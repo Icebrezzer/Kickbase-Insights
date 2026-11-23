@@ -155,6 +155,13 @@ class PushSettings(BaseModel):
     vapid_private_key: SecretStr | None = None
 
 
+class OddsSettings(BaseModel):
+    ### Optional key of the-odds-api.com, used when Kickbase's bet link has no odds. 500 requests a month free
+    api_key: SecretStr | None = None
+    ### Odds are refreshed this often for the next matchday
+    refresh_hours: float = 6
+
+
 class AutomationSettings(BaseModel):
     ### How often the automation looks at the leagues, in minutes
     interval_minutes: int = 5
@@ -167,6 +174,12 @@ class AutomationSettings(BaseModel):
     alert_minutes: Annotated[list[int], NoDecode, BeforeValidator(_comma_separated)] = [180, 60, 15]
     ### Forecast players' recent match points are refreshed when older than this
     form_max_age_hours: float = 12
+    ### The market is checked this often for new listings of transfer targets
+    market_watch_minutes: int = 10
+    ### Players a league may hold per manager (league setting, used by the buy planner)
+    max_squad_size: int = 18
+    ### Local hour of the daily sell advice push, before the market value update at 22:00
+    sell_advice_hour: int = 20
 
 
 class Settings(BaseSettings):
@@ -194,6 +207,7 @@ class Settings(BaseSettings):
     kickbase: KickbaseSettings = KickbaseSettings()
     sync: SyncSettings = SyncSettings()
     push: PushSettings = PushSettings()
+    odds: OddsSettings = OddsSettings()
     automation: AutomationSettings = AutomationSettings()
 
     @property

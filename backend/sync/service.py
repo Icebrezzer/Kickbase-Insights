@@ -30,6 +30,7 @@ from sqlmodel import Session, select
 from core import analytics
 from core.config import Settings
 from db.models import (
+    BidHistory,
     Battle,
     BattleEntry,
     Fixture,
@@ -914,10 +915,18 @@ def _write_personal(
     session.add(membership)
 
     session.exec(delete(MarketBid).where(MarketBid.league_id == league_id, MarketBid.user_id == user_id))
+    now = utcnow()
     for entry in market.players:
         bid = entry.own_bid(user_id)
         if bid is not None:
             session.add(MarketBid(league_id=league_id, user_id=user_id, player_id=entry.id, price=bid))
+            ### Kept beyond the auction, so a lost one can be told apart from one that was never fought
+            history = session.get(BidHistory, (league_id, user_id, entry.id))
+            if history is None or now - history.last_seen > timedelta(days=3):
+                history = BidHistory(league_id=league_id, user_id=user_id, player_id=entry.id, first_seen=now)
+            history.price = bid
+            history.last_seen = now
+            session.add(history)
 
 
 def _first(*values):

@@ -41,6 +41,10 @@ log = logging.getLogger(__name__)
 EVENT_TYPES_MAX_AGE = timedelta(hours=24)
 ### Lineups change rarely, and only through the managers themselves
 LINEUPS_MAX_AGE_SECONDS = 120
+### The ranking only gives the lineups (locked during a matchday) and Kickbase's lagging totals
+RANKING_MAX_AGE_SECONDS = 300
+### A finished match is asked once more this long after the whistle, Kickbase corrects points late
+FINISHED_RECHECK = timedelta(minutes=30)
 ### A player's matches change once per match
 MATCHES_MAX_AGE_SECONDS = 10 * 60
 ### Kick-off to final whistle including half time and stoppage time
@@ -62,7 +66,11 @@ class LiveService:
         self._minutes: dict[tuple[int, str, int], int] = {}
         ### Codes Kickbase sent that are not documented, each logged once so they can be looked into
         self._unknown_codes: set[tuple[str, int]] = set()
-        self._lock = asyncio.Lock()
+        ### One fetch per league at a time, a slow league does not hold up the others
+        self._locks: dict[str, asyncio.Lock] = {}
+        ### Last good player center per (league, day, player): (monotonic time, wall time, center)
+        self._centers: dict[tuple[str, int | None, str], tuple[float, datetime, kb.PlayerCenter]] = {}
+        self._rankings: dict[tuple[str, int | None], tuple[float, kb.Ranking]] = {}
         ### event type id -> (display name, kind)
         self._event_types: dict[int, tuple[str, analytics.EventKind | None]] = {}
         self._event_types_at: datetime | None = None
@@ -134,7 +142,7 @@ class LiveService:
         if not await self._outdated(league, refresh):
             return self._cache[league.id][1]
         ### Concurrent viewers share one fetch instead of each hammering Kickbase
-        async with self._lock:
+        async with self._locks.setdefault(league.id, asyncio.Lock()):
             if not await self._outdated(league, refresh):
                 return self._cache[league.id][1]
             result = await self._build(league, client)
@@ -251,18 +259,83 @@ class LiveService:
             players = {p.id: p for p in session.exec(select(Player))}
         return players, managers
 
+    async def _ranking(self, league: League, client: KickbaseClient, day: int | None, live: bool) -> kb.Ranking:
+        """The ranking with the lineups. While matches run it is only refreshed every few minutes."""
+        key = (league.id, day)
+        cached = self._rankings.get(key)
+        if cached and live and time.monotonic() - cached[0] < RANKING_MAX_AGE_SECONDS:
+            return cached[1]
+        try:
+            ranking = await client.ranking(league.id, day)
+        except KickbaseAuthError:
+            raise
+        except KickbaseError:
+            if cached:
+                return cached[1]
+            raise
+        self._rankings[key] = (time.monotonic(), ranking)
+        return ranking
+
+    def _needs_fetch(self, key: tuple[str, int | None, str], state: analytics.MatchState | None, now: datetime) -> bool:
+        """Only players whose match runs, or just ended, can have new points."""
+        cached = self._centers.get(key)
+        if cached is None:
+            return state != "upcoming"
+        _, fetched_at, center = cached
+        if state == "running":
+            return True
+        if state == "finished":
+            reported_final = analytics.match_state(center.match_status, center.match_minute) == "finished"
+            return not reported_final or now - fetched_at < FINISHED_RECHECK
+        return False
+
     async def _build(self, league: League, client: KickbaseClient) -> LiveOut:
         competition_id = league.competition_id
         players, managers = await asyncio.to_thread(self._load_db, league.id)
         matchdays, _ = await asyncio.gather(client.matchdays(competition_id), self._load_event_types(client))
         day = matchdays.current_day or league.current_day
-        ranking = await client.ranking(league.id, day)
+        current_group = next((group for group in matchdays.days if group.day == day), None)
+        group_states = {
+            team: analytics.match_state(m.status, m.minute)
+            for m in (current_group.matches if current_group else [])
+            for team in (m.team1_id, m.team2_id)
+        }
+        ranking = await self._ranking(league, client, day, any(s == "running" for s in group_states.values()))
 
         lineup_ids = sorted({pid for user in ranking.users for pid in user.lineup if pid})
-        centers = await asyncio.gather(
-            *(self._player_center(client, competition_id, pid, day, league.id) for pid in lineup_ids)
+        now = datetime.now(UTC)
+        ### Answers of earlier matchdays are not needed anymore
+        for key in [k for k in self._centers if k[0] == league.id and k[1] != day]:
+            del self._centers[key]
+
+        def team_of(pid: str) -> str | None:
+            player = players.get(pid)
+            return player.team_id if player else None
+
+        wanted = [
+            pid for pid in lineup_ids if self._needs_fetch((league.id, day, pid), group_states.get(team_of(pid)), now)
+        ]
+        fetched = await asyncio.gather(
+            *(self._player_center(client, competition_id, pid, day, league.id) for pid in wanted)
         )
-        center_by_id = {pid: center for pid, center in zip(lineup_ids, centers, strict=True) if center}
+        failed: set[str] = set()
+        for pid, center in zip(wanted, fetched, strict=True):
+            if center is not None:
+                self._centers[(league.id, day, pid)] = (time.monotonic(), now, center)
+            else:
+                failed.add(pid)
+        center_by_id = {
+            pid: self._centers[(league.id, day, pid)][2] for pid in lineup_ids if (league.id, day, pid) in self._centers
+        }
+        ### Failed now, but an earlier answer is still there: shown, and counted as stale
+        stale = {pid for pid in failed if pid in center_by_id}
+        missing = {pid for pid in failed if pid not in center_by_id}
+        ### Players whose match has not started have no points yet, that is complete as well
+        not_started = {
+            pid for pid in lineup_ids if pid not in center_by_id and group_states.get(team_of(pid)) == "upcoming"
+        }
+        if failed:
+            log.info("Live points of %d players could not be fetched (%d stale)", len(failed), len(stale))
 
         current = next((group for group in matchdays.days if group.day == day), None)
         matches = [
@@ -299,7 +372,7 @@ class LiveService:
             ### Kickbase updates the totals of the ranking with a delay, the points of the players are live.
             ### Their sum is what the manager gets, as long as every one of them could be fetched.
             live_sum = sum(p.points for p in lineup)
-            complete = all(pid in center_by_id for pid in fielded)
+            complete = all(pid in center_by_id or pid in not_started for pid in fielded)
             matchday_points = live_sum if complete or user.matchday_points is None else user.matchday_points
             season_points = user.season_points
             if season_points is not None and user.matchday_points is not None:
@@ -326,6 +399,9 @@ class LiveService:
             cache_seconds=self.settings.sync.live_cache_seconds,
             matches=matches,
             managers=result_managers,
+            fetched_players=len(wanted),
+            stale_players=len(stale),
+            missing_players=len(missing),
         )
 
     async def _player_center(

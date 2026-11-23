@@ -1,7 +1,7 @@
 import type { ColumnDef } from "@tanstack/react-table"
-import { AlertTriangle, Clock, Flame, Gavel, Users } from "lucide-react"
+import { AlertTriangle, ChevronDown, Clock, Flame, Gavel, ShieldAlert, ShoppingCart, Users } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
-import { useAutomationSettings, useManagerMap, useMarket, useRunScout } from "@/api/hooks"
+import { useAutomationSettings, useBuyPlanner, useManagerMap, useMarket, useRunScout } from "@/api/hooks"
 import type { MarketPlayer } from "@/api/types"
 import { BidDialog } from "@/components/BidDialog"
 import { DataTable, numberColumn } from "@/components/DataTable"
@@ -9,7 +9,7 @@ import { Avatar, Delta, Money, PercentDelta, PlayerCell, TrendIcon } from "@/com
 import { usePlayerSheet } from "@/components/PlayerSheet"
 import { Badge, Card, Chips, PageHeader, QueryState, SearchInput, Segmented, Stat } from "@/components/ui"
 import { cn } from "@/lib/cn"
-import { compactMoney, countdown, number, percent } from "@/lib/format"
+import { compactMoney, countdown, decimal, number, percent } from "@/lib/format"
 import { useNow } from "@/lib/hooks"
 import { playerName, POSITIONS } from "@/lib/kickbase"
 
@@ -107,6 +107,12 @@ function MarketView({ players }: { players: MarketPlayer[] }) {
           <Delta value={value} compact />
         </span>
       ), { hideBelow: "lg" }),
+      numberColumn<MarketPlayer>("bidLow", "Empfehlung", (p) => p.bidLow, (_, p) => <Recommendation player={p} />, { hideBelow: "md" }),
+      numberColumn<MarketPlayer>("expectedPoints", "Erw. Pkt.", (p) => p.expectedPoints, (value, p) => (
+        <span className="tabular-nums" title={[p.playProbability != null ? `spielt in ${Math.round(p.playProbability * 100)} % der Spiele` : null, p.odds ? `Quoten ${p.odds.map((o) => o ?? "–").join(" | ")}` : null].filter(Boolean).join(" · ")}>
+          {decimal(value)}
+        </span>
+      ), { hideBelow: "xl" }),
       {
         id: "rivals",
         header: "Konkurrenz",
@@ -187,6 +193,8 @@ function MarketView({ players }: { players: MarketPlayer[] }) {
         />
       </Card>
 
+      <BuyPlanner onBid={setBidding} />
+
       <Card>
         <div className="flex flex-col gap-3 p-4 sm:p-5 lg:flex-row lg:items-center lg:justify-between">
           <Segmented
@@ -247,6 +255,11 @@ function Seller({ player, image }: { player: MarketPlayer; image?: string | null
     <span className="inline-flex items-center gap-2">
       <Avatar name={player.sellerName ?? "?"} image={image} size={22} />
       <span className="max-w-32 truncate">{player.sellerName}</span>
+      {player.sellerInMinus && (
+        <span title="Verkäufer steht geschätzt im Minus" className="text-down">
+          <ShieldAlert className="size-3.5" />
+        </span>
+      )}
     </span>
   )
 }
@@ -278,7 +291,8 @@ function Rivals({ player, limit = 4 }: { player: MarketPlayer; limit?: number })
   if (player.rivals.length === 0) {
     return <span className="text-xs font-medium text-up">{player.rivalsByBudget ? "Keiner kann mithalten" : "Keine Konkurrenz"}</span>
   }
-  const shown = player.rivals.slice(0, limit)
+  const shown = player.rivals.filter((r) => r.probability >= 0.2).slice(0, limit)
+  if (shown.length === 0) return <span className="text-xs font-medium text-up">Kaum Konkurrenz</span>
   return (
     <span className="inline-flex flex-wrap items-center gap-1">
       {shown.map((rival) => (
@@ -288,20 +302,84 @@ function Rivals({ player, limit = 4 }: { player: MarketPlayer; limit?: number })
             rival.name,
             `${rival.clubPlayers}/3 vom Verein`,
             `${rival.squadSize} Spieler im Kader`,
+            `bietet mit ca. ${Math.round(rival.probability * 100)} %`,
+            rival.expectedBid != null ? `vermutlich ca. ${compactMoney(rival.expectedBid)}` : null,
+            ...rival.reasons,
             rival.estimatedBalance != null ? `Kontostand ca. ${compactMoney(rival.estimatedBalance)}` : null,
             rival.maxBid != null ? `max. Gebot ca. ${compactMoney(rival.maxBid)}` : null,
           ]
             .filter(Boolean)
             .join(" · ")}
-          className="inline-flex items-center gap-1 rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium"
+          className={cn(
+            "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
+            rival.probability >= 0.6 ? "bg-down/15" : rival.probability >= 0.35 ? "bg-warn/15" : "bg-surface-2",
+          )}
         >
           <Avatar name={rival.name} image={rival.image} size={14} />
           <span className="max-w-20 truncate">{rival.name}</span>
-          {rival.maxBid != null && <span className="text-muted tabular-nums">{compactMoney(rival.maxBid)}</span>}
+          <span className="tabular-nums">{Math.round(rival.probability * 100)} %</span>
+          {rival.inMinus && <ShieldAlert className="size-3 text-down" />}
         </span>
       ))}
       {player.rivals.length > shown.length && <span className="text-[11px] text-muted">+{player.rivals.length - shown.length}</span>}
     </span>
+  )
+}
+
+function Recommendation({ player }: { player: MarketPlayer }) {
+  if (player.bidLow == null || player.bidHigh == null) return <span className="text-muted">–</span>
+  const range =
+    player.bidHigh > player.bidLow ? `${compactMoney(player.bidLow)}–${compactMoney(player.bidHigh)}` : compactMoney(player.bidLow)
+  return (
+    <span className="inline-flex flex-col items-end leading-tight" title="Von „sicher günstig“ bis „schlägt die wahrscheinlichen Bieter“">
+      <span className="tabular-nums">{range}</span>
+      {player.marginLow != null && (
+        <span className={cn("text-[11px] tabular-nums", player.marginLow >= 0 ? "text-up" : "text-down")}>
+          Marge {player.marginLow >= 0 ? "+" : ""}
+          {compactMoney(player.marginLow)}
+        </span>
+      )}
+    </span>
+  )
+}
+
+function BuyPlanner({ onBid }: { onBid: (player: MarketPlayer) => void }) {
+  const query = useBuyPlanner()
+  const [open, setOpen] = useState(false)
+  const options = query.data ?? []
+  const shown = open ? options : options.filter((o) => !o.blocked).slice(0, 3)
+  return (
+    <Card>
+      <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center justify-between gap-3 px-4 pt-4 pb-2 text-left sm:px-5">
+        <span>
+          <span className="inline-flex items-center gap-2 text-[15px] font-semibold">
+            <ShoppingCart className="size-4" /> Kaufplaner
+          </span>
+          <span className="mt-0.5 block text-sm text-muted">Jetzt kaufen, bis zum Spieltag halten: Wertgewinn abzüglich Aufpreis und Punkte-Plus für deine beste Elf.</span>
+        </span>
+        <ChevronDown className={cn("size-5 shrink-0 text-muted transition-transform", open && "rotate-180")} />
+      </button>
+      <div className="divide-y divide-line px-1 pb-2">
+        {query.isPending && <p className="px-4 py-3 text-sm text-muted">Rechne …</p>}
+        {!query.isPending && shown.length === 0 && <p className="px-4 py-3 text-sm text-muted">Gerade nichts Lohnendes auf dem Markt.</p>}
+        {shown.map((option) => (
+          <div key={option.player.id} className={cn("flex items-center justify-between gap-3 px-3 py-2.5 sm:px-4", option.blocked && "opacity-60")}>
+            <PlayerCell player={option.player} sub={<span className="truncate">{option.blocked ?? `Gebot ${compactMoney(option.bid)}`}</span>} />
+            <div className="flex shrink-0 items-center gap-3 text-right text-xs">
+              <div>
+                <div className="text-muted">Marge</div>
+                <Delta value={option.margin} compact />
+              </div>
+              <div>
+                <div className="text-muted">Pkt.-Plus</div>
+                <div className="tabular-nums">{option.pointsGain > 0 ? `+${decimal(option.pointsGain)}` : "–"}</div>
+              </div>
+              {!option.blocked && <BidButton hasBid={option.player.ownBid != null} onClick={() => onBid(option.player)} compact />}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
   )
 }
 
@@ -339,6 +417,20 @@ function MarketCard({ player, now, target, onBid }: { player: MarketPlayer; now:
         <Users className="mt-0.5 size-3.5 shrink-0 text-muted" />
         <Rivals player={player} limit={3} />
       </div>
+      {player.bidLow != null && (
+        <div className="flex items-center justify-between gap-3 text-xs">
+          <span>
+            <span className="text-muted">Empfohlen </span>
+            <Recommendation player={player} />
+          </span>
+          {player.expectedPoints != null && (
+            <span>
+              <span className="text-muted">Erw. </span>
+              <span className="tabular-nums">{decimal(player.expectedPoints)} Pkt.</span>
+            </span>
+          )}
+        </div>
+      )}
       {(player.ownBid != null || onBid) && (
         <div className="flex items-center justify-between gap-3">
           {player.ownBid != null ? (

@@ -22,16 +22,19 @@ from typing import Any
 from sqlalchemy import Engine, func
 from sqlmodel import Session, select
 
+from api.context import MatchContext, load_context, match_day_of
 from api.schemas import (
     AutomationEventOut,
     CheckOut,
     CoachOut,
     ExpectationOut,
     ForecastQualityOut,
+    LeagueForecastOut,
     LineupApplyOut,
     MatchdayOut,
     RescueOut,
     ScoutRunOut,
+    SellAdviceOut,
     SellOut,
     SquadPlayerOut,
 )
@@ -44,9 +47,12 @@ from db.models import (
     Fixture,
     ForecastLog,
     League,
+    Manager,
+    MarketSeen,
     MarketValueHistory,
     Player,
     PlayerForm,
+    SquadEntry,
     Team,
     UserAutomation,
     UserLeague,
@@ -55,6 +61,7 @@ from db.models import (
 )
 from kickbase import KickbaseAuthError, KickbaseClient, KickbaseError
 from kickbase import models as kb
+from sync.odds import OddsService
 from sync.push import PushService
 
 log = logging.getLogger(__name__)
@@ -103,10 +110,11 @@ def parse_lineup(raw: Any) -> tuple[str | None, list[str]]:
     return formation, ids
 
 
-def form_matches(performance: kb.PlayerPerformance, now: datetime) -> list[list[int]]:
-    """`[day, points, minutes]` of the club's matches of this season that are over, newest first."""
+def form_matches(performance: kb.PlayerPerformance, now: datetime) -> list[list[int | None]]:
+    """`[matchday, points, minutes, role, market value day]` of the club's matches of this season that
+    are over, newest first. Role: 5 starting eleven, 3 substitute, 4 bench, None unknown."""
     season = performance.seasons[-1] if performance.seasons else None
-    result = []
+    result: list[list[int | None]] = []
     for match in season.matches if season else []:
         over = match.match_status == coach.MATCH_FINISHED or (
             match.kickoff is not None and match.kickoff + coach.MATCH_LENGTH < now
@@ -114,13 +122,18 @@ def form_matches(performance: kb.PlayerPerformance, now: datetime) -> list[list[
         if not over or match.day is None:
             continue
         minutes = int("".join(ch for ch in (match.minutes or "") if ch.isdigit()) or 0)
-        result.append([match.day, match.points or 0, minutes])
-    result.sort(key=lambda m: -m[0])
+        value_day = match_day_of(match.kickoff) if match.kickoff else None
+        result.append([match.day, match.points or 0, minutes, match.status, value_day])
+    result.sort(key=lambda m: -(m[0] or 0))
     return result
 
 
 class AutomationService:
-    def __init__(self, settings: Settings, engine: Engine, accounts: Accounts, push: PushService):
+    def __init__(
+        self, settings: Settings, engine: Engine, accounts: Accounts, push: PushService, odds: OddsService | None = None
+    ):
+        self.odds = odds
+        self._last_market_watch: dict[str, datetime] = {}
         self.settings = settings
         self.engine = engine
         self.accounts = accounts
@@ -205,7 +218,11 @@ class AutomationService:
             return list(
                 session.exec(
                     select(UserAutomation).where(
-                        UserAutomation.auto_scout | UserAutomation.auto_lineup | UserAutomation.deadline_alerts
+                        UserAutomation.auto_scout
+                        | UserAutomation.auto_lineup
+                        | UserAutomation.deadline_alerts
+                        | UserAutomation.listing_alerts
+                        | UserAutomation.sell_alerts
                     )
                 )
             )
@@ -257,8 +274,9 @@ class AutomationService:
     def _fit_and_log(self) -> tuple[coach.ForecastModel, int | None]:
         with Session(self.engine) as session:
             histories = dict(session.exec(select(MarketValueHistory.player_id, MarketValueHistory.points)).all())
+        matches = self._match_points()
         latest = max((points[-1][0] for points in histories.values() if points), default=None)
-        model = coach.fit_forecast(histories.values())
+        model = coach.fit_forecast(histories, matches)
         if latest is None:
             return model, None
         with Session(self.engine) as session:
@@ -276,7 +294,7 @@ class AutomationService:
             for player_id, points in histories.items():
                 if player_id in known or not points or points[-1][0] != latest:
                     continue
-                prediction = coach.forecast(points, model, horizon=1)
+                prediction = coach.forecast(points, model, horizon=1, matches=matches.get(player_id))
                 if prediction:
                     session.add(ForecastLog(player_id=player_id, day=latest + 1, predicted=prediction.next_change))
             session.commit()
@@ -321,12 +339,42 @@ class AutomationService:
             flag_precision=sum(1 for _, a in flagged if a >= threshold) / len(flagged) if flagged else None,
         )
 
-    def _forecasts(self) -> dict[str, coach.Forecast]:
+    def _match_points(self) -> dict[str, list[tuple[int, int]]]:
+        """`(market value day, points)` per player from the stored forms."""
         with Session(self.engine) as session:
-            histories = session.exec(select(MarketValueHistory.player_id, MarketValueHistory.points)).all()
+            rows = session.exec(select(PlayerForm.player_id, PlayerForm.matches)).all()
+        return {
+            pid: [(int(m[4]), int(m[1])) for m in matches if len(m) > 4 and m[4] is not None]
+            for pid, matches in rows
+        }
+
+    def _forecasts_for(self, player_ids: list[str], horizon: int) -> dict[str, coach.Forecast]:
+        with Session(self.engine) as session:
+            histories = session.exec(
+                select(MarketValueHistory.player_id, MarketValueHistory.points).where(
+                    MarketValueHistory.player_id.in_(player_ids)
+                )
+            ).all()
+            forms = dict(
+                session.exec(
+                    select(PlayerForm.player_id, PlayerForm.matches).where(PlayerForm.player_id.in_(player_ids))
+                ).all()
+            )
         result = {}
         for player_id, points in histories:
-            prediction = coach.forecast(points or [], self.model)
+            matches = [(int(m[4]), int(m[1])) for m in forms.get(player_id, []) if len(m) > 4 and m[4] is not None]
+            prediction = coach.forecast(points or [], self.model, horizon, matches)
+            if prediction:
+                result[player_id] = prediction
+        return result
+
+    def _forecasts(self, horizon: int = 3) -> dict[str, coach.Forecast]:
+        with Session(self.engine) as session:
+            histories = session.exec(select(MarketValueHistory.player_id, MarketValueHistory.points)).all()
+        matches = self._match_points()
+        result = {}
+        for player_id, points in histories:
+            prediction = coach.forecast(points or [], self.model, horizon, matches.get(player_id))
             if prediction:
                 result[player_id] = prediction
         return result
@@ -452,9 +500,13 @@ class AutomationService:
     ### Form and expected points
     ### ==============================================================================================
 
-    async def refresh_forms(self, client: KickbaseClient, competition_id: int, player_ids: list[str]) -> None:
+    async def refresh_forms(
+        self, client: KickbaseClient, competition_id: int, player_ids: list[str], force: bool = False
+    ) -> None:
         max_age = timedelta(hours=self.settings.automation.form_max_age_hours)
-        stale = await asyncio.to_thread(self._stale_forms, player_ids, utcnow() - max_age)
+        stale = (
+            player_ids if force else await asyncio.to_thread(self._stale_forms, player_ids, utcnow() - max_age)
+        )
 
         async def load(pid: str) -> tuple[str, list[list[int]]] | None:
             try:
@@ -488,25 +540,50 @@ class AutomationService:
                 session.merge(PlayerForm(player_id=pid, matches=matches, synced_at=now))
             session.commit()
 
-    def _context(self, league: League, player_ids: list[str]):
-        """Fixtures, table placements, forms and stored player details for the expected points."""
+    def _context(self, league: League, player_ids: list[str] | None) -> tuple[MatchContext, dict[str, Player]]:
         with Session(self.engine) as session:
-            fixtures = [
-                coach.FixtureInfo(f.day, f.kickoff, f.status, f.team1_id, f.team2_id)
-                for f in session.exec(select(Fixture).where(Fixture.competition_id == league.competition_id))
-            ]
-            placements = {
-                t.id: t.placement
-                for t in session.exec(select(Team).where(Team.competition_id == league.competition_id))
-            }
-            forms = {
-                pid: matches
-                for pid, matches in session.exec(
-                    select(PlayerForm.player_id, PlayerForm.matches).where(PlayerForm.player_id.in_(player_ids))
-                ).all()
-            }
-            players = {p.id: p for p in session.exec(select(Player).where(Player.id.in_(player_ids)))}
-        return fixtures, placements, forms, players
+            context = load_context(session, league.competition_id, player_ids, utcnow())
+            query = select(Player)
+            if player_ids is not None:
+                query = query.where(Player.id.in_(player_ids))
+            players = {p.id: p for p in session.exec(query)}
+        return context, players
+
+    async def refresh_all_forms(self, league: League, client: KickbaseClient) -> int:
+        """The match points of every player whose club played since his form was stored. Feeds the
+        forecast and the expected points of players outside the own squad. Once per match, so a
+        matchday costs about one request per player."""
+        stale = await asyncio.to_thread(self._forms_behind, league.competition_id)
+        if not stale:
+            return 0
+        await self.refresh_forms(client, league.competition_id, stale, force=True)
+        return len(stale)
+
+    def _forms_behind(self, competition_id: int) -> list[str]:
+        now = utcnow()
+        with Session(self.engine) as session:
+            last_match: dict[str, datetime] = {}
+            for f in session.exec(
+                select(Fixture).where(Fixture.competition_id == competition_id, Fixture.kickoff.is_not(None))
+            ):
+                assert f.kickoff is not None
+                end = f.kickoff + coach.MATCH_LENGTH
+                if end > now:
+                    continue
+                for team in (f.team1_id, f.team2_id):
+                    if team and (team not in last_match or end > last_match[team]):
+                        last_match[team] = end
+            synced = dict(session.exec(select(PlayerForm.player_id, PlayerForm.synced_at)).all())
+            team_ids = set(session.exec(select(Team.id).where(Team.competition_id == competition_id)).all())
+            stale = []
+            for pid, team_id in session.exec(select(Player.id, Player.team_id).where(Player.active)).all():
+                if team_id not in team_ids:
+                    continue
+                last = last_match.get(team_id or "")
+                stored = synced.get(pid)
+                if stored is None or (last is not None and stored < last):
+                    stale.append(pid)
+        return stale
 
     ### ==============================================================================================
     ### The viewer's matchday
@@ -525,23 +602,22 @@ class AutomationService:
             log.info("The saved lineup could not be read, using the ranking: %s", e)
             formation, saved = None, []
         source = "kickbase"
+        ranking = await client.ranking(league.id)
         if not saved:
-            ranking = await client.ranking(league.id)
             own = next((u for u in ranking.users if u.id == user_id), None)
             saved = [pid for pid in (own.lineup if own else []) if pid]
             source = "ranking"
         ids = [p.id for p in squad.players]
         await self.refresh_forms(client, league.competition_id, ids)
-        fixtures, placements, forms, stored = await asyncio.to_thread(self._context, league, ids)
-        upcoming = coach.next_matchday(fixtures, now)
+        others = sorted({pid for u in ranking.users if u.id != user_id for pid in u.lineup if pid})
+        context, stored = await asyncio.to_thread(self._context, league, [*ids, *others])
+        fixtures = context.fixtures
+        upcoming = context.upcoming
         live = coach.live_matchday(fixtures, now)
-        day = upcoming.day if upcoming else (league.current_day or 0)
 
-        expectations: dict[str, coach.Expectation] = {}
-        for p in squad.players:
-            recent = tuple(m[1] for m in (forms.get(p.id) or [])[:5])
-            form = coach.FormInput(p.id, p.position, p.status, p.team_id, p.average_points, recent)
-            expectations[p.id] = coach.expected_points(form, coach.next_fixture_of(p.team_id, fixtures, day), placements)
+        expectations: dict[str, coach.Expectation] = {
+            p.id: context.expectation(p.id, p.position, p.status, p.team_id, p.average_points) for p in squad.players
+        }
 
         candidates = [
             coach.LineupCandidate(p.id, p.position, expectations[p.id].expected, p.market_value) for p in squad.players
@@ -564,6 +640,46 @@ class AutomationService:
         checks = self._checks(real_budget, saved, best, saved_expected, expectations, stored, squad, upcoming, live)
         await asyncio.to_thread(self._store_budget, user_id, league.id, real_budget)
 
+        ### Sell before the value drops
+        updates = coach.updates_until(upcoming.deadline if upcoming else None, now)
+        forecasts = await asyncio.to_thread(self._forecasts_for, ids, max(updates, 1))
+        advice = []
+        for p in squad.players:
+            f = forecasts.get(p.id)
+            tip = coach.sell_advice(p.id, f.projection, updates, p.id in best.player_ids) if f else None
+            if tip:
+                advice.append(SellAdviceOut(player_id=p.id, reason=tip.reason, expected_drop=tip.expected_drop, in_best=tip.in_best))
+        advice.sort(key=lambda a: a.expected_drop)
+
+        ### What every manager's saved eleven is expected to score
+        league_forecast = []
+        for user in ranking.users:
+            lineup = saved if user.id == user_id else [pid for pid in user.lineup if pid]
+            total = 0.0
+            unavailable = 0
+            for pid in lineup:
+                if pid in expectations:
+                    e = expectations[pid]
+                elif pid in stored:
+                    sp = stored[pid]
+                    e = context.expectation(pid, sp.position, sp.status, sp.team_id, sp.average_points)
+                else:
+                    continue
+                total += e.expected
+                unavailable += e.availability == 0
+            league_forecast.append(
+                LeagueForecastOut(
+                    manager_id=user.id,
+                    name=user.name,
+                    image=user.image,
+                    is_self=user.id == user_id,
+                    expected=round(total, 1),
+                    fielded=len(lineup),
+                    unavailable=unavailable,
+                )
+            )
+        league_forecast.sort(key=lambda m: -m.expected)
+
         return CoachOut(
             matchday=MatchdayOut(day=upcoming.day, first_kickoff=upcoming.first_kickoff, deadline=upcoming.deadline)
             if upcoming
@@ -585,6 +701,7 @@ class AutomationService:
                     average_points=p.average_points,
                     purchase_price=p.purchase_price,
                     expected=ExpectationOut(**{**asdict(expectations[p.id]), "reasons": list(expectations[p.id].reasons)}),
+                    forecast=forecasts[p.id].next_change if p.id in forecasts else None,
                     in_lineup=p.id in saved,
                     in_best=p.id in best.player_ids,
                 )
@@ -599,6 +716,9 @@ class AutomationService:
             rescue=rescue,
             checks=checks,
             lineup_source=source,
+            sell_advice=advice,
+            league_forecast=league_forecast,
+            updates_to_matchday=updates,
         )
 
     def _checks(self, budget, saved, best, saved_expected, expectations, stored, squad, upcoming, live) -> list[CheckOut]:
@@ -713,10 +833,110 @@ class AutomationService:
     ### Rounds
     ### ==============================================================================================
 
+    async def watch_market(self, league_id: str, rows: list[UserAutomation], now: datetime) -> None:
+        """Reports new listings that are transfer targets or bargains, and rivals who have to sell."""
+        client = await asyncio.to_thread(self.accounts.client_for_league, league_id)
+        if client is None:
+            return
+        with Session(self.engine) as session:
+            league = session.get(League, league_id)
+        if league is None:
+            return
+        market = await client.market(league_id)
+        new, first_run = await asyncio.to_thread(self._diff_market, league_id, market)
+        info = await asyncio.to_thread(self._market_info, league, [p.id for p in new])
+        forecasts, balances, names, clubs, upcoming = info
+
+        ### Rivals in the red shortly before the deadline have to sell, their players come cheap
+        emergency = []
+        if upcoming is not None and timedelta(0) < upcoming.deadline - now < timedelta(hours=24):
+            emergency = [mid for mid, (balance, _) in balances.items() if balance < 0]
+
+        for row in rows:
+            lines = []
+            if not first_run:
+                for player in new:
+                    seller = player.seller.id if player.seller else None
+                    if seller == row.user_id or not clubs.can_buy(row.user_id, player.team_id):
+                        continue
+                    reasons = []
+                    f = forecasts.get(player.id)
+                    if f and f.next_change >= row.scout_threshold:
+                        reasons.append(f"Prognose {f.next_change / 1e3:+.0f} Tsd.")
+                    if seller and player.price and player.price < player.market_value:
+                        reasons.append("unter Marktwert")
+                    if seller and seller in emergency:
+                        reasons.append(f"{names.get(seller, 'Verkäufer')} im Minus")
+                    if reasons:
+                        lines.append(f"{player.last_name}: {', '.join(reasons)}")
+            if lines:
+                await self.push.send(
+                    row.user_id, "Neu auf dem Markt", "; ".join(lines[:4]), "/markt", tag=f"market-{league_id}"
+                )
+                self.record(row.user_id, league_id, "push", "Neu auf dem Markt: " + "; ".join(lines))
+            for mid in emergency:
+                if mid == row.user_id:
+                    continue
+                emergency_key = f"emergency:{league_id}:{row.user_id}:{mid}:{upcoming.day if upcoming else 0}"
+                if self._has_key(emergency_key):
+                    continue
+                balance = balances[mid][0]
+                await self.push.send(
+                    row.user_id,
+                    "Konkurrent muss verkaufen",
+                    f"{names.get(mid, mid)} steht geschätzt bei {balance / 1e6:.1f} Mio. € und muss vor der Deadline verkaufen.",
+                    "/konkurrenz",
+                    tag=f"emergency-{league_id}-{mid}",
+                )
+                self.record(
+                    row.user_id, league_id, "push", f"{names.get(mid, mid)} geschätzt im Minus", key=emergency_key
+                )
+
+    def _diff_market(self, league_id: str, market: kb.Market) -> tuple[list[kb.MarketPlayer], bool]:
+        with Session(self.engine) as session:
+            seen = {
+                row.player_id: row for row in session.exec(select(MarketSeen).where(MarketSeen.league_id == league_id))
+            }
+            first_run = not seen
+            new = []
+            current = set()
+            for player in market.players:
+                seller = player.seller.id if player.seller else None
+                current.add(player.id)
+                row = seen.get(player.id)
+                if row is None or row.seller_id != seller:
+                    new.append(player)
+                    session.merge(
+                        MarketSeen(league_id=league_id, player_id=player.id, seller_id=seller, price=player.price)
+                    )
+            for pid, row in seen.items():
+                if pid not in current:
+                    session.delete(row)
+            session.commit()
+        return new, first_run
+
+    def _market_info(self, league: League, player_ids: list[str]):
+        from api.insights import Insights
+
+        forecasts = self._forecasts_for(player_ids, 1) if player_ids else {}
+        with Session(self.engine) as session:
+            insights = Insights(session, league, None, self.model)
+            balances = insights.balances()
+            names = {m.id: m.name for m in session.exec(select(Manager).where(Manager.league_id == league.id))}
+            clubs = coach.ClubCounts.build(
+                (entry.manager_id, team_id)
+                for entry, team_id in session.exec(
+                    select(SquadEntry, Player.team_id)
+                    .join(Player, Player.id == SquadEntry.player_id)
+                    .where(SquadEntry.league_id == league.id)
+                )
+            )
+            context = load_context(session, league.competition_id, [], utcnow())
+        return forecasts, balances, names, clubs, context.upcoming
+
     async def after_sync(self, league_id: str) -> None:
         """Called by the sync service after a league was stored."""
         try:
-            await self.refresh_model()
             with Session(self.engine) as session:
                 league = session.get(League, league_id)
                 rows = session.exec(
@@ -724,6 +944,16 @@ class AutomationService:
                 ).all()
             if league is None:
                 return
+            client = self.accounts.client_for_league(league_id)
+            refreshed = 0
+            if client is not None:
+                try:
+                    refreshed = await self.refresh_all_forms(league, client)
+                    if self.odds is not None:
+                        await self.odds.refresh(client, league.competition_id)
+                except KickbaseError as e:
+                    log.warning("Forms or odds of %s not refreshed: %s", league.name, e)
+            await self.refresh_model(force=refreshed > 50)
             for row in rows:
                 client = self.client_for_user(row.user_id)
                 if client is None:
@@ -737,6 +967,21 @@ class AutomationService:
 
     async def tick(self, now: datetime) -> None:
         settings = await asyncio.to_thread(self._enabled)
+        watch: dict[str, list[UserAutomation]] = {}
+        for row in settings:
+            if row.listing_alerts:
+                watch.setdefault(row.league_id, []).append(row)
+        for league_id, rows in watch.items():
+            last = self._last_market_watch.get(league_id)
+            if last is not None and now - last < timedelta(minutes=self.settings.automation.market_watch_minutes):
+                continue
+            self._last_market_watch[league_id] = now
+            try:
+                await self.watch_market(league_id, rows, now)
+            except KickbaseError as e:
+                log.warning("Market watch of %s failed: %s", league_id, e)
+            except Exception:
+                log.exception("Market watch of %s crashed", league_id)
         for row in settings:
             with Session(self.engine) as session:
                 league = session.get(League, row.league_id)
@@ -800,6 +1045,31 @@ class AutomationService:
                             await self.push.send(
                                 row.user_id, "Aufstellung fehlgeschlagen", f"Die beste Elf konnte nicht gespeichert werden: {e}", "/spieltag"
                             )
+
+        ### Daily sell advice, before the market value update in the evening
+        local = now.astimezone(analytics.MARKET_VALUE_TIMEZONE)
+        if row.sell_alerts and local.hour == self.settings.automation.sell_advice_hour:
+            sell_key = f"sell:{league.id}:{row.user_id}:{local.date().isoformat()}"
+            if not self._has_key(sell_key):
+                async with self._lock(*key):
+                    view = await self.coach_view(league, row.user_id, client)
+                names = {p.id: p.last_name for p in view.squad}
+                tips = [f"{names.get(a.player_id, a.player_id)} ({a.expected_drop / 1e3:+.0f} Tsd.)" for a in view.sell_advice[:4]]
+                if tips:
+                    await self.push.send(
+                        row.user_id,
+                        "Verkaufen vor dem Update?",
+                        "Fallen voraussichtlich bis zum Spieltag: " + ", ".join(tips),
+                        "/spieltag",
+                        tag=f"sell-{league.id}",
+                    )
+                self.record(
+                    row.user_id,
+                    league.id,
+                    "push",
+                    "Verkaufsempfehlung: " + (", ".join(tips) if tips else "nichts zu verkaufen"),
+                    key=sell_key,
+                )
 
         ### Deadline alerts: only the latest due stage is sent, the earlier ones count as done
         if row.deadline_alerts and to_deadline > timedelta(0):

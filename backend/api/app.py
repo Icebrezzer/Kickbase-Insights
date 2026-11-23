@@ -26,6 +26,7 @@ from core.version import __version__
 from db import create_db_engine, init_db
 from kickbase import KickbaseHttp, PicturePool
 from sync.automation import AutomationService
+from sync.odds import OddsService
 from sync.push import PushService
 from sync.scheduler import Scheduler
 from sync.service import SyncService, mark_interrupted_runs
@@ -116,7 +117,8 @@ def create_app(
         sync = SyncService(settings, engine, accounts, pictures)
         scheduler = Scheduler(sync)
         push = PushService(settings, engine)
-        automation = AutomationService(settings, engine, accounts, push)
+        odds = OddsService(settings, engine)
+        automation = AutomationService(settings, engine, accounts, push, odds)
         sync.after_sync = automation.after_sync
         state = AppState(
             settings=settings,

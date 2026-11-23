@@ -89,6 +89,18 @@ function SettingsCard({ initial }: { initial: AutomationSettings }) {
           hint="Push 3 Std., 60 und 15 Min. vor dem ersten Anpfiff, wenn das Budget negativ ist oder die Elf Lücken hat."
         />
         <Switch
+          checked={form.listingAlerts}
+          onChange={(listingAlerts) => change({ listingAlerts })}
+          label="Markt-Alarm"
+          hint="Push, wenn ein Transferziel oder ein Schnäppchen unter Marktwert gelistet wird, und wenn ein Konkurrent kurz vor der Deadline im Minus steht."
+        />
+        <Switch
+          checked={form.sellAlerts}
+          onChange={(sellAlerts) => change({ sellAlerts })}
+          label="Tägliche Verkaufsempfehlung"
+          hint="Um 20 Uhr: Spieler, die bis zum Spieltag voraussichtlich an Wert verlieren – rechtzeitig vor dem Update um 22 Uhr."
+        />
+        <Switch
           checked={form.autoScout}
           onChange={(autoScout) => change({ autoScout })}
           label="Transferziele automatisch auf die Scoutingliste"

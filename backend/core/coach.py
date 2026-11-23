@@ -7,6 +7,7 @@ formulas can be tested on their own and changed without a migration (see DEVELOP
 
 from __future__ import annotations
 
+import math
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -31,6 +32,7 @@ class FixtureInfo:
     status: int | None
     team1_id: str | None
     team2_id: str | None
+    id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -115,6 +117,13 @@ def next_fixture_of(team_id: str | None, fixtures: Iterable[FixtureInfo], day: i
 ### ===============================================================================
 ### Expected points
 ### ===============================================================================
+###
+### expected = points when playing x chance to play x availability (status) x opponent factor
+###
+### - Points when playing: weighted points of the recent matches the player was on the pitch, blended
+###   with the season average.
+### - Chance to play: from his part in the club's last five matches (start 1, sub 0.5, bench 0).
+### - Opponent factor: from the betting odds when known (win probability), otherwise from the table.
 
 ### How likely a player with this Kickbase status plays. Anything not listed (injured, rehab,
 ### suspended, left the league, absent) scores nothing.
@@ -129,12 +138,40 @@ STATUS_REASONS = {
     128: "nicht mehr in der Liga",
     256: "abwesend",
 }
+### Kickbase's part of a player in a match: 5 starting eleven, 3 substitute, 4 bench
+ROLE_START, ROLE_SUB, ROLE_BENCH = 5, 3, 4
+ROLE_PLAY = {ROLE_START: 1.0, ROLE_SUB: 0.5, ROLE_BENCH: 0.0}
 ### Newest match first
 FORM_WEIGHTS = (5, 4, 3, 2, 1)
 FORM_SHARE = 0.6
-### The strongest opponent lowers, the weakest raises the expectation by this much
+### Without odds: the strongest opponent lowers, the weakest raises the expectation by this much
 OPPONENT_SPREAD = 0.15
 HOME_BONUS = 0.05
+### With odds: a typical win probability, and how strongly the expectation follows it
+TYPICAL_WIN = 0.4
+WIN_SLOPE = 0.4
+FACTOR_RANGE = (0.8, 1.25)
+
+
+@dataclass(frozen=True)
+class MatchForm:
+    points: int
+    minutes: int = 0
+    role: int | None = None
+
+    @property
+    def played(self) -> bool:
+        if self.role in (ROLE_START, ROLE_SUB):
+            return True
+        return self.role is None and self.minutes > 0
+
+    @property
+    def play_share(self) -> float:
+        if self.role in ROLE_PLAY:
+            return ROLE_PLAY[self.role]  # type: ignore[index]
+        if self.minutes >= 45:
+            return 1.0
+        return 0.5 if self.minutes > 0 else 0.0
 
 
 @dataclass(frozen=True)
@@ -144,8 +181,8 @@ class FormInput:
     status: int
     team_id: str | None
     average_points: int | None
-    ### Points of the club's last matches, newest first. 0 when the player was not on the pitch.
-    recent_points: tuple[int, ...] = ()
+    ### The club's last matches, newest first. Points are 0 when the player was not on the pitch.
+    recent: tuple[MatchForm, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -158,6 +195,8 @@ class Expectation:
     opponent_factor: float
     opponent_id: str | None
     home: bool | None
+    play_probability: float | None = None
+    win_probability: float | None = None
     reasons: tuple[str, ...] = ()
 
 
@@ -166,6 +205,14 @@ def form_points(recent: Sequence[int]) -> float | None:
         return None
     pairs = list(zip(FORM_WEIGHTS, recent, strict=False))
     return sum(w * p for w, p in pairs) / sum(w for w, _ in pairs)
+
+
+def play_probability(recent: Sequence[MatchForm]) -> float | None:
+    """The share of the last five matches the player was part of, substitutes count half."""
+    window = list(recent[:5])
+    if not window:
+        return None
+    return round(sum(m.play_share for m in window) / len(window), 2)
 
 
 def opponent_factor(placement: int | None, teams: int, home: bool | None) -> float:
@@ -180,23 +227,40 @@ def opponent_factor(placement: int | None, teams: int, home: bool | None) -> flo
     return factor
 
 
+def odds_factor(win_probability: float) -> float:
+    """The opponent factor from the club's win probability. Home advantage is in the odds already."""
+    low, high = FACTOR_RANGE
+    return max(low, min(high, 1 + WIN_SLOPE * (win_probability - TYPICAL_WIN)))
+
+
+def win_probabilities(home: float | None, draw: float | None, away: float | None) -> tuple[float, float, float] | None:
+    """Decimal odds to probabilities, the bookmaker's margin taken out."""
+    if not home or not draw or not away or min(home, draw, away) <= 1:
+        return None
+    raw = (1 / home, 1 / draw, 1 / away)
+    total = sum(raw)
+    return raw[0] / total, raw[1] / total, raw[2] / total
+
+
 def expected_points(
     player: FormInput,
     fixture: FixtureInfo | None,
     placements: Mapping[str, int | None],
+    win_probability: float | None = None,
 ) -> Expectation:
-    """The points a player is expected to score on the next matchday.
-
-    Form (weighted last five matches) and season average are blended, then scaled by how likely the
-    player plays and by the strength of the opponent. No match means no points.
-    """
+    """The points a player is expected to score on the next matchday. No match means no points."""
     reasons: list[str] = []
-    form = form_points(player.recent_points)
+    played = [m.points for m in player.recent if m.played]
+    form = form_points(played)
     average = float(player.average_points) if player.average_points is not None else None
     if form is not None and average is not None:
         base = FORM_SHARE * form + (1 - FORM_SHARE) * average
     else:
         base = form if form is not None else average or 0.0
+
+    chance = play_probability(player.recent)
+    if chance is not None and chance < 0.5:
+        reasons.append("selten in der Startelf" if chance > 0 else "zuletzt nicht gespielt")
 
     availability = STATUS_AVAILABILITY.get(player.status, 0.0)
     if player.status in STATUS_REASONS:
@@ -213,18 +277,24 @@ def expected_points(
     else:
         home = fixture.team1_id == player.team_id
         opponent_id = fixture.team2_id if home else fixture.team1_id
-        teams = max((v for v in placements.values() if v is not None), default=18)
-        factor = opponent_factor(placements.get(opponent_id or ""), max(teams, 2), home)
+        if win_probability is not None:
+            factor = odds_factor(win_probability)
+        else:
+            teams = max((v for v in placements.values() if v is not None), default=18)
+            factor = opponent_factor(placements.get(opponent_id or ""), max(teams, 2), home)
 
+    expected = max(base, 0.0) * (chance if chance is not None else 1.0) * availability * factor
     return Expectation(
         player_id=player.player_id,
-        expected=round(max(base, 0.0) * availability * factor, 1),
+        expected=round(expected, 1),
         form=round(form, 1) if form is not None else None,
         season_average=average,
         availability=availability,
         opponent_factor=round(factor, 3),
         opponent_id=opponent_id,
         home=home,
+        play_probability=chance,
+        win_probability=round(win_probability, 3) if win_probability is not None else None,
         reasons=tuple(reasons),
     )
 
@@ -383,14 +453,19 @@ def rescue_sales(budget: int, squad: Sequence[SellCandidate], protected: Iterabl
 ### histories of all players every day, so it adapts to what Kickbase really does. Changes are
 ### relative to the market value, so cheap and expensive players weigh the same.
 
-### Features: the last three daily changes and the average of the four before
-FEATURE_NAMES = ("d1", "d2", "d3", "d4_7")
+### Features: the last three daily changes, the average of the four before, and the Kickbase points
+### of the player's matches of the last three days (in thousands)
+FEATURE_NAMES = ("d1", "d2", "d3", "d4_7", "pts")
 ### Used until enough history is stored to learn from. Close to BaseXI's behaviour.
-DEFAULT_WEIGHTS = (1.05, 0.0, 0.0, -0.05)
+DEFAULT_WEIGHTS = (1.05, 0.0, 0.0, -0.05, 0.0)
+POINTS_WINDOW = 3
 TRAINING_DAYS = 90
 MIN_TRAINING_ROWS = 2000
 ### A relative change beyond this is a data error or a transfer from abroad, it is left out of training
 MAX_RELATIVE_CHANGE = 0.25
+
+### `(day, points)`: the epoch day of a match and the player's Kickbase points in it
+MatchPoints = Sequence[tuple[int, int]]
 
 
 @dataclass(frozen=True)
@@ -433,42 +508,56 @@ def streak_of(changes: Sequence[int]) -> int:
     return streak
 
 
-def _relative_series(points: Sequence[Sequence[int]]) -> list[float | None]:
-    """Relative daily changes, oldest first. None where a day is missing."""
-    series: list[float | None] = []
+def _relative_series(points: Sequence[Sequence[int]]) -> list[tuple[int, float | None]]:
+    """`(day, relative change into that day)`, oldest first. None where the day before is missing."""
+    series: list[tuple[int, float | None]] = []
     for (day_a, value_a), (day_b, value_b) in zip(points, points[1:], strict=False):
         if day_b - day_a != 1 or value_a <= 0:
-            series.append(None)
+            series.append((day_b, None))
         else:
-            series.append((value_b - value_a) / value_a)
+            series.append((day_b, (value_b - value_a) / value_a))
     return series
 
 
-def _features(changes: Sequence[float]) -> list[float] | None:
+def points_feature(matches: MatchPoints | None, last_day: int) -> float:
+    """The points of the matches in the three days up to `last_day`, in thousands."""
+    if not matches:
+        return 0.0
+    return sum(p for day, p in matches if last_day - POINTS_WINDOW < day <= last_day) / 1000
+
+
+def _features(changes: Sequence[float], points: float) -> list[float] | None:
     """The features from the last seven relative changes, newest last."""
     if len(changes) < 7:
         return None
-    return [changes[-1], changes[-2], changes[-3], sum(changes[-7:-3]) / 4]
+    return [changes[-1], changes[-2], changes[-3], sum(changes[-7:-3]) / 4, points]
 
 
 def _predict(model: ForecastModel, features: Sequence[float]) -> float:
+    if len(model.weights) != len(features):
+        model = ForecastModel()
     return sum(w * f for w, f in zip(model.weights, features, strict=True))
 
 
-def fit_forecast(histories: Iterable[Sequence[Sequence[int]]], training_days: int = TRAINING_DAYS) -> ForecastModel:
+def fit_forecast(
+    histories: Mapping[str, Sequence[Sequence[int]]],
+    match_points: Mapping[str, MatchPoints] | None = None,
+    training_days: int = TRAINING_DAYS,
+) -> ForecastModel:
     """Learns the weights from the stored histories: for every day, the next change from the ones before."""
     rows: list[list[float]] = []
     targets: list[float] = []
-    for points in histories:
+    for player_id, points in histories.items():
+        matches = (match_points or {}).get(player_id)
         series = _relative_series(points[-(training_days + 9) :])
         for end in range(7, len(series)):
-            window = series[end - 7 : end]
-            target = series[end]
+            window = [c for _, c in series[end - 7 : end]]
+            target = series[end][1]
             if target is None or any(c is None for c in window):
                 continue
             if abs(target) > MAX_RELATIVE_CHANGE or any(abs(c) > MAX_RELATIVE_CHANGE for c in window):  # type: ignore[arg-type]
                 continue
-            features = _features(window)  # type: ignore[arg-type]
+            features = _features(window, points_feature(matches, series[end - 1][0]))  # type: ignore[arg-type]
             assert features is not None
             rows.append(features)
             targets.append(target)
@@ -476,32 +565,44 @@ def fit_forecast(histories: Iterable[Sequence[Sequence[int]]], training_days: in
         return ForecastModel()
     from core.analytics import least_squares
 
-    weights = least_squares(rows, targets)
+    ### Without any match points the points weight cannot be learned, it stays out
+    use_points = any(r[4] for r in rows)
+    fit_rows = rows if use_points else [r[:4] for r in rows]
+    weights = least_squares(fit_rows, targets)
     if weights is None:
         return ForecastModel()
+    if not use_points:
+        weights = [*weights, 0.0]
     model = ForecastModel(tuple(round(w, 4) for w in weights), len(rows))
     error = sum(abs(_predict(model, r) - t) for r, t in zip(rows, targets, strict=True)) / len(rows)
     naive = sum(abs(r[0] - t) for r, t in zip(rows, targets, strict=True)) / len(rows)
     return ForecastModel(model.weights, model.rows, error, naive)
 
 
-def forecast(points: Sequence[Sequence[int]], model: ForecastModel | None = None, horizon: int = 3) -> Forecast | None:
+def forecast(
+    points: Sequence[Sequence[int]],
+    model: ForecastModel | None = None,
+    horizon: int = 3,
+    matches: MatchPoints | None = None,
+) -> Forecast | None:
     """The expected change of the next market value update, and a projection for the updates after.
 
-    The projection feeds every forecast change back in as if it had happened.
+    The projection feeds every forecast change back in as if it had happened. Match points older
+    than the window drop out on their own, matches still to come are unknown.
     """
     model = model or ForecastModel()
     if len(points) < 2 or points[-1][1] <= 0:
         return None
-    series = [c for c in _relative_series(points[-12:]) if c is not None]
+    series = [c for _, c in _relative_series(points[-12:]) if c is not None]
     if len(series) < 7:
         return None
+    last_day = points[-1][0]
     value = float(points[-1][1])
     start = value
     changes = list(series)
     projection = []
-    for _ in range(horizon):
-        features = _features(changes)
+    for step in range(horizon):
+        features = _features(changes, points_feature(matches, last_day + step))
         assert features is not None
         change = max(-MAX_RELATIVE_CHANGE, min(MAX_RELATIVE_CHANGE, _predict(model, features)))
         value *= 1 + change
@@ -589,3 +690,221 @@ def rivals_for(
         result.append(Rival(manager_id, clubs.of(manager_id, team_id), balance, max_bid))
     result.sort(key=lambda r: (-(r.max_bid or 0), r.club_players))
     return result
+
+
+### ===============================================================================
+### Bidders and bids
+### ===============================================================================
+###
+### Bids at Kickbase are sealed, only the own one is visible. Who bids and how much is estimated from
+### what each manager did before: whether the club limit and the budget allow it at all, how much he
+### needs a player of this position, whether he usually buys at this price, how active he is, and how
+### much he usually pays on top of the market value.
+
+### The squad a manager wants per position, to tell where he needs players
+IDEAL_SQUAD = {1: 2, 2: 5, 3: 6, 4: 3}
+PRICE_CLASSES = ((0, 5_000_000), (5_000_000, 15_000_000), (15_000_000, 10**12))
+LIKELY = 0.35
+BID_STEP = 10_000
+
+
+@dataclass(frozen=True)
+class BidderProfile:
+    manager_id: str
+    overpay_shares: tuple[float, ...] # What he paid on top of the market value, per purchase
+    purchase_values: tuple[int, ...] # Market values of his purchases
+    purchases_recent: int # Purchases in the last 14 days
+    positions: Mapping[int, int] # Fit players per position
+    squad_size: int
+    max_squad: int = 18
+
+
+@dataclass(frozen=True)
+class BidderEstimate:
+    manager_id: str
+    probability: float
+    expected_bid: int | None
+    position_need: float
+    reasons: tuple[str, ...] = ()
+
+
+def position_need(profile: BidderProfile, position: int) -> float:
+    ideal = IDEAL_SQUAD.get(position, 0)
+    if ideal == 0:
+        return 0.0
+    return max(0.0, min(1.0, (ideal - profile.positions.get(position, 0)) / ideal))
+
+
+def price_class(value: int) -> int:
+    for index, (low, high) in enumerate(PRICE_CLASSES):
+        if low <= value < high:
+            return index
+    return len(PRICE_CLASSES) - 1
+
+
+def _quantile(values: Sequence[float], q: float) -> float:
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, int(q * len(ordered)))]
+
+
+def estimate_bidder(
+    profile: BidderProfile, position: int, market_value: int, price: int, can_buy_club: bool, max_bid: int | None,
+    league_shares: Sequence[float] = (),
+) -> BidderEstimate:
+    """How likely a manager bids for a player and what he would bid."""
+    reasons: list[str] = []
+    if not can_buy_club:
+        return BidderEstimate(profile.manager_id, 0.0, None, 0.0, ("3 Spieler vom Verein",))
+    if max_bid is not None and max_bid < price:
+        return BidderEstimate(profile.manager_id, 0.0, None, 0.0, ("zu wenig Budget",))
+
+    need = position_need(profile, position)
+    same_class = [v for v in profile.purchase_values if price_class(v) == price_class(market_value)]
+    interest = min(1.0, len(same_class) / 4)
+    activity = min(1.0, profile.purchases_recent / 3)
+    probability = 0.1 + 0.35 * need + 0.3 * interest + 0.25 * activity
+    if need >= 0.5:
+        reasons.append("braucht die Position")
+    if interest >= 0.5:
+        reasons.append("kauft oft in der Preisklasse")
+    if activity >= 0.67:
+        reasons.append("gerade sehr aktiv")
+    if profile.squad_size >= profile.max_squad:
+        probability *= 0.5
+        reasons.append("Kader voll")
+
+    shares = profile.overpay_shares if len(profile.overpay_shares) >= 3 else tuple(league_shares)
+    share = max(0.0, _quantile(shares, 0.75)) if shares else 0.05
+    expected = math.ceil(market_value * (1 + share) / BID_STEP) * BID_STEP
+    if max_bid is not None:
+        expected = min(expected, max_bid)
+    return BidderEstimate(profile.manager_id, round(min(probability, 0.95), 2), expected, round(need, 2), tuple(reasons))
+
+
+@dataclass(frozen=True)
+class BidRange:
+    low: int
+    high: int
+    ### Forecast market value gain until the deadline minus what the bid is above the market value
+    margin_low: int | None
+    margin_high: int | None
+    ### The likely bidders the high end tries to beat
+    beats: tuple[str, ...] = ()
+
+
+def bid_range(
+    market_value: int,
+    price: int,
+    league_shares: Sequence[float],
+    bidders: Sequence[BidderEstimate],
+    gain_to_matchday: int | None,
+    own_max_bid: int | None = None,
+) -> BidRange:
+    """The bid to place: at least the asking price and the league's usual markup, at most enough to
+    beat the likely bidders."""
+    floor = max(price, market_value)
+    usual = _quantile(league_shares, 0.5) if league_shares else 0.03
+    low = max(floor, math.ceil(market_value * (1 + max(usual, 0)) / BID_STEP) * BID_STEP)
+    likely = [b for b in bidders if b.probability >= LIKELY and b.expected_bid]
+    high = max([low, *(b.expected_bid + BID_STEP for b in likely if b.expected_bid)])
+    if own_max_bid is not None:
+        high = min(high, max(own_max_bid, floor))
+        low = min(low, high)
+
+    def margin(bid: int) -> int | None:
+        return None if gain_to_matchday is None else gain_to_matchday - (bid - market_value)
+
+    return BidRange(low, high, margin(low), margin(high), tuple(b.manager_id for b in likely))
+
+
+### ===============================================================================
+### Sell advice and buy planner
+### ===============================================================================
+
+
+@dataclass(frozen=True)
+class SellAdvice:
+    player_id: str
+    reason: str
+    expected_drop: int # Forecast change until the deadline, negative
+    in_best: bool
+
+
+def sell_advice(
+    player_id: str, projection: Sequence[int], updates: int, in_best: bool, threshold: int = 100_000
+) -> SellAdvice | None:
+    """Sell before the value drops: forecast loss until the deadline, worse for bench players."""
+    if not projection:
+        return None
+    drop = projection[max(0, min(updates, len(projection)) - 1)]
+    limit = threshold if not in_best else threshold * 3
+    if drop > -limit:
+        return None
+    reason = "fällt voraussichtlich" + (" und sitzt auf der Bank" if not in_best else ", trotz Startelf prüfen")
+    return SellAdvice(player_id, reason, drop, in_best)
+
+
+@dataclass(frozen=True)
+class BuyOption:
+    player_id: str
+    bid: int
+    margin: int | None # Value gain until the deadline minus overpay
+    points_gain: float # More expected points of the best eleven with him
+    blocked: str | None = None # Why he cannot be bought right now
+
+
+def points_gain(squad: Sequence[LineupCandidate], candidate: LineupCandidate) -> float:
+    before = best_eleven(squad)
+    after = best_eleven([*squad, candidate])
+    return round(max(0.0, (after.expected - after.empty_slots * EMPTY_SLOT) - (before.expected - before.empty_slots * EMPTY_SLOT)), 1)
+
+
+### ===============================================================================
+### Odds from undocumented answers
+### ===============================================================================
+
+_ODDS_KEYS = (
+    ("1", "x", "2"),
+    ("o1", "ox", "o2"),
+    ("h", "d", "a"),
+    ("home", "draw", "away"),
+    ("hw", "dr", "aw"),
+)
+
+
+def find_odds(raw: object, depth: int = 0) -> tuple[float, float, float] | None:
+    """Looks for home / draw / away odds in an answer whose shape is unknown."""
+    if depth > 6:
+        return None
+    if isinstance(raw, dict):
+        lowered = {str(k).lower(): v for k, v in raw.items()}
+        for keys in _ODDS_KEYS:
+            values = [lowered.get(k) for k in keys]
+            numbers = [_odd(v) for v in values]
+            if all(n is not None for n in numbers):
+                return numbers[0], numbers[1], numbers[2]  # type: ignore[return-value]
+        for value in raw.values():
+            found = find_odds(value, depth + 1)
+            if found:
+                return found
+    elif isinstance(raw, list):
+        numbers = [_odd(v) for v in raw]
+        if len(raw) == 3 and all(n is not None for n in numbers):
+            return numbers[0], numbers[1], numbers[2]  # type: ignore[return-value]
+        if len(raw) == 3 and all(isinstance(v, dict) for v in raw):
+            inner = [next((_odd(x) for k, x in v.items() if str(k).lower() in ("o", "odd", "odds", "v", "value", "price")), None) for v in raw]
+            if all(n is not None for n in inner):
+                return inner[0], inner[1], inner[2]  # type: ignore[return-value]
+        for value in raw:
+            found = find_odds(value, depth + 1)
+            if found:
+                return found
+    return None
+
+
+def _odd(value: object) -> float | None:
+    try:
+        number = float(str(value).replace(",", "."))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return number if 1.01 <= number <= 100 else None

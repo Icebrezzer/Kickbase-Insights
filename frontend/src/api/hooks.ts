@@ -6,6 +6,8 @@ import type {
   AutomationEvent,
   AutomationSettings,
   BidResult,
+  BuyOption,
+  Rivals,
   Coach,
   ForecastQuality,
   LineupApplied,
@@ -329,3 +331,6 @@ export function useRunScout() {
 
 export const usePushKey = () =>
   useQuery({ queryKey: ["push-key"], queryFn: () => api<PushKey>("/push/key"), staleTime: 10 * 60_000 })
+
+export const useRivals = () => useLeagueQuery<Rivals>(["rivals"], "/rivals")
+export const useBuyPlanner = () => useLeagueQuery<BuyOption[]>(["buys"], "/planner/buys")

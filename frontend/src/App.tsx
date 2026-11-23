@@ -12,6 +12,7 @@ const Dashboard = lazy(() => import("./pages/Dashboard"))
 const Market = lazy(() => import("./pages/Market"))
 const Matchday = lazy(() => import("./pages/Matchday"))
 const Automation = lazy(() => import("./pages/Automation"))
+const Rivals = lazy(() => import("./pages/Rivals"))
 const Players = lazy(() => import("./pages/Players"))
 const Watchlist = lazy(() => import("./pages/Watchlist"))
 const Compare = lazy(() => import("./pages/Compare"))
@@ -46,6 +47,7 @@ export function App() {
         <Route path="markt" element={<Market />} />
         <Route path="spieltag" element={<Matchday />} />
         <Route path="automatik" element={<Automation />} />
+        <Route path="konkurrenz" element={<Rivals />} />
         <Route path="spieler" element={<Players />} />
         <Route path="merkliste" element={<Watchlist />} />
         <Route path="vergleich" element={<Compare />} />

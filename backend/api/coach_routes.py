@@ -11,20 +11,26 @@ from api.routes import (
     LeagueDep,
     LeagueIdDep,
     PlayerIdPath,
+    SessionDep,
     StateDep,
     ViewerDep,
     ask_kickbase,
+    cached,
     forget_private,
+    insights,
+    shows_balances,
 )
 from api.schemas import (
     AutomationEventOut,
     AutomationSettingsIn,
     AutomationSettingsOut,
+    BuyOptionOut,
     CoachOut,
     ForecastQualityOut,
     LineupApplyOut,
     PushKeyOut,
     PushSubscriptionIn,
+    RivalsOut,
     ScoutRunOut,
     SellOut,
 )
@@ -81,6 +87,28 @@ async def sell(
     return result
 
 
+@router.get("/rivals", response_model=RivalsOut)
+def rivals(state: StateDep, session: SessionDep, league: LeagueDep, viewer: ViewerDep) -> RivalsOut:
+    """Every manager as a bidder: habits, needs, weaknesses, money and the auctions he won against you."""
+    allowed = shows_balances(state.settings, viewer)
+    return cached(state, league, ("rivals",), lambda: insights(state, session, league, viewer).rival_profiles(allowed), viewer)
+
+
+@router.get("/planner/buys", response_model=list[BuyOptionOut])
+def buy_planner(state: StateDep, session: SessionDep, league: LeagueDep, viewer: ViewerDep) -> list[BuyOptionOut]:
+    """Market players worth buying now, by value gain until the deadline and expected points."""
+    return cached(state, league, ("buys",), lambda: insights(state, session, league, viewer).buy_options(), viewer)
+
+
+@router.get("/odds/sample")
+async def odds_sample(state: StateDep, viewer: ViewerDep) -> list[dict]:
+    """The latest stored answers of the odds sources, to check Kickbase's undocumented bet link."""
+    automation = _automation(state)
+    if automation.odds is None:
+        return []
+    return await asyncio.to_thread(automation.odds.sample)
+
+
 ### ===============================================================================
 ### Automation settings
 ### ===============================================================================
@@ -93,6 +121,8 @@ def _settings_out(state, viewer, row) -> AutomationSettingsOut:
         scout_limit=row.scout_limit,
         auto_lineup=row.auto_lineup,
         deadline_alerts=row.deadline_alerts,
+        listing_alerts=row.listing_alerts,
+        sell_alerts=row.sell_alerts,
         session_expires_at=automation.session_expiry(viewer.user_id),
         uses_service_account=automation.accounts.service_user_id == viewer.user_id,
     )

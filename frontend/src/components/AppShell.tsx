@@ -22,6 +22,7 @@ import {
   Star,
   Store,
   Sun,
+  Swords,
   Trophy,
   Users,
 } from "lucide-react"
@@ -47,6 +48,7 @@ const NAV: NavItem[] = [
   { to: "/markt", label: "Transfermarkt", short: "Markt", icon: Store, primary: true },
   { to: "/live", label: "Live", icon: Radio, primary: true },
   { to: "/liga", label: "Liga", icon: Trophy, primary: true },
+  { to: "/konkurrenz", label: "Konkurrenz", icon: Swords },
   { to: "/spieler", label: "Spieler", icon: Users },
   { to: "/merkliste", label: "Watchlist", icon: Star },
   { to: "/vergleich", label: "Vergleich", icon: Scale },

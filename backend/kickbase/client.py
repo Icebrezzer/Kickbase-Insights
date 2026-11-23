@@ -404,6 +404,10 @@ class KickbaseClient:
             models.PlayerCenter, f"/v4/competitions/{competition_id}/playercenter/{player_id}", params or None
         )
 
+    async def match_betlink(self, match_id: str) -> Any:
+        """The betting link of a match. Kickbase does not document it; it may carry the odds."""
+        return await self.request("GET", f"/v4/matches/{match_id}/betlink", retries=1)
+
     async def event_types(self, language: str | None = None) -> models.EventTypes:
         headers = {"Accept-Language": language} if language else None
         return models.EventTypes.model_validate(await self.request("GET", "/v4/live/eventtypes", headers=headers))

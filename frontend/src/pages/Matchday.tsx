@@ -3,12 +3,12 @@
  * bring a negative budget back to zero. Everything here is asked from Kickbase live.
  */
 
-import { AlertTriangle, CheckCircle2, Info, Lock, Save, ShieldAlert, XCircle } from "lucide-react"
+import { AlertTriangle, CheckCircle2, Info, Lock, Save, ShieldAlert, TrendingDown, XCircle } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useApplyLineup, useCoach, useSell, useTeamMap } from "@/api/hooks"
 import type { Check, Coach, SquadPlayer } from "@/api/types"
 import { Dialog } from "@/components/Dialog"
-import { Money, PlayerCell, PositionBadge, TeamLogo } from "@/components/kickbase"
+import { Avatar, Money, PlayerCell, PositionBadge, TeamLogo } from "@/components/kickbase"
 import { Badge, Button, Card, CardHeader, PageHeader, QueryState, Stat } from "@/components/ui"
 import { cn } from "@/lib/cn"
 import { compactMoney, countdown, decimal, money, weekdayTime } from "@/lib/format"
@@ -62,6 +62,10 @@ function MatchdayView({ coach }: { coach: Coach }) {
       {coach.rescue && <Rescue coach={coach} byId={byId} onSell={setSelling} />}
 
       <LineupCard coach={coach} byId={byId} />
+
+      {coach.sellAdvice.length > 0 && <SellAdviceCard coach={coach} byId={byId} onSell={setSelling} />}
+
+      <LeagueForecast coach={coach} />
 
       <SquadCard coach={coach} onSell={setSelling} />
 
@@ -206,8 +210,79 @@ function Opponent({ player }: { player: SquadPlayer }) {
       {e.home ? "vs" : "@"}
       <TeamLogo teamId={e.opponentId} size={14} />
       <span className="truncate">{team?.name ?? "?"}</span>
+      {e.winProbability != null && <span className="text-muted">· Sieg {Math.round(e.winProbability * 100)} %</span>}
+      {e.playProbability != null && e.playProbability < 1 && (
+        <span className={cn(e.playProbability < 0.5 ? "text-warn" : "text-muted")}>· spielt {Math.round(e.playProbability * 100)} %</span>
+      )}
       {e.reasons.length > 0 && <span className="text-warn">· {e.reasons.join(", ")}</span>}
     </span>
+  )
+}
+
+function SellAdviceCard({ coach, byId, onSell }: { coach: Coach; byId: Map<string, SquadPlayer>; onSell: (p: SquadPlayer) => void }) {
+  return (
+    <Card>
+      <CardHeader
+        title={
+          <span className="inline-flex items-center gap-2">
+            <TrendingDown className="size-4 text-down" /> Verkaufen vor dem Wertverlust
+          </span>
+        }
+        description={`Prognose bis zur Deadline (${coach.updatesToMatchday} Marktwert-Updates). Verkauft wird vor 22 Uhr zum heutigen Wert.`}
+      />
+      <div className="divide-y divide-line px-1 pt-2 pb-2">
+        {coach.sellAdvice.map((advice) => {
+          const player = byId.get(advice.playerId)
+          if (!player) return null
+          return (
+            <div key={advice.playerId} className="flex items-center justify-between gap-3 px-3 py-2.5 sm:px-4">
+              <PlayerCell player={player} sub={<span className="truncate">{advice.reason}</span>} />
+              <div className="flex shrink-0 items-center gap-3">
+                <span className="text-sm font-semibold text-down tabular-nums">{compactMoney(advice.expectedDrop)}</span>
+                <Button size="sm" onClick={() => onSell(player)}>
+                  Verkaufen
+                </Button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </Card>
+  )
+}
+
+function LeagueForecast({ coach }: { coach: Coach }) {
+  if (coach.leagueForecast.length === 0) return null
+  const top = Math.max(...coach.leagueForecast.map((m) => m.expected), 1)
+  return (
+    <Card>
+      <CardHeader title="Spieltagsprognose der Liga" description="Erwartete Punkte der gespeicherten Elf jedes Managers." />
+      <div className="space-y-2 p-4 sm:p-5">
+        {coach.leagueForecast.map((manager, index) => (
+          <div key={manager.managerId} className="flex items-center gap-3 text-sm">
+            <span className="w-5 text-right text-xs text-muted tabular-nums">{index + 1}</span>
+            <Avatar name={manager.name} image={manager.image} size={24} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className={cn("truncate", manager.isSelf && "font-semibold")}>{manager.name}</span>
+                <span className="shrink-0 tabular-nums">
+                  {decimal(manager.expected)}
+                  {(manager.fielded < 11 || manager.unavailable > 0) && (
+                    <span className="ml-1.5 text-xs text-warn">
+                      {manager.fielded < 11 ? `${manager.fielded}/11` : ""}
+                      {manager.unavailable > 0 ? ` ${manager.unavailable} fällt aus` : ""}
+                    </span>
+                  )}
+                </span>
+              </div>
+              <div className="mt-1 h-1.5 rounded-full bg-surface-2">
+                <div className={cn("h-full rounded-full", manager.isSelf ? "bg-accent" : "bg-muted/40")} style={{ width: `${(manager.expected / top) * 100}%` }} />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
   )
 }
 

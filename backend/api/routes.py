@@ -155,7 +155,9 @@ def cached(
 
 def insights(state: AppState, session: Session, league: League, viewer: Viewer | None = None) -> Insights:
     model = state.automation.model if state.automation is not None else None
-    return Insights(session, league, viewer.user_id if viewer else None, model)
+    return Insights(
+        session, league, viewer.user_id if viewer else None, model, state.settings.automation.max_squad_size
+    )
 
 
 ### ===============================================================================
@@ -449,9 +451,21 @@ async def live(
         bool, Query(description="Ask Kickbase even though no match runs, at most every live_cache_seconds")
     ] = False,
 ) -> LiveOut:
-    return await ask_kickbase(
-        state, viewer, lambda client: state.live.get(league, client, viewer.user_id, refresh)
-    )
+    try:
+        return await ask_kickbase(
+            state, viewer, lambda client: state.live.get(league, client, viewer.user_id, refresh)
+        )
+    except HTTPException as e:
+        ### The viewer's Kickbase session ended mid-match: the league's other access still shows live points
+        if e.status_code != 401:
+            raise
+        fallback = await asyncio.to_thread(state.accounts.client_for_league, league.id)
+        if fallback is None:
+            raise
+        try:
+            return await state.live.get(league, fallback, viewer.user_id, refresh)
+        except KickbaseError as inner:
+            raise e from inner
 
 
 @router.get("/players/{player_id}/matches", response_model=PlayerMatchesOut)

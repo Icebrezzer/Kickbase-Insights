@@ -291,6 +291,10 @@ class UserAutomation(SQLModel, table=True):
     auto_lineup: bool = False
     ### Push warnings before the deadline (negative budget, gaps or unavailable players in the eleven)
     deadline_alerts: bool = True
+    ### Push when a transfer target or a bargain is listed, and when a rival has to sell
+    listing_alerts: bool = True
+    ### Push a daily sell advice before the market value update
+    sell_alerts: bool = True
     updated_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
 
 
@@ -341,3 +345,33 @@ class PushSubscription(SQLModel, table=True):
     p256dh: str
     auth: str
     created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+
+
+class BidHistory(SQLModel, table=True):
+    """Every own bid a user had, kept after the auction. With the transfers it shows lost auctions."""
+    league_id: str = Field(primary_key=True)
+    user_id: str = Field(primary_key=True)
+    player_id: str = Field(primary_key=True)
+    price: int = _money(0)
+    first_seen: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+    last_seen: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime, index=True)
+
+
+class MatchOdds(SQLModel, table=True):
+    """Betting odds of a match (decimal, home / draw / away), from Kickbase or The Odds API."""
+    match_id: str = Field(primary_key=True)
+    home: float | None = None
+    draw: float | None = None
+    away: float | None = None
+    source: str = ""
+    raw: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    updated_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+
+
+class MarketSeen(SQLModel, table=True):
+    """Listings the market watch has already reported, so a new one is pushed only once."""
+    league_id: str = Field(primary_key=True)
+    player_id: str = Field(primary_key=True)
+    seller_id: str | None = None
+    price: int | None = _money()
+    seen_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)

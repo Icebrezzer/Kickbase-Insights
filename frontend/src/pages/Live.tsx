@@ -121,6 +121,12 @@ export default function Live() {
                     ? " · aktualisiert sich jede Minute"
                     : ""
                   : " · gerade läuft kein Spiel, neue Daten nur per „Aktualisieren“"}
+                {live.stalePlayers > 0 && (
+                  <span className="text-warn"> · {live.stalePlayers} Spieler mit letztem bekannten Stand</span>
+                )}
+                {live.missingPlayers > 0 && (
+                  <span className="text-down"> · {live.missingPlayers} Spieler nicht erreichbar, deren Manager zeigen den Kickbase-Stand</span>
+                )}
               </p>
               <PlayerSearch onSelect={setSearched} />
             </div>

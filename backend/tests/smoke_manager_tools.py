@@ -62,6 +62,27 @@ def main() -> None:
         check(players[0]["rivalsByBudget"] is True, "balances user filters rivals by budget")
         check(any(p.get("forecast") is not None for p in players), "market players carry a forecast")
 
+        first = players[0]
+        for key in ("bidLow", "bidHigh", "marginLow", "expectedPoints", "playProbability", "odds", "sellerInMinus"):
+            check(key in first, f"market player has {key}")
+        check(all(p["bidLow"] is None or p["bidLow"] >= p["marketValue"] for p in players), "bids start at the market value")
+        check(all(0 <= r["probability"] <= 1 for p in players for r in p["rivals"]), "bidder probabilities are shares")
+        check(any(p["expectedPoints"] for p in players), "market players carry expected points")
+
+        rivals = client.get("/api/rivals")
+        check(rivals.status_code == 200, f"rivals ({rivals.status_code} {rivals.text[:300]})")
+        profiles = rivals.json()
+        check(len(profiles["managers"]) > 1, f"{len(profiles['managers'])} rival profiles")
+        check(any(m["balanceHistory"] for m in profiles["managers"]), "balance histories for the balances user")
+        check(any(m["purchases"] for m in profiles["managers"]), "purchases are counted")
+
+        buys = client.get("/api/planner/buys")
+        check(buys.status_code == 200, f"buy planner ({buys.status_code} {buys.text[:300]})")
+        check(len(buys.json()) > 0, f"buy planner has {len(buys.json())} options")
+
+        odds = client.get("/api/odds/sample")
+        check(odds.status_code == 200, f"odds sample ({len(odds.json())} stored answers)")
+
         everyone = client.get("/api/players")
         check(everyone.status_code == 200, "players")
         check(any(len(p.get("projection") or []) == 3 for p in everyone.json()), "players carry a projection")
@@ -72,6 +93,9 @@ def main() -> None:
         check(len(view["squad"]) > 0, f"coach squad has {len(view['squad'])} players")
         check(len(view["bestLineup"]) == 11, f"best eleven has {len(view['bestLineup'])} players")
         check(bool(view["checks"]), "coach has checks")
+        check("sellAdvice" in view and "leagueForecast" in view, "coach has sell advice and league forecast")
+        check(len(view["leagueForecast"]) > 1, f"league forecast for {len(view['leagueForecast'])} managers")
+        check(any(p["expected"]["playProbability"] is not None for p in view["squad"]), "squad has start probabilities")
         print("    checks:", [c["message"] for c in view["checks"]])
         print("    matchday:", view["matchday"], "open:", view["lineupOpen"], "budget:", view["budget"])
 
@@ -98,6 +122,18 @@ def main() -> None:
             client.delete(f"/api/watchlist/{added[0]}")
             again = client.post("/api/automation/scout")
             check(again.status_code == 200, "second scouting run answers (cooldown)")
+
+        ### The market watch: the first round only remembers, the second reports nothing new
+        state = app.state.kbi
+        rows = [state.automation.get_settings("1001", "4242")]
+        check(rows[0].listing_alerts, "listing alerts are on by default")
+        from db.models import utcnow
+
+        client.portal.call(state.automation.watch_market, "4242", rows, utcnow())
+        client.portal.call(state.automation.watch_market, "4242", rows, utcnow())
+        check(True, "market watch ran twice")
+        client.portal.call(state.automation.tick, utcnow())
+        check(True, "automation round ran")
 
         events = client.get("/api/automation/events")
         check(events.status_code == 200, f"events ({len(events.json())})")
