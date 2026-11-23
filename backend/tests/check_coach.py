@@ -9,6 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from core import achievements as a  # noqa: E402
 from core import coach as c  # noqa: E402
 
 
@@ -136,6 +137,41 @@ def main() -> None:
     assert [r.manager_id for r in rich] == ["c"], rich
     plain = c.rivals_for("1", 5_000_000, ["a", "b", "c"], clubs)
     assert {r.manager_id for r in plain} == {"b", "c"}, plain
+
+    ### Achievements: BaseXI's figures for the league leader in November 2026 (41.9 Mio incl. 1 Mio
+    ### "Tormaschine", which cannot be worked out from the stored data)
+    day_points = [1180, 980, 780, 2067, 1380, 1620, 1490, 980, 1990, 1720]
+    placements = [1, 3, 5, 1, 2, 1, 1, 4, 1, 1]
+    values = [120e6, 180e6, 230e6, 280e6, 300e6, 330e6, 360e6, 390e6, 400e6, 415.2e6]
+    lineup_points = {
+        1: [663, 120], 2: [210, 90], 3: [150], 4: [520, 410, 230], 5: [310, 205], 6: [240, 100], 7: [205],
+        8: [180], 9: [330, 300, 260], 10: [505, 420, 330],
+    }
+    season = a.ManagerSeason(
+        "m",
+        [(d + 1, p, pl, int(v)) for d, (p, pl, v) in enumerate(zip(day_points, placements, values, strict=True))],
+        14306,
+        lineup_points,
+        mvp_days=3,
+        profits=[3.2e6] * 10 + [5.5e6] * 8 + [1.5e6],
+        transfers=315,
+        squad_size=14,
+    )
+    earned = {e.rule.key: e for e in a.evaluate(season)}
+    assert earned["md_win"].count == 6 and earned["md_win_3"].count == 1 and earned["md_win_10"].count == 0
+    assert earned["md_1000"].count == 7 and earned["md_1500"].count == 4 and earned["md_2000"].count == 1
+    assert earned["goals"].count is None
+    by_group: dict[str, int] = {}
+    for e in earned.values():
+        by_group[e.rule.group] = by_group.get(e.rule.group, 0) + e.amount
+    assert by_group["Spieltagssiege"] == 7_500_000, by_group
+    assert by_group["Spieltagspunkte"] == 7_850_000, by_group
+    assert by_group["Saisonpunkte"] == 350_000, by_group
+    assert by_group["Mannschaftswert"] == 3_850_000, by_group
+    assert by_group["Transfers & Händchen"] == 8_700_000, by_group
+    assert by_group["Transferkönig"] == 750_000, by_group
+    assert a.total(list(earned.values())) == sum(by_group.values())
+    assert a.mvp_days({1: ["x", "y"], 2: ["z"]}, {1: {"y"}, 2: {"q"}}) == 1
 
     print("All coach checks passed.")
 

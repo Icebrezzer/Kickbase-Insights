@@ -52,6 +52,8 @@ jobs:
         run: npm run build
 
   ui-audit:
+    permissions:
+      contents: write
     ### Screenshots of every page on phones, tablet and desktop, plus an overflow report (artifact "ui-audit").
     ### Pinned to 24.04: Playwright's browsers lag behind the newest runner image
     runs-on: ubuntu-24.04
@@ -91,12 +93,13 @@ jobs:
       - name: App log
         if: always()
         run: tail -50 /tmp/kbi.log
-      - uses: actions/upload-artifact@v4
+      - name: Publish the screenshots to the ui-audit branch
         if: always()
-        with:
-          name: ui-audit
-          path: ui-audit
-          retention-days: 7
+        run: |
+          cd ui-audit
+          git init -q && git checkout -q -b ui-audit
+          git add -A && git -c user.name=ci -c user.email=ci@localhost commit -qm "UI audit of ${{ github.sha }}"
+          git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" ui-audit
 
   image:
     needs: [backend, frontend]

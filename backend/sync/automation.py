@@ -50,6 +50,8 @@ from db.models import (
     Manager,
     MarketSeen,
     MarketValueHistory,
+    MatchdayLineup,
+    MatchdayRanking,
     Player,
     PlayerForm,
     SquadEntry,
@@ -559,6 +561,36 @@ class AutomationService:
         await self.refresh_forms(client, league.competition_id, stale, force=True)
         return len(stale)
 
+    async def backfill_lineups(self, league: League, client: KickbaseClient) -> int:
+        """The elevens of matchdays that were stored before lineups were kept, one request per matchday."""
+        missing = await asyncio.to_thread(self._days_without_lineups, league.id)
+        for day in missing:
+            try:
+                ranking = await client.ranking(league.id, day)
+            except KickbaseAuthError:
+                raise
+            except KickbaseError as e:
+                log.info("No lineups of matchday %s: %s", day, e)
+                continue
+            await asyncio.to_thread(self._store_lineups, league.id, day, ranking)
+        return len(missing)
+
+    def _days_without_lineups(self, league_id: str) -> list[int]:
+        with Session(self.engine) as session:
+            ranked = set(session.exec(select(MatchdayRanking.day).where(MatchdayRanking.league_id == league_id)).all())
+            stored = set(session.exec(select(MatchdayLineup.day).where(MatchdayLineup.league_id == league_id)).all())
+        return sorted(ranked - stored)
+
+    def _store_lineups(self, league_id: str, day: int, ranking: kb.Ranking) -> None:
+        with Session(self.engine) as session:
+            for user in ranking.users:
+                session.merge(
+                    MatchdayLineup(
+                        league_id=league_id, day=day, manager_id=user.id, players=[pid for pid in user.lineup if pid]
+                    )
+                )
+            session.commit()
+
     def _forms_behind(self, competition_id: int) -> list[str]:
         now = utcnow()
         with Session(self.engine) as session:
@@ -948,6 +980,7 @@ class AutomationService:
             refreshed = 0
             if client is not None:
                 try:
+                    await self.backfill_lineups(league, client)
                     refreshed = await self.refresh_all_forms(league, client)
                     if self.odds is not None:
                         await self.odds.refresh(client, league.competition_id)

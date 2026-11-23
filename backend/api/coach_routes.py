@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, HTTPException, Path, Query
+from sqlmodel import Session
 
 from api.routes import (
     LeagueDep,
@@ -28,6 +31,7 @@ from api.schemas import (
     CoachOut,
     ForecastQualityOut,
     LineupApplyOut,
+    ManagerDetailOut,
     PushKeyOut,
     PushSubscriptionIn,
     RivalsOut,
@@ -92,6 +96,34 @@ def rivals(state: StateDep, session: SessionDep, league: LeagueDep, viewer: View
     """Every manager as a bidder: habits, needs, weaknesses, money and the auctions he won against you."""
     allowed = shows_balances(state.settings, viewer)
     return cached(state, league, ("rivals",), lambda: insights(state, session, league, viewer).rival_profiles(allowed), viewer)
+
+
+@router.get("/managers/{manager_id}/detail", response_model=ManagerDetailOut)
+async def manager_detail(
+    state: StateDep,
+    league: LeagueDep,
+    viewer: ViewerDep,
+    manager_id: Annotated[str, Path(pattern=r"^\d+$")],
+    day: Annotated[int | None, Query(ge=1, le=60)] = None,
+) -> ManagerDetailOut:
+    """Everything about one manager: squad, lineup, values, clubs, transfers, achievements, season."""
+    current: list[str] | None = None
+    if day is None:
+        try:
+            lineups = await ask_kickbase(state, viewer, lambda client: state.live.lineups(league, client))
+            current = lineups.lineups.get(manager_id)
+        except HTTPException:
+            current = None
+    allowed = shows_balances(state.settings, viewer)
+
+    def build() -> ManagerDetailOut | None:
+        with Session(state.engine) as session:
+            return insights(state, session, league, viewer).manager_detail(manager_id, allowed, current, day)
+
+    result = await asyncio.to_thread(build)
+    if result is None:
+        raise HTTPException(404, "Diesen Manager gibt es in der Liga nicht.")
+    return result
 
 
 @router.get("/planner/buys", response_model=list[BuyOptionOut])

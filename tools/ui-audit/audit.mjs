@@ -96,4 +96,7 @@ for (const target of TARGETS) {
 await writeFile(`${OUT}/report.json`, JSON.stringify(report, null, 2))
 const bad = report.filter((r) => r.pageOverflow > 0 || r.wide?.length || r.errors?.length)
 console.log(`${report.length} screens, ${bad.length} with overflow or errors`)
-for (const r of bad) console.log(r.name, "overflow", r.pageOverflow, "wide", r.wide?.length ?? 0, r.errors?.length ? r.errors : "")
+for (const r of bad) {
+  console.log(r.name, "overflow", r.pageOverflow, "wide", r.wide?.length ?? 0, r.errors?.length ? r.errors : "")
+  for (const w of r.wide ?? []) console.log("   wide:", w)
+}

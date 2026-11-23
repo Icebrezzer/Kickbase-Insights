@@ -671,3 +671,71 @@ class BuyOptionOut(Schema):
     margin: int | None = None
     points_gain: float = 0 # More expected points of the best eleven with him
     blocked: str | None = None
+
+
+### ===============================================================================
+### Manager detail
+### ===============================================================================
+
+class ManagerSquadPlayerOut(PlayerOut):
+    in_lineup: bool = False
+    form: list[tuple[int, int | None]] = [] # (matchday, points) of the club's last five matches, oldest first
+    starts: int | None = None # Starting eleven in the club's last ten matches
+    day_points: int | None = None # Points on the selected matchday
+
+
+class ValueSplitOut(Schema):
+    team_value: int
+    today: int # Market value change of today
+
+
+class AchievementOut(Schema):
+    key: str
+    group: str
+    name: str
+    description: str
+    reward: int
+    kind: str
+    count: int | None = None
+    amount: int
+
+
+class SeasonPointOut(Schema):
+    day: int
+    points: int | None = None
+    season_points: int | None = None
+    placement: int | None = None
+
+
+class ManagerDetailOut(Schema):
+    id: str
+    name: str
+    image: str | None = None
+    is_self: bool = False
+    placement: int | None = None
+    points: int | None = None
+    previous_id: str | None = None
+    next_id: str | None = None
+    transfers: int = 0
+    squad_size: int = 0
+    max_squad: int = 18
+    total: ValueSplitOut
+    lineup: ValueSplitOut
+    bench: ValueSplitOut
+    transfer_profit: int = 0
+    overpay_average: float | None = None
+    clubs: list[tuple[str, int]] = [] # (team id, players), most first
+    positions: dict[int, int] = {}
+    estimated_balance: int | None = None
+    max_bid: int | None = None
+    lineup_day: int | None = None # The matchday the lineup is from, None for the current one
+    lineup_ids: list[str] = []
+    days: list[int] = [] # Matchdays with a stored lineup
+    squad: list[ManagerSquadPlayerOut] = []
+    turnovers: list[TurnoverOut] = []
+    transfer_list: list[TransferOut] = []
+    achievements: list[AchievementOut] = []
+    achievements_total: int = 0
+    season: list[SeasonPointOut] = []
+    team_values: list[tuple[str, int]] = [] # (date, value) every evening
+    matchday_dates: list[tuple[int, str]] = [] # (matchday, date of its first kick-off)

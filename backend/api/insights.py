@@ -41,12 +41,17 @@ from api.schemas import (
     BalancePointOut,
     BuyOptionOut,
     LostAuctionOut,
+    AchievementOut,
+    ManagerDetailOut,
+    ManagerSquadPlayerOut,
+    SeasonPointOut,
+    ValueSplitOut,
     TeamOut,
     TransferOut,
     TurnoverOut,
     WatchedPlayerOut,
 )
-from core import analytics, coach
+from core import achievements, analytics, coach
 from db.models import (
     BidHistory,
     Battle,
@@ -58,6 +63,7 @@ from db.models import (
     MarketBid,
     MarketListing,
     MarketValueHistory,
+    MatchdayLineup,
     MatchdayRanking,
     Player,
     PlayerForm,
@@ -85,6 +91,9 @@ class Insights:
         self.model = model or coach.ForecastModel()
         self.max_squad = max_squad
         self._match_points: dict[str, list[tuple[int, int]]] | None = None
+        self._form_rows: dict[str, list] | None = None
+        self._estimates: dict[str, int] | None = None
+        self._prizes: dict[str, int] | None = None
         ### Empty until the first sync after an update has stored it
         self.season = session.get(LeagueSeason, league.id) or LeagueSeason(league_id=league.id)
 
@@ -139,18 +148,259 @@ class Insights:
         membership = self.session.get(UserLeague, (self.viewer_id, self.league_id))
         return membership.budget if membership else None
 
+    def estimated_balances(self) -> dict[str, int]:
+        """Start money, plus sales, minus purchases, plus the prize money of the season's achievements.
+        Login bonuses are not visible."""
+        if self._estimates is None:
+            events = analytics.transfer_events(self._transfer_records())
+            start_money = self.season.start_money or analytics.DEFAULT_START_MONEY
+            prizes = self.achievement_totals()
+            self._estimates = {
+                m.id: analytics.estimate_balance(m.id, events, start_money) + prizes.get(m.id, 0)
+                for m in self._managers()
+            }
+        return self._estimates
+
     def balances(self) -> dict[str, tuple[int, int]]:
         """Per manager the balance and the highest possible bid. The viewer's own come from the real
-        budget, the others are estimates from the start money and the transfers."""
-        events = analytics.transfer_events(self._transfer_records())
-        start_money = self.season.start_money or analytics.DEFAULT_START_MONEY
+        budget, the others are estimates (see `estimated_balances`)."""
+        estimates = self.estimated_balances()
         own_budget = self.own_budget()
         result = {}
         for manager in self._managers():
-            estimated = analytics.estimate_balance(manager.id, events, start_money)
+            estimated = estimates.get(manager.id, 0)
             balance = own_budget if manager.id == self.viewer_id and own_budget is not None else estimated
             result[manager.id] = (balance, analytics.max_bid(balance, manager.team_value or 0))
         return result
+
+    ### ================================================================================================
+    ### Manager detail
+    ### ================================================================================================
+
+    def manager_detail(
+        self, manager_id: str, balances: bool, current_lineup: list[str] | None, day: int | None = None
+    ) -> ManagerDetailOut | None:
+        managers = sorted(self._managers(), key=lambda m: (m.placement is None, m.placement or 0, m.name))
+        manager = next((m for m in managers if m.id == manager_id), None)
+        if manager is None:
+            return None
+        index = managers.index(manager)
+        squad_entries = {pid: e for pid, e in self._squad().items() if e.manager_id == manager_id}
+        lineups = self.lineups_by_day().get(manager_id, {})
+        lineup_ids = list(lineups.get(day, [])) if day is not None else list(current_lineup or [])
+        if day is None and not lineup_ids and lineups:
+            lineup_ids = list(lineups[max(lineups)])
+        players = {p.id: p for p in self.session.exec(select(Player).where(Player.id.in_(list(squad_entries))))}
+        histories = self._histories(list(squad_entries))
+        market_ids = set(self._market())
+        all_squad = self._squad()
+        points = self.matchday_points()
+        forms = self._forms()
+
+        squad_out = []
+        for pid in squad_entries:
+            player = players.get(pid)
+            if player is None:
+                continue
+            club_matches = sorted((m for m in forms.get(pid, []) if m and m[0] is not None), key=lambda m: m[0])
+            out = self._player_out(
+                player,
+                histories.get(pid),
+                all_squad,
+                market_ids,
+                ManagerSquadPlayerOut,
+                in_lineup=pid in lineup_ids,
+                form=[(int(m[0]), int(m[1]) if (len(m) < 4 or m[3] in (3, 5) or (m[2] or 0) > 0) else None) for m in club_matches[-5:]],
+                starts=sum(1 for m in club_matches[-10:] if len(m) > 3 and m[3] == coach.ROLE_START) if club_matches else None,
+                day_points=points.get((pid, day)) if day is not None else None,
+            )
+            squad_out.append(out)
+        squad_out.sort(key=lambda p: (not p.in_lineup, p.position, -(p.average_points or 0)))
+
+        def split(ids: list[str]) -> ValueSplitOut:
+            chosen = [p for p in squad_out if p.id in ids]
+            return ValueSplitOut(
+                team_value=sum(p.market_value for p in chosen), today=sum(p.today or 0 for p in chosen)
+            )
+
+        records = self._transfer_records()
+        own_records = [t for t in records if manager_id in (t.buyer, t.seller)]
+        names = self._manager_names()
+        turnovers = [t for t in self.turnovers() if t.manager_id == manager_id or t.manager == manager_id]
+        own_purchases = [p for p in self._purchases() if p.transfer.buyer == manager_id]
+        earned = achievements.evaluate(self.achievement_seasons()[manager_id])
+        shown = balances or manager_id == self.viewer_id
+        money = self.balances().get(manager_id) if shown else None
+        clubs = Counter(p.team_id for p in squad_out if p.team_id)
+        rankings = sorted(
+            self.session.exec(
+                select(MatchdayRanking).where(
+                    MatchdayRanking.league_id == self.league_id, MatchdayRanking.manager_id == manager_id
+                )
+            ),
+            key=lambda r: r.day,
+        )
+        kickoffs: dict[int, datetime] = {}
+        for f in self.session.exec(select(Fixture).where(Fixture.competition_id == self.league.competition_id)):
+            if f.kickoff and (f.day not in kickoffs or f.kickoff < kickoffs[f.day]):
+                kickoffs[f.day] = f.kickoff
+
+        return ManagerDetailOut(
+            id=manager.id,
+            name=manager.name,
+            image=manager.image,
+            is_self=manager.id == self.viewer_id,
+            placement=manager.placement,
+            points=manager.points,
+            previous_id=managers[index - 1].id if index > 0 else None,
+            next_id=managers[index + 1].id if index + 1 < len(managers) else None,
+            transfers=len(own_records),
+            squad_size=len(squad_out),
+            max_squad=self.max_squad,
+            total=split([p.id for p in squad_out]),
+            lineup=split(lineup_ids),
+            bench=split([p.id for p in squad_out if p.id not in lineup_ids]),
+            transfer_profit=sum(t.profit or 0 for t in turnovers),
+            overpay_average=(sum(p.overpay_share for p in own_purchases) / len(own_purchases)) if own_purchases else None,
+            clubs=clubs.most_common(),
+            positions=dict(Counter(p.position for p in squad_out)),
+            estimated_balance=money[0] if money else None,
+            max_bid=money[1] if money else None,
+            lineup_day=day,
+            lineup_ids=lineup_ids,
+            days=sorted(lineups),
+            squad=squad_out,
+            turnovers=turnovers,
+            transfer_list=[self._transfer_out(t, names) for t in self._own_transfers(manager_id)],
+            achievements=[
+                AchievementOut(
+                    key=e.rule.key,
+                    group=e.rule.group,
+                    name=e.rule.name,
+                    description=e.rule.description,
+                    reward=e.rule.reward,
+                    kind=e.rule.kind,
+                    count=e.count,
+                    amount=e.amount,
+                )
+                for e in earned
+            ],
+            achievements_total=achievements.total(earned),
+            season=[
+                SeasonPointOut(day=r.day, points=r.points, season_points=r.season_points, placement=r.placement)
+                for r in rankings
+            ],
+            team_values=self.team_value_history(manager_id),
+            matchday_dates=[(d, k.date().isoformat()) for d, k in sorted(kickoffs.items()) if k <= datetime.now(UTC)],
+        )
+
+    def _own_transfers(self, manager_id: str) -> list[Transfer]:
+        rows = self.session.exec(
+            select(Transfer).where(
+                Transfer.league_id == self.league_id,
+                (Transfer.buyer_id == manager_id) | (Transfer.seller_id == manager_id),
+            )
+        ).all()
+        return sorted((t for t in rows if self._this_season(t)), key=lambda t: t.date, reverse=True)
+
+    def team_value_history(self, manager_id: str) -> list[tuple[str, int]]:
+        """The team value every evening since the season start: the squad of that day at that day's values.
+
+        The squad is rebuilt backwards from today's through the transfers: a purchase after a day means
+        the player was not there yet, a sale after it means he still was.
+        """
+        start = self.season_start()
+        if start is None:
+            return []
+        today = analytics.market_value_day(datetime.now(UTC))
+        first = analytics.market_value_day(start)
+        squad = {pid for pid, e in self._squad().items() if e.manager_id == manager_id}
+        events = sorted(
+            (e for e in analytics.transfer_events(self._transfer_records()) if e.manager == manager_id),
+            key=lambda e: e.date,
+            reverse=True,
+        )
+        involved = squad | {e.player_id for e in events}
+        histories = self._histories(list(involved))
+        result = []
+        held = set(squad)
+        pending = list(events)
+        for day in range(today, first - 1, -1):
+            ### Undo everything that happened after this day's market value update
+            while pending and analytics.market_value_day(pending[0].date) >= day:
+                event = pending.pop(0)
+                if event.kind == "buy":
+                    held.discard(event.player_id)
+                else:
+                    held.add(event.player_id)
+            value = sum(analytics.value_on_day(histories.get(pid) or [], day) or 0 for pid in held)
+            result.append((analytics.day_to_date(day).isoformat(), value))
+        result.reverse()
+        return result
+
+    ### ================================================================================================
+    ### Achievements
+    ### ================================================================================================
+
+    def _forms(self) -> dict[str, list]:
+        if self._form_rows is None:
+            self._form_rows = dict(self.session.exec(select(PlayerForm.player_id, PlayerForm.matches)).all())
+        return self._form_rows
+
+    def matchday_points(self) -> dict[tuple[str, int], int]:
+        """(player, matchday) -> Kickbase points, for every player whose form is stored."""
+        return {
+            (pid, int(m[0])): int(m[1])
+            for pid, matches in self._forms().items()
+            for m in matches
+            if m and m[0] is not None
+        }
+
+    def lineups_by_day(self) -> dict[str, dict[int, list[str]]]:
+        result: dict[str, dict[int, list[str]]] = defaultdict(dict)
+        for row in self.session.exec(select(MatchdayLineup).where(MatchdayLineup.league_id == self.league_id)):
+            result[row.manager_id][row.day] = list(row.players)
+        return result
+
+    def achievement_seasons(self) -> dict[str, achievements.ManagerSeason]:
+        rankings: dict[str, list] = defaultdict(list)
+        for r in self.session.exec(select(MatchdayRanking).where(MatchdayRanking.league_id == self.league_id)):
+            rankings[r.manager_id].append((r.day, r.points, r.placement, r.team_value))
+        points = self.matchday_points()
+        best: dict[int, tuple[int, set[str]]] = {}
+        for (pid, day), value in points.items():
+            top = best.get(day)
+            if top is None or value > top[0]:
+                best[day] = (value, {pid})
+            elif value == top[0]:
+                top[1].add(pid)
+        best_by_day = {day: ids for day, (_, ids) in best.items()}
+        lineups = self.lineups_by_day()
+        records = self._transfer_records()
+        turnovers = self._turnovers()
+        squad_sizes = Counter(e.manager_id for e in self._squad().values())
+        result = {}
+        for manager in self._managers():
+            own_lineups = lineups.get(manager.id, {})
+            result[manager.id] = achievements.ManagerSeason(
+                manager_id=manager.id,
+                matchdays=sorted(rankings.get(manager.id, [])),
+                season_points=manager.points or 0,
+                lineup_points={day: [points.get((pid, day), 0) for pid in ids] for day, ids in own_lineups.items()},
+                mvp_days=achievements.mvp_days(own_lineups, best_by_day),
+                profits=[t.profit for t in turnovers if t.manager == manager.id and t.profit is not None],
+                transfers=sum(1 for t in records if manager.id in (t.buyer, t.seller)),
+                squad_size=squad_sizes.get(manager.id, 0),
+            )
+        return result
+
+    def achievement_totals(self) -> dict[str, int]:
+        if self._prizes is None:
+            self._prizes = {
+                mid: achievements.total(achievements.evaluate(season))
+                for mid, season in self.achievement_seasons().items()
+            }
+        return self._prizes
 
     def season_start(self) -> datetime | None:
         """The start Kickbase reports. Otherwise the first stored transfer or the first kick-off."""
@@ -852,7 +1102,7 @@ class Insights:
         previous_points: int | None = None
         for manager in managers:
             own_events = [e for e in events if e.manager == manager.id]
-            estimated = analytics.estimate_balance(manager.id, own_events, start_money)
+            estimated = self.estimated_balances().get(manager.id, start_money)
             is_self = manager.id == self.viewer_id
             budget = own_budget if is_self else None
             balance = budget if budget is not None else estimated
