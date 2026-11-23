@@ -187,6 +187,10 @@ def main() -> None:
     assert fitted.learned and abs(fitted.form - 0.8) < 0.1 and abs(fitted.average - 0.2) < 0.1, fitted
     assert fitted.error is not None and fitted.default_error is not None and fitted.error < fitted.default_error
     assert not ln.fit_expectation(rows[:100]).learned
+    ### Without any odds (the past has none) the other weights are still learned, the odds slope stays
+    no_odds = [ln.ExpectationRow(r.form, r.average, r.chance, None, r.table, r.home, r.actual) for r in rows]
+    partial = ln.fit_expectation(no_odds)
+    assert partial.learned and partial.win == c.ExpectationWeights().win, partial
     matches = [[d, p, 90, 5] for d, p in zip(range(1, 9), (100, 120, 80, 150, 0, 200, 90, 110), strict=True)]
     history = ln.history_rows(matches, {d: ("3", d % 2 == 0) for d in range(1, 9)}, {"3": 18})
     assert len(history) == 5 and history[0].actual == 150 and history[0].table == 1.0

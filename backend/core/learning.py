@@ -72,16 +72,22 @@ def fit_expectation(rows: Sequence[ExpectationRow]) -> coach.ExpectationWeights:
         table = r.table if r.win is None else 0.0
         features.append([r.chance * (r.form or 0), r.chance * (r.average or 0), r.chance * base * win_term, r.chance * base * table])
         targets.append(r.actual)
-    solution = least_squares(features, targets)
+    ### A column without any data (no odds yet, or only odds) cannot be fitted: it keeps its starting value
+    defaults = [default.form, default.average, default.win * (default.form + default.average), default.table * (default.form + default.average)]
+    active = [i for i in range(4) if any(row[i] for row in features)]
+    solution = least_squares([[row[i] for i in active] for row in features], targets) if active else None
     if solution is None:
         return default
-    a, b, c, d = solution
+    coefficients = list(defaults)
+    for index, value in zip(active, solution, strict=True):
+        coefficients[index] = value
+    a, b, c, d = coefficients
     scale = max(a + b, 0.1)
     fitted = coach.ExpectationWeights(
         form=round(min(max(a, 0.0), 1.5), 3),
         average=round(min(max(b, 0.0), 1.5), 3),
-        win=round(min(max(c / scale, 0.0), 1.0), 3),
-        table=round(min(max(d / scale, 0.0), 0.4), 3),
+        win=round(min(max(c / scale, 0.0), 1.0), 3) if 2 in active else default.win,
+        table=round(min(max(d / scale, 0.0), 0.4), 3) if 3 in active else default.table,
         rows=len(usable),
     )
     error = sum(abs(predict(r, fitted) - r.actual) for r in usable) / len(usable)
