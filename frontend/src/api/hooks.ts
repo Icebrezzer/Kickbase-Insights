@@ -7,6 +7,7 @@ import type {
   AutomationSettings,
   BidResult,
   BuyOption,
+  Learning,
   ManagerDetail,
   Rivals,
   Coach,
@@ -340,3 +341,5 @@ export const useManagerDetail = (id: string, day: number | null) =>
   useLeagueQuery<ManagerDetail>(["manager-detail", id, day ?? "current"], `/managers/${id}/detail${day ? `?day=${day}` : ""}`, {
     staleTime: 60_000,
   })
+
+export const useLearning = () => useLeagueQuery<Learning>(["learning"], "/learning", { staleTime: 10 * 60_000 })

@@ -30,6 +30,7 @@ from api.schemas import (
     BuyOptionOut,
     CoachOut,
     ForecastQualityOut,
+    LearningOut,
     LineupApplyOut,
     ManagerDetailOut,
     PushKeyOut,
@@ -130,6 +131,20 @@ async def manager_detail(
 def buy_planner(state: StateDep, session: SessionDep, league: LeagueDep, viewer: ViewerDep) -> list[BuyOptionOut]:
     """Market players worth buying now, by value gain until the deadline and expected points."""
     return cached(state, league, ("buys",), lambda: insights(state, session, league, viewer).buy_options(), viewer)
+
+
+@router.get("/learning", response_model=LearningOut)
+async def learning_status(state: StateDep, league: LeagueDep, viewer: ViewerDep) -> LearningOut:
+    """What the app learned: expected points weights, bidder model, achievement counting, sell ratio,
+    balance correction, and the viewer's achievements next to Kickbase's own counters."""
+    automation = _automation(state)
+
+    def build() -> LearningOut:
+        status = automation.learning.status(league)
+        with Session(state.engine) as session:
+            return insights(state, session, league, viewer).learning_view(status)
+
+    return await asyncio.to_thread(build)
 
 
 @router.get("/odds/sample")

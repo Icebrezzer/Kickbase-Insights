@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -242,21 +242,49 @@ def win_probabilities(home: float | None, draw: float | None, away: float | None
     return raw[0] / total, raw[1] / total, raw[2] / total
 
 
+@dataclass(frozen=True)
+class ExpectationWeights:
+    """How the parts of the expected points are weighed. Learned weekly from the real points
+    (see `core.learning.fit_expectation`), these are the starting values."""
+    form: float = FORM_SHARE
+    average: float = 1 - FORM_SHARE
+    win: float = WIN_SLOPE
+    table: float = OPPONENT_SPREAD
+    rows: int = 0
+    error: float | None = None # Mean absolute error of these weights on the data they were fitted on
+    default_error: float | None = None # ... and of the starting values
+
+    @property
+    def learned(self) -> bool:
+        return self.rows > 0
+
+
+def table_term(placement: int | None, teams: int) -> float:
+    """-1 against the top of the table, +1 against the bottom, 0 when unknown."""
+    if placement is None or teams <= 1:
+        return 0.0
+    return 2 * (placement - 1) / (teams - 1) - 1
+
+
 def expected_points(
     player: FormInput,
     fixture: FixtureInfo | None,
     placements: Mapping[str, int | None],
     win_probability: float | None = None,
+    weights: ExpectationWeights | None = None,
 ) -> Expectation:
     """The points a player is expected to score on the next matchday. No match means no points."""
+    w = weights or ExpectationWeights()
     reasons: list[str] = []
     played = [m.points for m in player.recent if m.played]
     form = form_points(played)
     average = float(player.average_points) if player.average_points is not None else None
     if form is not None and average is not None:
-        base = FORM_SHARE * form + (1 - FORM_SHARE) * average
+        base = w.form * form + w.average * average
+    elif form is not None or average is not None:
+        base = (form if form is not None else average or 0.0) * (w.form + w.average)
     else:
-        base = form if form is not None else average or 0.0
+        base = 0.0
 
     chance = play_probability(player.recent)
     if chance is not None and chance < 0.5:
@@ -277,11 +305,14 @@ def expected_points(
     else:
         home = fixture.team1_id == player.team_id
         opponent_id = fixture.team2_id if home else fixture.team1_id
+        low, high = FACTOR_RANGE
         if win_probability is not None:
-            factor = odds_factor(win_probability)
+            factor = max(low, min(high, 1 + w.win * (win_probability - TYPICAL_WIN)))
         else:
             teams = max((v for v in placements.values() if v is not None), default=18)
-            factor = opponent_factor(placements.get(opponent_id or ""), max(teams, 2), home)
+            term = table_term(placements.get(opponent_id or ""), max(teams, 2))
+            factor = 1 + w.table * term + (HOME_BONUS if home else -HOME_BONUS)
+            factor = max(low, min(high, factor))
 
     expected = max(base, 0.0) * (chance if chance is not None else 1.0) * availability * factor
     return Expectation(
@@ -747,30 +778,49 @@ def _quantile(values: Sequence[float], q: float) -> float:
     return ordered[min(len(ordered) - 1, int(q * len(ordered)))]
 
 
+def bidder_features(profile: BidderProfile, position: int, market_value: int) -> list[float]:
+    """need, interest in the price class, activity, squad full: what the learned model weighs."""
+    same_class = [v for v in profile.purchase_values if price_class(v) == price_class(market_value)]
+    return [
+        position_need(profile, position),
+        min(1.0, len(same_class) / 4),
+        min(1.0, profile.purchases_recent / 3),
+        1.0 if profile.squad_size >= profile.max_squad else 0.0,
+    ]
+
+
 def estimate_bidder(
-    profile: BidderProfile, position: int, market_value: int, price: int, can_buy_club: bool, max_bid: int | None,
+    profile: BidderProfile,
+    position: int,
+    market_value: int,
+    price: int,
+    can_buy_club: bool,
+    max_bid: int | None,
     league_shares: Sequence[float] = (),
+    learned: Callable[[Sequence[float]], float] | None = None,
 ) -> BidderEstimate:
-    """How likely a manager bids for a player and what he would bid."""
+    """How likely a manager bids for a player and what he would bid. With a `learned` model the
+    chance comes from the logged auctions instead of the starting weights."""
     reasons: list[str] = []
     if not can_buy_club:
         return BidderEstimate(profile.manager_id, 0.0, None, 0.0, ("3 Spieler vom Verein",))
     if max_bid is not None and max_bid < price:
         return BidderEstimate(profile.manager_id, 0.0, None, 0.0, ("zu wenig Budget",))
 
-    need = position_need(profile, position)
-    same_class = [v for v in profile.purchase_values if price_class(v) == price_class(market_value)]
-    interest = min(1.0, len(same_class) / 4)
-    activity = min(1.0, profile.purchases_recent / 3)
-    probability = 0.1 + 0.35 * need + 0.3 * interest + 0.25 * activity
+    need, interest, activity, full = bidder_features(profile, position, market_value)
+    if learned is not None:
+        probability = learned([need, interest, activity, full])
+    else:
+        probability = 0.1 + 0.35 * need + 0.3 * interest + 0.25 * activity
+        if full:
+            probability *= 0.5
     if need >= 0.5:
         reasons.append("braucht die Position")
     if interest >= 0.5:
         reasons.append("kauft oft in der Preisklasse")
     if activity >= 0.67:
         reasons.append("gerade sehr aktiv")
-    if profile.squad_size >= profile.max_squad:
-        probability *= 0.5
+    if full:
         reasons.append("Kader voll")
 
     shares = profile.overpay_shares if len(profile.overpay_shares) >= 3 else tuple(league_shares)
@@ -799,6 +849,7 @@ def bid_range(
     bidders: Sequence[BidderEstimate],
     gain_to_matchday: int | None,
     own_max_bid: int | None = None,
+    lost_gap: float | None = None,
 ) -> BidRange:
     """The bid to place: at least the asking price and the league's usual markup, at most enough to
     beat the likely bidders."""
@@ -807,6 +858,9 @@ def bid_range(
     low = max(floor, math.ceil(market_value * (1 + max(usual, 0)) / BID_STEP) * BID_STEP)
     likely = [b for b in bidders if b.probability >= LIKELY and b.expected_bid]
     high = max([low, *(b.expected_bid + BID_STEP for b in likely if b.expected_bid)])
+    ### Learned from lost auctions: winners paid this much more than the own bid in this price class
+    if lost_gap:
+        high = max(high, math.ceil(low * (1 + lost_gap) / BID_STEP) * BID_STEP)
     if own_max_bid is not None:
         high = min(high, max(own_max_bid, floor))
         low = min(low, high)

@@ -98,7 +98,9 @@ class Earned:
     amount: int
 
 
-def evaluate(season: ManagerSeason) -> list[Earned]:
+def evaluate(season: ManagerSeason, per_player: bool = False) -> list[Earned]:
+    """`per_player`: the player achievements count every player of the eleven above the threshold,
+    otherwise once per matchday. Which one Kickbase does is learned (see core.learning.mode_votes)."""
     wins = sum(1 for _, _, placement, _ in season.matchdays if placement == 1)
     day_points = [p for _, p, _, _ in season.matchdays if p is not None]
     best_value = max((v for _, _, _, v in season.matchdays if v), default=0)
@@ -116,6 +118,8 @@ def evaluate(season: ManagerSeason) -> list[Earned]:
         if k.startswith("season_"):
             return int(season.season_points >= t)
         if k.startswith("player_"):
+            if per_player:
+                return sum(1 for points in lineups for p in points if p >= t)
             return sum(1 for points in lineups if points and max(points) >= t)
         if k == "goals":
             return None

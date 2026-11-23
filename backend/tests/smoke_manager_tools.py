@@ -90,6 +90,14 @@ def main() -> None:
         check(any(p["dayPoints"] is not None for p in past.json()["squad"]), "day points of a past matchday")
         check(client.get("/api/managers/9999/detail").status_code == 404, "unknown manager is 404")
 
+        learned = client.get("/api/learning")
+        check(learned.status_code == 200, f"learning ({learned.status_code} {learned.text[:300]})")
+        lj = learned.json()
+        check(lj["expectation"].get("historyRows", 0) > 0, f"expected points learned from {lj['expectation'].get('historyRows')} past matches")
+        check(lj["auctionsLogged"] > 0, f"{lj['auctionsLogged']} auctions logged")
+        check(len(lj["achievements"]) == 36, "achievement check lists every rule")
+        check("balanceCorrection" in lj, "balance correction reported")
+
         buys = client.get("/api/planner/buys")
         check(buys.status_code == 200, f"buy planner ({buys.status_code} {buys.text[:300]})")
         check(len(buys.json()) > 0, f"buy planner has {len(buys.json())} options")

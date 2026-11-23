@@ -171,6 +171,7 @@ class MarketPlayerOut(PlayerOut):
     next_home: bool | None = None
     odds: list[float | None] | None = None # Home, draw, away of his next match
     seller_in_minus: bool = False # The selling manager is estimated below zero
+    bidders_learned: bool = False # The bidder chances come from the logged auctions
 
 
 class LostAuctionOut(Schema):
@@ -596,6 +597,7 @@ class CoachOut(Schema):
     sell_advice: list[SellAdviceOut] = []
     league_forecast: list[LeagueForecastOut] = []
     updates_to_matchday: int = 0
+    sell_ratio: float | None = None # What Kickbase paid for instant sales against the market value
 
 
 class LineupApplyOut(Schema):
@@ -739,3 +741,30 @@ class ManagerDetailOut(Schema):
     season: list[SeasonPointOut] = []
     team_values: list[tuple[str, int]] = [] # (date, value) every evening
     matchday_dates: list[tuple[int, str]] = [] # (matchday, date of its first kick-off)
+
+
+class BalanceCorrectionOut(Schema):
+    amount: int # Added to every estimated balance
+    members: int # Members whose real budget it was learned from
+    residuals: list[int] = []
+
+
+class AchievementCheckOut(Schema):
+    key: str
+    name: str
+    kickbase: int | None = None # Kickbase's counter (all seasons of the league)
+    app: int | None = None # What the app counts for this season
+
+
+class LearningOut(Schema):
+    expectation: dict = {}
+    expectation_logged: int = 0
+    expectation_checked: int = 0
+    bidder: dict = {}
+    auctions_logged: int = 0
+    auctions_resolved: int = 0
+    achievement_mode: dict = {}
+    sell_ratio: dict = {}
+    balance_correction: BalanceCorrectionOut | None = None
+    achievements: list[AchievementCheckOut] = []
+    achievements_checked_at: datetime | None = None

@@ -383,3 +383,58 @@ class MatchdayLineup(SQLModel, table=True):
     day: int = Field(primary_key=True)
     manager_id: str = Field(primary_key=True)
     players: list = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+
+
+### ===============================================================================
+### Learning
+### ===============================================================================
+
+class ModelState(SQLModel, table=True):
+    """What the app learned, e.g. "expectation" weights, "bidder" model, "achievement_mode"."""
+    key: str = Field(primary_key=True)
+    data: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    updated_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+
+
+class ExpectationLog(SQLModel, table=True):
+    """The expected points of a player for a matchday as known before it, and later what he scored."""
+    competition_id: int = Field(primary_key=True)
+    day: int = Field(primary_key=True)
+    player_id: str = Field(primary_key=True)
+    expected: float = 0
+    form: float | None = None
+    average: float | None = None
+    chance: float = 1 # Chance to play times availability
+    win: float | None = None
+    table: float = 0
+    home: bool | None = None
+    actual: int | None = None
+    logged_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+
+
+class AchievementSnapshot(SQLModel, table=True):
+    """The user's own achievement counters as Kickbase reports them, taken after every sync."""
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True)
+    league_id: str = Field(index=True)
+    at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+    last_final_day: int | None = None # The last finished matchday at that moment
+    counts: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    raw: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+
+
+class AuctionLog(SQLModel, table=True):
+    """A listing with what every manager looked like when it appeared, and who got the player."""
+    league_id: str = Field(primary_key=True)
+    player_id: str = Field(primary_key=True)
+    listed_at: datetime = Field(primary_key=True, sa_type=UTCDateTime)
+    seller_id: str | None = None
+    market_value: int = _money(0)
+    price: int | None = _money()
+    position: int = 0
+    team_id: str | None = None
+    ### Per manager: need, interest, activity, squad_full, can_buy, affordable
+    candidates: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    winner_id: str | None = None
+    final_price: int | None = _money()
+    resolved: bool = False

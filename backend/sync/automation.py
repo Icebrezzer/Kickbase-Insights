@@ -63,6 +63,8 @@ from db.models import (
 )
 from kickbase import KickbaseAuthError, KickbaseClient, KickbaseError
 from kickbase import models as kb
+from sync.learning import LearningService
+from sync.learning import sell_ratio as learned_sell_ratio
 from sync.odds import OddsService
 from sync.push import PushService
 
@@ -135,6 +137,7 @@ class AutomationService:
         self, settings: Settings, engine: Engine, accounts: Accounts, push: PushService, odds: OddsService | None = None
     ):
         self.odds = odds
+        self.learning = LearningService(settings, engine)
         self._last_market_watch: dict[str, datetime] = {}
         self.settings = settings
         self.engine = engine
@@ -349,6 +352,10 @@ class AutomationService:
             pid: [(int(m[4]), int(m[1])) for m in matches if len(m) > 4 and m[4] is not None]
             for pid, matches in rows
         }
+
+    def _sell_ratio(self) -> float | None:
+        with Session(self.engine) as session:
+            return learned_sell_ratio(session)
 
     def _forecasts_for(self, player_ids: list[str], horizon: int) -> dict[str, coach.Forecast]:
         with Session(self.engine) as session:
@@ -659,11 +666,12 @@ class AutomationService:
         real_budget = budget.budget
 
         rescue = None
+        ratio = await asyncio.to_thread(self._sell_ratio)
         if real_budget is not None and real_budget < 0:
             plan = coach.rescue_sales(
                 real_budget,
                 [
-                    coach.SellCandidate(p.id, p.position, expectations[p.id].expected, p.market_value)
+                    coach.SellCandidate(p.id, p.position, expectations[p.id].expected, int(p.market_value * (ratio or 1.0)))
                     for p in squad.players
                 ],
             )
@@ -751,6 +759,7 @@ class AutomationService:
             sell_advice=advice,
             league_forecast=league_forecast,
             updates_to_matchday=updates,
+            sell_ratio=ratio,
         )
 
     def _checks(self, budget, saved, best, saved_expected, expectations, stored, squad, upcoming, live) -> list[CheckOut]:
@@ -987,6 +996,20 @@ class AutomationService:
                 except KickbaseError as e:
                     log.warning("Forms or odds of %s not refreshed: %s", league.name, e)
             await self.refresh_model(force=refreshed > 50)
+            await asyncio.to_thread(self.learning.after_sync, league)
+            ### Kickbase's own achievement counters of everybody who can be asked, to learn the rules
+            for member in await asyncio.to_thread(self.accounts.member_clients, league_id):
+                user = member.user
+                if user is not None:
+                    try:
+                        await self.learning.snapshot_achievements(league, user.id, member)
+                    except KickbaseError as e:
+                        log.info("Achievements of %s not read: %s", user.id, e)
+            if self.accounts.service is not None and self.accounts.service_user_id:
+                try:
+                    await self.learning.snapshot_achievements(league, self.accounts.service_user_id, self.accounts.service)
+                except KickbaseError as e:
+                    log.info("Achievements of the server account not read: %s", e)
             for row in rows:
                 client = self.client_for_user(row.user_id)
                 if client is None:

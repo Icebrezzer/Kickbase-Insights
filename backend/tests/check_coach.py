@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core import achievements as a  # noqa: E402
 from core import coach as c  # noqa: E402
+from core import learning as ln  # noqa: E402
 
 
 def t(day: int, hour: int, minute: int = 0) -> datetime:
@@ -172,6 +173,45 @@ def main() -> None:
     assert by_group["Transferkönig"] == 750_000, by_group
     assert a.total(list(earned.values())) == sum(by_group.values())
     assert a.mvp_days({1: ["x", "y"], 2: ["z"]}, {1: {"y"}, 2: {"q"}}) == 1
+
+    ### Learning: expected points weights are recovered from points made with known weights
+    truth = c.ExpectationWeights(form=0.8, average=0.2, win=0.6, table=0.1)
+    rows = []
+    for _ in range(1500):
+        form, average = rng.uniform(20, 250), rng.uniform(30, 200)
+        win = rng.choice([None, rng.uniform(0.1, 0.8)])
+        row = ln.ExpectationRow(form, average, rng.choice([1.0, 0.8, 0.5]), win, rng.uniform(-1, 1), rng.choice([True, False]), 0)
+        actual = ln.predict(row, truth) + rng.gauss(0, 15)
+        rows.append(ln.ExpectationRow(row.form, row.average, row.chance, row.win, row.table, row.home, int(actual)))
+    fitted = ln.fit_expectation(rows)
+    assert fitted.learned and abs(fitted.form - 0.8) < 0.1 and abs(fitted.average - 0.2) < 0.1, fitted
+    assert fitted.error is not None and fitted.default_error is not None and fitted.error < fitted.default_error
+    assert not ln.fit_expectation(rows[:100]).learned
+    matches = [[d, p, 90, 5] for d, p in zip(range(1, 9), (100, 120, 80, 150, 0, 200, 90, 110), strict=True)]
+    history = ln.history_rows(matches, {d: ("3", d % 2 == 0) for d in range(1, 9)}, {"3": 18})
+    assert len(history) == 5 and history[0].actual == 150 and history[0].table == 1.0
+
+    ### Learning: the bidder model finds that need decides who wins
+    samples = []
+    for _ in range(400):
+        need = rng.random()
+        samples.append(([need, rng.random(), rng.random(), 0.0], 1 if rng.random() < need * 0.8 else 0))
+    bidders = ln.fit_bidders(samples, auctions=80)
+    assert bidders.learned and bidders.weights[0] > 1, bidders
+    assert bidders.probability([1, 0.5, 0.5, 0]) > bidders.probability([0, 0.5, 0.5, 0])
+    assert not ln.fit_bidders(samples, auctions=10).learned
+
+    ### Learning: achievements, sales, lost auctions
+    counts = ln.parse_achievement_counts({"it": [{"n": "Topscorer (100 Tsd.)", "c": 9}, {"ti": "MVP", "cnt": 3}]})
+    assert counts == {"Topscorer (100 Tsd.)": 9, "MVP": 3}, counts
+    assert ln.rule_for("Topscorer (100 Tsd.)") == "player_200" and ln.rule_for("Spieltagssieger Gold") == "md_win_10"
+    assert ln.mode_votes({"player_200": 3}, {"player_200": 2}, {"player_200": 3}) == (0, 1)
+    assert ln.mode_votes({"player_200": 2}, {"player_200": 2}, {"player_200": 3}) == (1, 0)
+    assert ln.mode_votes({"player_200": 1}, {"player_200": 1}, {"player_200": 1}) == (0, 0)
+    assert ln.sell_ratio([(9_500_000, 10_000_000), (4_800_000, 5_000_000)]) == 0.955
+    assert ln.lost_gaps([(6_000_000, 6_000_000, 6_600_000), (7_000_000, 7_000_000, 7_350_000)]) == {1: 0.075}
+    raised = c.bid_range(6_000_000, 6_000_000, [0.03], [], None, None, lost_gap=0.2)
+    assert raised.high >= raised.low * 1.19, raised
 
     print("All coach checks passed.")
 

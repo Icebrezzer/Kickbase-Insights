@@ -41,7 +41,10 @@ from api.schemas import (
     BalancePointOut,
     BuyOptionOut,
     LostAuctionOut,
+    AchievementCheckOut,
     AchievementOut,
+    BalanceCorrectionOut,
+    LearningOut,
     ManagerDetailOut,
     ManagerSquadPlayerOut,
     SeasonPointOut,
@@ -51,8 +54,9 @@ from api.schemas import (
     TurnoverOut,
     WatchedPlayerOut,
 )
-from core import achievements, analytics, coach
+from core import achievements, analytics, coach, learning
 from db.models import (
+    AchievementSnapshot,
     BidHistory,
     Battle,
     BattleEntry,
@@ -73,6 +77,15 @@ from db.models import (
     UserLeague,
 )
 from kickbase.models import ScoutedPlayer
+from sync.learning import achievement_mode, bidder_model
+
+
+### Overpay is read from the purchases of the last weeks once there are enough of them
+RECENT_DAYS = 45
+### The balance correction never moves an estimate further than this
+MAX_CORRECTION = 25_000_000
+MIN_RECENT = 5
+MIN_RECENT_LEAGUE = 10
 
 
 class Insights:
@@ -94,6 +107,7 @@ class Insights:
         self._form_rows: dict[str, list] | None = None
         self._estimates: dict[str, int] | None = None
         self._prizes: dict[str, int] | None = None
+        self._correction: BalanceCorrectionOut | None = None
         ### Empty until the first sync after an update has stored it
         self.season = session.get(LeagueSeason, league.id) or LeagueSeason(league_id=league.id)
 
@@ -155,11 +169,30 @@ class Insights:
             events = analytics.transfer_events(self._transfer_records())
             start_money = self.season.start_money or analytics.DEFAULT_START_MONEY
             prizes = self.achievement_totals()
-            self._estimates = {
+            raw = {
                 m.id: analytics.estimate_balance(m.id, events, start_money) + prizes.get(m.id, 0)
                 for m in self._managers()
             }
+            correction = self.balance_correction(raw)
+            self._estimates = {mid: value + correction.amount for mid, value in raw.items()}
+            self._correction = correction
         return self._estimates
+
+    def balance_correction(self, raw: dict[str, int]) -> BalanceCorrectionOut:
+        """What the estimates miss (login bonuses, wrong achievements), learned from the members whose
+        real budget is known: the median of real minus estimated, added to everybody's estimate."""
+        fresh_since = datetime.now(UTC) - timedelta(days=2)
+        known = [
+            (m.user_id, m.budget)
+            for m in self.session.exec(select(UserLeague).where(UserLeague.league_id == self.league_id))
+            if m.budget is not None and m.budget_updated_at is not None and m.budget_updated_at >= fresh_since
+        ]
+        residuals = [budget - raw[uid] for uid, budget in known if uid in raw]
+        if not residuals:
+            return BalanceCorrectionOut(amount=0, members=0)
+        amount = int(median(residuals))
+        amount = max(-MAX_CORRECTION, min(MAX_CORRECTION, amount))
+        return BalanceCorrectionOut(amount=amount, members=len(residuals), residuals=sorted(residuals))
 
     def balances(self) -> dict[str, tuple[int, int]]:
         """Per manager the balance and the highest possible bid. The viewer's own come from the real
@@ -228,7 +261,9 @@ class Insights:
         names = self._manager_names()
         turnovers = [t for t in self.turnovers() if t.manager_id == manager_id or t.manager == manager_id]
         own_purchases = [p for p in self._purchases() if p.transfer.buyer == manager_id]
-        earned = achievements.evaluate(self.achievement_seasons()[manager_id])
+        earned = achievements.evaluate(
+            self.achievement_seasons()[manager_id], achievement_mode(self.session) == "player"
+        )
         shown = balances or manager_id == self.viewer_id
         money = self.balances().get(manager_id) if shown else None
         clubs = Counter(p.team_id for p in squad_out if p.team_id)
@@ -394,10 +429,41 @@ class Insights:
             )
         return result
 
+    def learning_view(self, status: dict) -> LearningOut:
+        """What the app has learned, with the viewer's own achievements next to Kickbase's counters."""
+        self.estimated_balances()
+        checks: list[AchievementCheckOut] = []
+        checked_at = None
+        if self.viewer_id:
+            snapshot = self.session.exec(
+                select(AchievementSnapshot)
+                .where(AchievementSnapshot.user_id == self.viewer_id, AchievementSnapshot.league_id == self.league_id)
+                .order_by(AchievementSnapshot.at.desc())
+            ).first()
+            season = self.achievement_seasons().get(self.viewer_id)
+            if season is not None:
+                own = {
+                    e.rule.key: e
+                    for e in achievements.evaluate(season, achievement_mode(self.session) == "player")
+                }
+                for rule in achievements.RULES:
+                    kickbase = snapshot.counts.get(rule.key) if snapshot else None
+                    checks.append(
+                        AchievementCheckOut(key=rule.key, name=rule.name, kickbase=kickbase, app=own[rule.key].count)
+                    )
+            checked_at = snapshot.at if snapshot else None
+        return LearningOut(
+            **status,
+            balance_correction=self._correction,
+            achievements=checks,
+            achievements_checked_at=checked_at,
+        )
+
     def achievement_totals(self) -> dict[str, int]:
         if self._prizes is None:
+            per_player = achievement_mode(self.session) == "player"
             self._prizes = {
-                mid: achievements.total(achievements.evaluate(season))
+                mid: achievements.total(achievements.evaluate(season, per_player))
                 for mid, season in self.achievement_seasons().items()
             }
         return self._prizes
@@ -572,8 +638,13 @@ class Insights:
             if status in coach.STATUS_AVAILABILITY:
                 fit_positions[entry.manager_id][position] += 1
         result = {}
+        recent_cut = datetime.now(UTC) - timedelta(days=RECENT_DAYS)
         for manager in self._managers():
             own = [p for p in purchases if p.transfer.buyer == manager.id]
+            ### Prices rise during a season: the recent purchases count when there are enough of them
+            fresh = [p for p in own if p.transfer.date >= recent_cut]
+            if len(fresh) >= MIN_RECENT:
+                own = fresh
             result[manager.id] = coach.BidderProfile(
                 manager_id=manager.id,
                 overpay_shares=tuple(p.overpay_share for p in own),
@@ -606,7 +677,13 @@ class Insights:
         purchases = self._purchases()
         ### Advice comes from others only
         rival_purchases = [p for p in purchases if p.transfer.buyer != self.viewer_id]
-        league_shares = [p.overpay_share for p in rival_purchases]
+        recent_cut = datetime.now(UTC) - timedelta(days=RECENT_DAYS)
+        fresh = [p for p in rival_purchases if p.transfer.date >= recent_cut]
+        league_shares = [p.overpay_share for p in (fresh if len(fresh) >= MIN_RECENT_LEAGUE else rival_purchases)]
+        learned = bidder_model(self.session)
+        gaps = learning.lost_gaps(
+            (a.own_bid, a.own_bid, a.price) for a in self.lost_auctions() if a.date >= recent_cut
+        )
         clubs = self._club_counts()
         managers = {m.id: m for m in self._managers()}
         squad_sizes = Counter(e.manager_id for e in squad.values())
@@ -637,6 +714,7 @@ class Insights:
                     clubs.can_buy(mid, player.team_id),
                     money[mid][1] if balances and mid in money else None,
                     league_shares,
+                    learned.probability if learned.learned else None,
                 )
                 if estimate.probability > 0:
                     estimates.append(estimate)
@@ -645,7 +723,15 @@ class Insights:
             prediction = coach.forecast(histories.get(player.id) or [], self.model, max(updates, 1), matches)
             gain = prediction.projection[updates - 1] if prediction and updates > 0 else None
             margin = None if gain is None else gain - max(price - player.market_value, 0)
-            bids = coach.bid_range(player.market_value, price, league_shares, estimates, gain, own_max_bid)
+            bids = coach.bid_range(
+                player.market_value,
+                price,
+                league_shares,
+                estimates,
+                gain,
+                own_max_bid,
+                gaps.get(coach.price_class(player.market_value)),
+            )
             own_club = clubs.of(self.viewer_id or "", player.team_id)
             expectation = context.expectation(player.id, player.position, player.status, player.team_id, player.average_points)
             fixture = context.fixture_of(player.team_id)
@@ -696,6 +782,7 @@ class Insights:
                     next_opponent_id=expectation.opponent_id,
                     next_home=expectation.home,
                     odds=list(odds) if odds else None,
+                    bidders_learned=learned.learned,
                     seller_in_minus=bool(
                         balances and listing.seller_id in money and money[listing.seller_id][0] < 0
                     ),

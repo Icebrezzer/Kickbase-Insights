@@ -69,7 +69,7 @@ function MatchdayView({ coach }: { coach: Coach }) {
 
       <SquadCard coach={coach} onSell={setSelling} />
 
-      <SellDialog player={selling} budget={coach.budget} onClose={() => setSelling(null)} />
+      <SellDialog player={selling} budget={coach.budget} ratio={coach.sellRatio} onClose={() => setSelling(null)} />
     </div>
   )
 }
@@ -321,7 +321,17 @@ function SquadCard({ coach, onSell }: { coach: Coach; onSell: (p: SquadPlayer) =
   )
 }
 
-function SellDialog({ player, budget, onClose }: { player: SquadPlayer | null; budget: number | null; onClose: () => void }) {
+function SellDialog({
+  player,
+  budget,
+  ratio,
+  onClose,
+}: {
+  player: SquadPlayer | null
+  budget: number | null
+  ratio: number | null
+  onClose: () => void
+}) {
   const sell = useSell()
   const confirm = async () => {
     if (!player) return
@@ -339,7 +349,8 @@ function SellDialog({ player, budget, onClose }: { player: SquadPlayer | null; b
           <h2 className="pr-10 text-lg font-semibold">{playerName(player)} sofort verkaufen?</h2>
           <p className="text-sm text-muted">
             Der Spieler geht sofort an Kickbase. Das lässt sich <strong className="text-fg">nicht rückgängig machen</strong>. Marktwert: {money(player.marketValue)}
-            {budget != null && <> · Budget danach ca. {compactMoney(budget + player.marketValue)}</>}.
+            {ratio != null && <> · Kickbase zahlte bisher ca. {Math.round(ratio * 100)} % davon</>}
+            {budget != null && <> · Budget danach ca. {compactMoney(budget + Math.round(player.marketValue * (ratio ?? 1)))}</>}.
           </p>
           {player.inLineup && <p className="text-sm text-warn">Er steht in deiner Startelf – die Lücke wird bei aktivierter Automatik neu besetzt.</p>}
           {sell.error && <p className="text-sm text-down">{sell.error.message}</p>}

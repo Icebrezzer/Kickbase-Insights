@@ -5,11 +5,18 @@
 
 import { Bell, BellOff, CheckCircle2, Smartphone, XCircle } from "lucide-react"
 import { type ReactNode, useEffect, useState } from "react"
-import { useAutomationEvents, useAutomationSettings, useForecastQuality, usePushKey, useSaveAutomation } from "@/api/hooks"
+import {
+  useAutomationEvents,
+  useAutomationSettings,
+  useForecastQuality,
+  useLearning,
+  usePushKey,
+  useSaveAutomation,
+} from "@/api/hooks"
 import type { AutomationSettings } from "@/api/types"
 import { Badge, Button, Card, CardHeader, EmptyState, PageHeader, QueryState, Stat } from "@/components/ui"
 import { cn } from "@/lib/cn"
-import { dateTime, number, share } from "@/lib/format"
+import { compactMoney, dateTime, decimal, number, share } from "@/lib/format"
 import { currentSubscription, disablePush, enablePush, isIos, isStandalone, pushSupported, testPush } from "@/lib/push"
 
 export default function Automation() {
@@ -21,6 +28,7 @@ export default function Automation() {
         <PushCard />
         <QueryState query={settings}>{(data) => <SettingsCard initial={data} />}</QueryState>
         <ForecastCard />
+        <LearningCard />
         <EventsCard />
       </div>
     </>
@@ -240,6 +248,80 @@ function ForecastCard() {
             <Stat label="Treffer bei Transferzielen" value={share(q.flagPrecision)} hint="Prognose ≥ Schwelle und wirklich gestiegen" />
           </div>
         )}
+      </QueryState>
+    </Card>
+  )
+}
+
+function LearningCard() {
+  const query = useLearning()
+  return (
+    <Card>
+      <CardHeader title="Lernstand" description="Was die App aus den Daten deiner Liga gelernt hat. Alles passt sich laufend selbst an." />
+      <QueryState query={query}>
+        {(l) => {
+          const e = l.expectation
+          const mode = l.achievementMode.mode ?? "matchday"
+          const compared = l.achievements.filter((a) => a.kickbase != null)
+          return (
+            <div className="space-y-4 p-4 sm:p-5">
+              <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+                <Stat
+                  label="Erwartete Punkte"
+                  value={e.rows ? "gelernt" : "Startwerte"}
+                  hint={
+                    e.error != null && e.defaultError != null
+                      ? `Fehler ${decimal(e.error)} statt ${decimal(e.defaultError)} Pkt. · ${number((e.historyRows ?? 0) + (e.loggedRows ?? 0))} Spiele`
+                      : `${number(e.historyRows ?? 0)} vergangene Spiele, ${number(l.expectationChecked)} geprüfte Vorhersagen`
+                  }
+                />
+                <Stat
+                  label="Gewichte"
+                  value={`${decimal((e.form ?? 0.6) * 100)} / ${decimal((e.average ?? 0.4) * 100)}`}
+                  hint={`Form / Schnitt · Quoten ${decimal(e.win ?? 0.4)} · Tabelle ${decimal(e.table ?? 0.15)}`}
+                />
+                <Stat
+                  label="Bieter-Modell"
+                  value={l.bidder.weights?.length ? "gelernt" : `${l.auctionsResolved} / 50`}
+                  hint={l.bidder.weights?.length ? `aus ${l.bidder.auctions} Auktionen` : `Auktionen ausgewertet, ${l.auctionsLogged} erfasst`}
+                />
+                <Stat
+                  label="Budget-Korrektur"
+                  value={l.balanceCorrection?.members ? compactMoney(l.balanceCorrection.amount) : "–"}
+                  hint={l.balanceCorrection?.members ? `aus ${l.balanceCorrection.members} echten Kontoständen` : "braucht einen echten Kontostand"}
+                />
+                <Stat
+                  label="Sofortverkauf"
+                  value={l.sellRatio.ratio ? share(l.sellRatio.ratio) : "–"}
+                  hint={l.sellRatio.ratio ? `vom Marktwert, aus ${l.sellRatio.sales} Verkäufen` : "lernt beim ersten Verkauf"}
+                />
+                <Stat
+                  label="Spieler-Erfolge"
+                  value={mode === "player" ? "je Spieler" : "je Spieltag"}
+                  hint={`Stimmen ${l.achievementMode.votesMatchday ?? 0} : ${l.achievementMode.votesPlayer ?? 0} (Spieltag : Spieler)`}
+                />
+              </div>
+              {compared.length > 0 && (
+                <div>
+                  <div className="mb-1.5 text-xs font-medium text-muted">
+                    Deine Erfolge: Kickbase-Zähler (alle Saisons) und App (diese Saison)
+                    {l.achievementsCheckedAt && ` · Stand ${dateTime(l.achievementsCheckedAt)}`}
+                  </div>
+                  <div className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+                    {compared.map((a) => (
+                      <div key={a.key} className="flex justify-between gap-3">
+                        <span className="truncate">{a.name}</span>
+                        <span className={cn("tabular-nums", a.app != null && a.kickbase != null && a.app > a.kickbase && "text-warn")}>
+                          {a.kickbase} / {a.app ?? "–"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        }}
       </QueryState>
     </Card>
   )

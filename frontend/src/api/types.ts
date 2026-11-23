@@ -474,6 +474,7 @@ export type Coach = {
     unavailable: number
   }[]
   updatesToMatchday: number
+  sellRatio: number | null
 }
 
 export type LineupApplied = { formation: string; playerIds: string[]; confirmed: boolean; response: string | null }
@@ -620,4 +621,28 @@ export type ManagerDetail = {
   season: { day: number; points: number | null; seasonPoints: number | null; placement: number | null }[]
   teamValues: [string, number][]
   matchdayDates: [number, string][]
+}
+
+export type Learning = {
+  expectation: {
+    form?: number
+    average?: number
+    win?: number
+    table?: number
+    rows?: number
+    error?: number | null
+    defaultError?: number | null
+    loggedRows?: number
+    historyRows?: number
+  }
+  expectationLogged: number
+  expectationChecked: number
+  bidder: { weights?: number[]; bias?: number; auctions?: number }
+  auctionsLogged: number
+  auctionsResolved: number
+  achievementMode: { mode?: "matchday" | "player"; votesMatchday?: number; votesPlayer?: number }
+  sellRatio: { ratio?: number; sales?: number }
+  balanceCorrection: { amount: number; members: number; residuals: number[] } | null
+  achievements: { key: string; name: string; kickbase: number | null; app: number | null }[]
+  achievementsCheckedAt: string | null
 }

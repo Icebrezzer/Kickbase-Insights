@@ -9,7 +9,7 @@ from datetime import datetime
 from sqlmodel import Session, select
 
 from core import analytics, coach
-from db.models import Fixture, MatchOdds, PlayerForm, Team
+from db.models import Fixture, MatchOdds, ModelState, PlayerForm, Team
 
 
 @dataclass
@@ -20,6 +20,7 @@ class MatchContext:
     odds: dict[str, tuple[float | None, float | None, float | None]] = field(default_factory=dict)
     upcoming: coach.Matchday | None = None
     day: int = 0
+    weights: coach.ExpectationWeights = field(default_factory=coach.ExpectationWeights)
 
     def fixture_of(self, team_id: str | None) -> coach.FixtureInfo | None:
         return coach.next_fixture_of(team_id, self.fixtures, self.day)
@@ -55,7 +56,9 @@ class MatchContext:
     ) -> coach.Expectation:
         fixture = self.fixture_of(team_id)
         form = coach.FormInput(player_id, position, status, team_id, average_points, self.recent(player_id)[:5])
-        return coach.expected_points(form, fixture, self.placements, self.win_probability(fixture, team_id))
+        return coach.expected_points(
+            form, fixture, self.placements, self.win_probability(fixture, team_id), self.weights
+        )
 
 
 def load_context(
@@ -80,7 +83,17 @@ def load_context(
         for o in session.exec(select(MatchOdds).where(MatchOdds.match_id.in_(match_ids)))
         if o.home and o.away
     }
-    return MatchContext(fixtures, placements, forms, odds, upcoming, day)
+    return MatchContext(fixtures, placements, forms, odds, upcoming, day, learned_weights(session))
+
+
+def learned_weights(session: Session) -> coach.ExpectationWeights:
+    """The expected points weights learned from the real points (sync.learning), if any."""
+    row = session.get(ModelState, "expectation")
+    data = row.data if row else {}
+    if not data or not data.get("rows"):
+        return coach.ExpectationWeights()
+    fields = coach.ExpectationWeights.__dataclass_fields__
+    return coach.ExpectationWeights(**{k: v for k, v in data.items() if k in fields})
 
 
 def match_day_of(kickoff: datetime) -> int:
