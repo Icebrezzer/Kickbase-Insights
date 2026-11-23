@@ -276,6 +276,7 @@ class DemoLeague:
         self.lineups = {
             mid: self._lineup(rng, [entry[0] for entry in squad]) for mid, squad in self.squads.items()
         }
+        self.formations: dict[str, str | None] = {}
         self.rankings: dict[int, list[dict]] = {}
         totals = dict.fromkeys(member_ids, 0)
         for day in range(1, CURRENT_DAY + 1):
@@ -586,6 +587,42 @@ class DemoWorld:
                 return httpx.Response(403, json={"err": "not a member"})
             body = json.loads(request.content or b"{}") if request.method == "POST" else {}
             return league.offer(request.method, user_id, offer.group(2), offer.group(3), body)
+
+        sell = re.fullmatch(r"/v4/leagues/(\w+)/market/(\w+)/sell", path)
+        if sell and request.method == "POST":
+            league = self.leagues.get(sell.group(1))
+            if league is None or user_id not in dict(league.managers):
+                return httpx.Response(403, json={"err": "not a member"})
+            squad = league.squads[user_id]
+            entry = next((e for e in squad if e[0] == sell.group(2)), None)
+            if entry is None:
+                return httpx.Response(400, json={"err": "not your player"})
+            squad.remove(entry)
+            league.budgets[user_id] += self.players[entry[0]].market_value
+            league.lineups[user_id] = [pid if pid != entry[0] else None for pid in league.lineups[user_id]]
+            return httpx.Response(200, json={})
+
+        lineup = re.fullmatch(r"/v4/leagues/(\w+)/lineup", path)
+        if lineup:
+            league = self.leagues.get(lineup.group(1))
+            if league is None or user_id not in dict(league.managers):
+                return httpx.Response(403, json={"err": "not a member"})
+            if request.method == "POST":
+                body = json.loads(request.content or b"{}")
+                owned = {e[0] for e in league.squads[user_id]}
+                players = [str(pid) for pid in body.get("players", [])]
+                if len(players) != 11 or not set(players) <= owned:
+                    return httpx.Response(400, json={"err": "invalid lineup"})
+                league.lineups[user_id] = players
+                league.formations[user_id] = body.get("type")
+                return httpx.Response(200, json={})
+            return httpx.Response(
+                200,
+                json={
+                    "type": league.formations.get(user_id),
+                    "lp": [{"i": pid} for pid in league.lineups[user_id] if pid],
+                },
+            )
 
         scouted = re.fullmatch(r"/v4/leagues/(\w+)/scoutedplayers(?:/(\w+))?", path)
         if scouted:

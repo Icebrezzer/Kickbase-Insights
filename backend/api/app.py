@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import mimetypes
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from api.live import LiveService
+from api.coach_routes import router as coach_router
 from api.routes import AppState, router
 from auth.accounts import Accounts
 from auth.security import TokenCipher
@@ -23,10 +25,16 @@ from core.config import Settings, get_settings
 from core.version import __version__
 from db import create_db_engine, init_db
 from kickbase import KickbaseHttp, PicturePool
+from sync.automation import AutomationService
+from sync.odds import OddsService
+from sync.push import PushService
 from sync.scheduler import Scheduler
 from sync.service import SyncService, mark_interrupted_runs
 
 log = logging.getLogger("kbi")
+
+### Safari only installs the home screen app with the right type for the manifest
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 
 def _not_a_health_check(record: logging.LogRecord) -> bool:
@@ -108,6 +116,10 @@ def create_app(
         pictures = PicturePool() if not settings.demo and transport is None else None
         sync = SyncService(settings, engine, accounts, pictures)
         scheduler = Scheduler(sync)
+        push = PushService(settings, engine)
+        odds = OddsService(settings, engine)
+        automation = AutomationService(settings, engine, accounts, push, odds)
+        sync.after_sync = automation.after_sync
         state = AppState(
             settings=settings,
             engine=engine,
@@ -115,16 +127,20 @@ def create_app(
             sync=sync,
             live=LiveService(settings, engine),
             scheduler=scheduler,
+            automation=automation,
+            push=push,
         )
         app.state.kbi = state
 
         if start_scheduler:
             scheduler.start()
+            automation.start()
 
         try:
             yield
         finally:
             await sync.shutdown()
+            await automation.stop()
             await scheduler.stop()
             for task in list(state.tasks):
                 task.cancel()
@@ -150,6 +166,7 @@ def create_app(
         )
 
     app.include_router(router)
+    app.include_router(coach_router)
     mount_frontend(app, settings.frontend_dir)
     return app
 

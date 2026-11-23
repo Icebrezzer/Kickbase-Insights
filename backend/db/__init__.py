@@ -68,6 +68,7 @@ def init_db(engine: Engine) -> None:
 
     SQLModel.metadata.create_all(engine)
     _add_transfer_ids(engine)
+    _add_missing_columns(engine)
     with Session(engine) as session:
         session.merge(SchemaInfo(id=1, version=SCHEMA_VERSION))
         session.commit()
@@ -92,6 +93,26 @@ def _add_transfer_ids(engine: Engine) -> None:
                 f"WHERE manager.league_id = transfer.league_id AND manager.name = transfer.{side})"
             )
         connection.exec_driver_sql("UPDATE leagueseason SET transfers_complete_since = NULL")
+
+
+### Columns added to tables after they were first created: table -> column -> SQL type and default
+_LATER_COLUMNS = {
+    "userautomation": {"listing_alerts": "BOOLEAN DEFAULT TRUE", "sell_alerts": "BOOLEAN DEFAULT TRUE"},
+}
+
+
+def _add_missing_columns(engine: Engine) -> None:
+    """Adds columns of the manager tools that came after their table, keeping the stored rows."""
+    inspector = inspect(engine)
+    for table, columns in _LATER_COLUMNS.items():
+        if table not in inspector.get_table_names():
+            continue
+        present = {column["name"] for column in inspector.get_columns(table)}
+        with engine.begin() as connection:
+            for name, definition in columns.items():
+                if name not in present:
+                    log.info("Adding column %s.%s", table, name)
+                    connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
 
 
 def session_scope(engine: Engine) -> Iterator[Session]:

@@ -293,7 +293,7 @@ export function PlayerCell({
           <span className="truncate font-medium">{playerName(player)}</span>
           <StatusFlag value={player.status} text={player.statusText} />
         </div>
-        <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
+        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted">
           <PositionBadge value={player.position} />
           {sub}
         </div>

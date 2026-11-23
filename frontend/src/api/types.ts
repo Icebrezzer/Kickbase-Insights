@@ -94,6 +94,10 @@ export type Player = {
   ownerId: string | null
   purchasePrice: number | null
   onMarket: boolean
+  /** Expected change of the next market value update */
+  forecast: number | null
+  /** Expected change against today after 1, 2, 3 updates */
+  projection: number[]
 }
 
 export type BidAdvice = {
@@ -112,6 +116,42 @@ export type MarketPlayer = Player & {
   listedAt: string | null
   isFreeAgent: boolean
   bidAdvice: BidAdvice | null // Only for Kickbase's own listings
+  /** Managers who may still buy a player of this club, the richest first */
+  rivals: Rival[]
+  /** Rivals who cannot afford the price are left out as well */
+  rivalsByBudget: boolean
+  ownClubPlayers: number
+  ownClubFull: boolean
+  /** Forecast value change until the next deadline, minus the markup on the price */
+  marginToMatchday: number | null
+  updatesToMatchday: number
+  /** Recommended bid: from the league's usual markup up to beating the likely bidders */
+  bidLow: number | null
+  bidHigh: number | null
+  marginLow: number | null
+  marginHigh: number | null
+  expectedPoints: number | null
+  playProbability: number | null
+  nextOpponentId: string | null
+  nextHome: boolean | null
+  /** Home, draw, away of his next match */
+  odds: (number | null)[] | null
+  sellerInMinus: boolean
+}
+
+export type Rival = {
+  managerId: string
+  name: string
+  image: string | null
+  clubPlayers: number
+  squadSize: number
+  estimatedBalance: number | null
+  maxBid: number | null
+  /** That he bids, from his habits, needs and money */
+  probability: number
+  expectedBid: number | null
+  reasons: string[]
+  inMinus: boolean
 }
 
 export type WatchedPlayer = Player & {
@@ -328,6 +368,12 @@ export type Live = {
   matchRunning: boolean
   matches: Match[]
   managers: LiveManager[]
+  /** Asked from Kickbase in this round: only players whose match runs or just ended */
+  fetchedPlayers: number
+  /** No answer from Kickbase, their last known points are shown */
+  stalePlayers: number
+  /** No answer and nothing known yet, those managers show Kickbase's lagging total */
+  missingPlayers: number
 }
 
 export type SyncTrigger = { started: boolean; reason: string | null }
@@ -356,3 +402,247 @@ export type PlayerMatch = {
 export type PlayerMatches = { season: string | null; matches: PlayerMatch[] }
 
 export type BidResult = { ownBid: number | null }
+
+// ---------------------------------------------------------------------------
+// Manager tools
+// ---------------------------------------------------------------------------
+
+export type Expectation = {
+  playerId: string
+  expected: number
+  form: number | null
+  seasonAverage: number | null
+  availability: number
+  opponentFactor: number
+  opponentId: string | null
+  home: boolean | null
+  playProbability: number | null
+  winProbability: number | null
+  reasons: string[]
+}
+
+export type SquadPlayer = {
+  id: string
+  firstName: string | null
+  lastName: string
+  teamId: string | null
+  image: string | null
+  position: number
+  status: number
+  statusText: string | null
+  marketValue: number
+  averagePoints: number | null
+  purchasePrice: number | null
+  expected: Expectation
+  inLineup: boolean
+  inBest: boolean
+  forecast: number | null
+}
+
+export type Check = { level: "ok" | "info" | "warn" | "error"; message: string }
+
+export type Coach = {
+  matchday: { day: number; firstKickoff: string; deadline: string } | null
+  liveDay: number | null
+  lineupOpen: boolean
+  budget: number | null
+  squad: SquadPlayer[]
+  savedFormation: string | null
+  savedLineup: string[]
+  savedExpected: number
+  bestFormation: string
+  bestLineup: string[]
+  bestExpected: number
+  rescue: {
+    sales: string[]
+    budgetAfter: number
+    expectedBefore: number
+    expectedAfter: number
+    expectedLoss: number
+    enough: boolean
+  } | null
+  checks: Check[]
+  lineupSource: "kickbase" | "ranking"
+  sellAdvice: { playerId: string; reason: string; expectedDrop: number; inBest: boolean }[]
+  leagueForecast: {
+    managerId: string
+    name: string
+    image: string | null
+    isSelf: boolean
+    expected: number
+    fielded: number
+    unavailable: number
+  }[]
+  updatesToMatchday: number
+  sellRatio: number | null
+}
+
+export type LineupApplied = { formation: string; playerIds: string[]; confirmed: boolean; response: string | null }
+export type SellResult = { playerId: string; budget: number | null; response: string | null }
+
+export type AutomationSettings = {
+  autoScout: boolean
+  scoutThreshold: number
+  scoutLimit: number
+  autoLineup: boolean
+  deadlineAlerts: boolean
+  listingAlerts: boolean
+  sellAlerts: boolean
+  sessionExpiresAt?: string | null
+  usesServiceAccount?: boolean
+}
+
+export type AutomationEvent = {
+  id: number
+  at: string
+  kind: "lineup" | "scout" | "alert" | "sell" | "push" | string
+  ok: boolean
+  message: string
+  details: Record<string, unknown>
+}
+
+export type ScoutRun = { added: string[]; removed: string[]; flagged: string[] }
+
+export type ForecastQuality = {
+  weights: number[]
+  features: string[]
+  learned: boolean
+  trainingRows: number
+  error: number | null
+  naiveError: number | null
+  checked: number
+  directionHits: number | null
+  meanAbsError: number | null
+  flagPrecision: number | null
+}
+
+export type PushKey = { publicKey: string | null; subscribed: number }
+
+export type LostAuction = {
+  playerId: string
+  playerName: string | null
+  date: string
+  ownBid: number
+  price: number
+  winnerId: string
+  winner: string
+}
+
+export type RivalProfile = {
+  id: string
+  name: string
+  image: string | null
+  isSelf: boolean
+  squadSize: number
+  /** Fit players per position, keys "1"–"4" */
+  fitPositions: Record<string, number>
+  needs: number[]
+  unavailable: string[]
+  blockedClubs: string[]
+  purchases: number
+  purchasesRecent: number
+  overpayMedian: number | null
+  overpayByClass: (number | null)[]
+  activeHours: number[]
+  lastActivity: string | null
+  estimatedBalance: number | null
+  maxBid: number | null
+  inMinus: boolean
+  balanceHistory: { date: string; balance: number }[]
+  lostTo: LostAuction[]
+}
+
+export type Rivals = {
+  leagueOverpayByClass: (number | null)[]
+  priceClasses: number[]
+  deadline: string | null
+  managers: RivalProfile[]
+  lost: LostAuction[]
+}
+
+export type BuyOption = {
+  player: MarketPlayer
+  bid: number
+  margin: number | null
+  pointsGain: number
+  blocked: string | null
+}
+
+export type ManagerSquadPlayer = Player & {
+  inLineup: boolean
+  /** (matchday, points) of the club's last five matches, oldest first. Points null: did not play */
+  form: [number, number | null][]
+  starts: number | null
+  dayPoints: number | null
+}
+
+export type ValueSplit = { teamValue: number; today: number }
+
+export type Achievement = {
+  key: string
+  group: string
+  name: string
+  description: string
+  reward: number
+  kind: "each" | "milestone" | "once_per_league"
+  count: number | null
+  amount: number
+}
+
+export type ManagerDetail = {
+  id: string
+  name: string
+  image: string | null
+  isSelf: boolean
+  placement: number | null
+  points: number | null
+  previousId: string | null
+  nextId: string | null
+  transfers: number
+  squadSize: number
+  maxSquad: number
+  total: ValueSplit
+  lineup: ValueSplit
+  bench: ValueSplit
+  transferProfit: number
+  overpayAverage: number | null
+  clubs: [string, number][]
+  positions: Record<string, number>
+  estimatedBalance: number | null
+  maxBid: number | null
+  lineupDay: number | null
+  lineupIds: string[]
+  days: number[]
+  squad: ManagerSquadPlayer[]
+  turnovers: Turnover[]
+  transferList: Transfer[]
+  achievements: Achievement[]
+  achievementsTotal: number
+  season: { day: number; points: number | null; seasonPoints: number | null; placement: number | null }[]
+  teamValues: [string, number][]
+  matchdayDates: [number, string][]
+}
+
+export type Learning = {
+  expectation: {
+    form?: number
+    average?: number
+    win?: number
+    table?: number
+    rows?: number
+    error?: number | null
+    defaultError?: number | null
+    loggedRows?: number
+    historyRows?: number
+  }
+  expectationLogged: number
+  expectationChecked: number
+  bidder: { weights?: number[]; bias?: number; auctions?: number }
+  auctionsLogged: number
+  auctionsResolved: number
+  achievementMode: { mode?: "matchday" | "player"; votesMatchday?: number; votesPlayer?: number }
+  sellRatio: { ratio?: number; sales?: number }
+  balanceCorrection: { amount: number; members: number; residuals: number[] } | null
+  achievements: { key: string; name: string; kickbase: number | null; app: number | null }[]
+  achievementsCheckedAt: string | null
+}

@@ -115,12 +115,29 @@ class PlayerOut(Schema):
     owner_id: str | None = None
     purchase_price: int | None = None
     on_market: bool = False
+    ### Expected change of the next market value update and the projection for the following ones
+    forecast: int | None = None
+    projection: list[int] = []
 
 
 class BidAdviceOut(Schema):
     amounts: list[int] # The suggested bids, lowest first
     comparable: list[float] # What the others paid on top, lowest first
     similar: bool # comparable purchases of a similar market value
+
+
+class RivalOut(Schema):
+    manager_id: str
+    name: str
+    image: str | None = None
+    club_players: int # Players of this club the manager owns already
+    squad_size: int = 0
+    estimated_balance: int | None = None
+    max_bid: int | None = None
+    probability: float = 0 # That he bids, estimated from his habits, needs and money
+    expected_bid: int | None = None # What he would probably bid
+    reasons: list[str] = []
+    in_minus: bool = False # Estimated balance below zero
 
 
 class MarketPlayerOut(PlayerOut):
@@ -133,6 +150,74 @@ class MarketPlayerOut(PlayerOut):
     listed_at: datetime | None = None
     is_free_agent: bool = True
     bid_advice: BidAdviceOut | None = None # Only for Kickbase's own listings
+    ### Managers who may still buy a player of this club (at most three per club), the richest first.
+    ### With `rivals_by_budget` the ones who cannot afford the price are left out as well.
+    rivals: list[RivalOut] = []
+    rivals_by_budget: bool = False
+    own_club_players: int = 0
+    own_club_full: bool = False
+    ### Forecast market value change until the next lineup deadline, minus what the price is above the value
+    margin_to_matchday: int | None = None
+    updates_to_matchday: int = 0
+    ### Recommended bid: from the league's usual markup up to beating the likely bidders
+    bid_low: int | None = None
+    bid_high: int | None = None
+    ### Forecast gain until the deadline minus what the bid is above the market value
+    margin_low: int | None = None
+    margin_high: int | None = None
+    expected_points: float | None = None # Next matchday
+    play_probability: float | None = None
+    next_opponent_id: str | None = None
+    next_home: bool | None = None
+    odds: list[float | None] | None = None # Home, draw, away of his next match
+    seller_in_minus: bool = False # The selling manager is estimated below zero
+    bidders_learned: bool = False # The bidder chances come from the logged auctions
+
+
+class LostAuctionOut(Schema):
+    player_id: str
+    player_name: str | None = None
+    date: datetime
+    own_bid: int
+    price: int # What the winner paid
+    winner_id: str
+    winner: str
+
+
+class BalancePointOut(Schema):
+    date: datetime
+    balance: int
+
+
+class RivalProfileOut(Schema):
+    id: str
+    name: str
+    image: str | None = None
+    is_self: bool = False
+    squad_size: int
+    fit_positions: dict[int, int] # Fit players per position
+    needs: list[int] # Positions he is short of
+    unavailable: list[str] # Injured or suspended players of his squad
+    blocked_clubs: list[str] # Clubs he owns three players of
+    purchases: int # From Kickbase this season
+    purchases_recent: int # All purchases of the last 14 days
+    overpay_median: float | None = None
+    overpay_by_class: list[float | None] = [] # Median share per price class
+    active_hours: list[int] = [] # Local hours he buys at most
+    last_activity: datetime | None = None
+    estimated_balance: int | None = None
+    max_bid: int | None = None
+    in_minus: bool = False
+    balance_history: list[BalancePointOut] = []
+    lost_to: list[LostAuctionOut] = [] # The viewer's auctions he won
+
+
+class RivalsOut(Schema):
+    league_overpay_by_class: list[float | None]
+    price_classes: list[int] # Upper bounds of the price classes, the last one is open
+    deadline: datetime | None = None
+    managers: list[RivalProfileOut]
+    lost: list[LostAuctionOut] = []
 
 
 class WatchedPlayerOut(PlayerOut):
@@ -380,6 +465,12 @@ class LiveOut(Schema):
     match_running: bool = False
     matches: list[MatchOut]
     managers: list[LiveManagerOut]
+    ### Asked from Kickbase in this round, only players whose match runs or just ended
+    fetched_players: int = 0
+    ### Kickbase did not answer for them, their last known points are shown
+    stale_players: int = 0
+    ### Kickbase did not answer and nothing is known yet: the manager's total comes from the ranking
+    missing_players: int = 0
 
 
 class PlayerMatchOut(Schema):
@@ -412,3 +503,268 @@ class BidOut(Schema):
 class LineupsOut(Schema):
     day: int | None
     lineups: dict[str, list[str]] # Manager id -> the player ids of their current starting eleven
+
+
+### ===============================================================================
+### Manager tools
+### ===============================================================================
+
+class ExpectationOut(Schema):
+    player_id: str
+    expected: float
+    form: float | None = None
+    season_average: float | None = None
+    availability: float
+    opponent_factor: float
+    opponent_id: str | None = None
+    home: bool | None = None
+    play_probability: float | None = None # Share of the last five matches he played
+    win_probability: float | None = None # Of his club, from the betting odds
+    reasons: list[str] = []
+
+
+class MatchdayOut(Schema):
+    day: int
+    first_kickoff: datetime
+    deadline: datetime
+
+
+class SquadPlayerOut(Schema):
+    id: str
+    first_name: str | None = None
+    last_name: str
+    team_id: str | None = None
+    image: str | None = None
+    position: int
+    status: int
+    status_text: str | None = None
+    market_value: int
+    average_points: int | None = None
+    purchase_price: int | None = None
+    expected: ExpectationOut
+    in_lineup: bool = False # Saved at Kickbase
+    in_best: bool = False # Part of the best eleven
+    forecast: int | None = None
+
+
+class RescueOut(Schema):
+    sales: list[str]
+    budget_after: int
+    expected_before: float
+    expected_after: float
+    expected_loss: float
+    enough: bool
+
+
+class SellAdviceOut(Schema):
+    player_id: str
+    reason: str
+    expected_drop: int # Forecast value change until the deadline
+    in_best: bool
+
+
+class LeagueForecastOut(Schema):
+    manager_id: str
+    name: str
+    image: str | None = None
+    is_self: bool = False
+    expected: float # Expected points of the saved eleven
+    fielded: int
+    unavailable: int # Fielded players who will not play
+
+
+class CheckOut(Schema):
+    level: str # ok, warn or error
+    message: str
+
+
+class CoachOut(Schema):
+    """Everything about the viewer's next matchday in one answer."""
+    matchday: MatchdayOut | None = None
+    live_day: int | None = None
+    lineup_open: bool = False
+    budget: int | None = None
+    squad: list[SquadPlayerOut] = []
+    saved_formation: str | None = None
+    saved_lineup: list[str] = []
+    saved_expected: float = 0
+    best_formation: str
+    best_lineup: list[str] = []
+    best_expected: float = 0
+    rescue: RescueOut | None = None
+    checks: list[CheckOut] = []
+    lineup_source: str = "kickbase" # Where saved_lineup comes from
+    sell_advice: list[SellAdviceOut] = []
+    league_forecast: list[LeagueForecastOut] = []
+    updates_to_matchday: int = 0
+    sell_ratio: float | None = None # What Kickbase paid for instant sales against the market value
+
+
+class LineupApplyOut(Schema):
+    formation: str
+    player_ids: list[str]
+    confirmed: bool # Kickbase reports the new lineup afterwards
+    response: str | None = None # What Kickbase answered, for checking the undocumented request
+
+
+class SellOut(Schema):
+    player_id: str
+    budget: int | None = None
+    response: str | None = None
+
+
+class AutomationSettingsIn(Schema):
+    auto_scout: bool = False
+    scout_threshold: int = Field(250_000, ge=0, le=50_000_000)
+    scout_limit: int = Field(30, ge=1, le=100)
+    auto_lineup: bool = False
+    deadline_alerts: bool = True
+    listing_alerts: bool = True
+    sell_alerts: bool = True
+
+
+class AutomationSettingsOut(AutomationSettingsIn):
+    session_expires_at: datetime | None = None # Automation works until then, without the env account
+    uses_service_account: bool = False
+
+
+class AutomationEventOut(Schema):
+    id: int
+    at: datetime
+    kind: str
+    ok: bool
+    message: str
+    details: dict = {}
+
+
+class ScoutRunOut(Schema):
+    added: list[str] = []
+    removed: list[str] = []
+    flagged: list[str] = [] # Every player at or above the threshold right now
+
+
+class ForecastQualityOut(Schema):
+    weights: list[float]
+    features: list[str]
+    learned: bool
+    training_rows: int
+    error: float | None = None
+    naive_error: float | None = None
+    checked: int = 0 # Forecasts compared with the real update
+    direction_hits: float | None = None # Share with the right direction
+    mean_abs_error: int | None = None
+    flag_precision: float | None = None # Of the players forecast at >= 250k, share that really rose >= 250k
+
+
+class PushKeyOut(Schema):
+    public_key: str | None = None # None when push is not configured
+    subscribed: int = 0
+
+
+class PushSubscriptionIn(Schema):
+    endpoint: str = Field(min_length=10, max_length=2000)
+    p256dh: str = Field(min_length=10, max_length=500)
+    auth: str = Field(min_length=4, max_length=200)
+
+
+class BuyOptionOut(Schema):
+    player: MarketPlayerOut
+    bid: int
+    margin: int | None = None
+    points_gain: float = 0 # More expected points of the best eleven with him
+    blocked: str | None = None
+
+
+### ===============================================================================
+### Manager detail
+### ===============================================================================
+
+class ManagerSquadPlayerOut(PlayerOut):
+    in_lineup: bool = False
+    form: list[tuple[int, int | None]] = [] # (matchday, points) of the club's last five matches, oldest first
+    starts: int | None = None # Starting eleven in the club's last ten matches
+    day_points: int | None = None # Points on the selected matchday
+
+
+class ValueSplitOut(Schema):
+    team_value: int
+    today: int # Market value change of today
+
+
+class AchievementOut(Schema):
+    key: str
+    group: str
+    name: str
+    description: str
+    reward: int
+    kind: str
+    count: int | None = None
+    amount: int
+
+
+class SeasonPointOut(Schema):
+    day: int
+    points: int | None = None
+    season_points: int | None = None
+    placement: int | None = None
+
+
+class ManagerDetailOut(Schema):
+    id: str
+    name: str
+    image: str | None = None
+    is_self: bool = False
+    placement: int | None = None
+    points: int | None = None
+    previous_id: str | None = None
+    next_id: str | None = None
+    transfers: int = 0
+    squad_size: int = 0
+    max_squad: int = 18
+    total: ValueSplitOut
+    lineup: ValueSplitOut
+    bench: ValueSplitOut
+    transfer_profit: int = 0
+    overpay_average: float | None = None
+    clubs: list[tuple[str, int]] = [] # (team id, players), most first
+    positions: dict[int, int] = {}
+    estimated_balance: int | None = None
+    max_bid: int | None = None
+    lineup_day: int | None = None # The matchday the lineup is from, None for the current one
+    lineup_ids: list[str] = []
+    days: list[int] = [] # Matchdays with a stored lineup
+    squad: list[ManagerSquadPlayerOut] = []
+    turnovers: list[TurnoverOut] = []
+    transfer_list: list[TransferOut] = []
+    achievements: list[AchievementOut] = []
+    achievements_total: int = 0
+    season: list[SeasonPointOut] = []
+    team_values: list[tuple[str, int]] = [] # (date, value) every evening
+    matchday_dates: list[tuple[int, str]] = [] # (matchday, date of its first kick-off)
+
+
+class BalanceCorrectionOut(Schema):
+    amount: int # Added to every estimated balance
+    members: int # Members whose real budget it was learned from
+    residuals: list[int] = []
+
+
+class AchievementCheckOut(Schema):
+    key: str
+    name: str
+    kickbase: int | None = None # Kickbase's counter (all seasons of the league)
+    app: int | None = None # What the app counts for this season
+
+
+class LearningOut(Schema):
+    expectation: dict = {}
+    expectation_logged: int = 0
+    expectation_checked: int = 0
+    bidder: dict = {}
+    auctions_logged: int = 0
+    auctions_resolved: int = 0
+    achievement_mode: dict = {}
+    sell_ratio: dict = {}
+    balance_correction: BalanceCorrectionOut | None = None
+    achievements: list[AchievementCheckOut] = []
+    achievements_checked_at: datetime | None = None

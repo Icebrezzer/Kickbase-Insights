@@ -147,6 +147,41 @@ class SyncSettings(BaseModel):
         return ZoneInfo(self.timezone)
 
 
+class PushSettings(BaseModel):
+    ### Contact for the push services, e.g. "mailto:you@example.org" or "https://kickbase.example.org".
+    ### Push messages are off without it. Apple refuses messages without a valid contact.
+    subject: str | None = None
+    ### The VAPID key in PEM. Generated and kept in the data folder when not set
+    vapid_private_key: SecretStr | None = None
+
+
+class OddsSettings(BaseModel):
+    ### Optional key of the-odds-api.com, used when Kickbase's bet link has no odds. 500 requests a month free
+    api_key: SecretStr | None = None
+    ### Odds are refreshed this often for the next matchday
+    refresh_hours: float = 6
+
+
+class AutomationSettings(BaseModel):
+    ### How often the automation looks at the leagues, in minutes
+    interval_minutes: int = 5
+    ### While the lineup can be changed, the own squad is checked this often for new transfers...
+    lineup_check_minutes: int = 30
+    ### ...and this often in the last hours before the deadline
+    lineup_check_minutes_close: int = 5
+    close_hours: float = 3
+    ### Minutes before the deadline when the deadline alerts are sent
+    alert_minutes: Annotated[list[int], NoDecode, BeforeValidator(_comma_separated)] = [180, 60, 15]
+    ### Forecast players' recent match points are refreshed when older than this
+    form_max_age_hours: float = 12
+    ### The market is checked this often for new listings of transfer targets
+    market_watch_minutes: int = 10
+    ### Players a league may hold per manager (league setting, used by the buy planner)
+    max_squad_size: int = 18
+    ### Local hour of the daily sell advice push, before the market value update at 22:00
+    sell_advice_hour: int = 20
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="KBI_",
@@ -171,6 +206,9 @@ class Settings(BaseSettings):
     database: DatabaseSettings = DatabaseSettings()
     kickbase: KickbaseSettings = KickbaseSettings()
     sync: SyncSettings = SyncSettings()
+    push: PushSettings = PushSettings()
+    odds: OddsSettings = OddsSettings()
+    automation: AutomationSettings = AutomationSettings()
 
     @property
     def database_url(self) -> str:

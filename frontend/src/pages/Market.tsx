@@ -1,7 +1,7 @@
 import type { ColumnDef } from "@tanstack/react-table"
-import { Clock, Gavel } from "lucide-react"
-import { useMemo, useState } from "react"
-import { useManagerMap, useMarket } from "@/api/hooks"
+import { AlertTriangle, ChevronDown, Clock, Flame, Gavel, ShieldAlert, ShoppingCart, Users } from "lucide-react"
+import { type ReactNode, useEffect, useMemo, useState } from "react"
+import { useAutomationSettings, useBuyPlanner, useManagerMap, useMarket, useRunScout } from "@/api/hooks"
 import type { MarketPlayer } from "@/api/types"
 import { BidDialog } from "@/components/BidDialog"
 import { DataTable, numberColumn } from "@/components/DataTable"
@@ -9,11 +9,13 @@ import { Avatar, Delta, Money, PercentDelta, PlayerCell, TrendIcon } from "@/com
 import { usePlayerSheet } from "@/components/PlayerSheet"
 import { Badge, Card, Chips, PageHeader, QueryState, SearchInput, Segmented, Stat } from "@/components/ui"
 import { cn } from "@/lib/cn"
-import { compactMoney, countdown, number, percent } from "@/lib/format"
+import { compactMoney, countdown, decimal, number, percent } from "@/lib/format"
 import { useNow } from "@/lib/hooks"
 import { playerName, POSITIONS } from "@/lib/kickbase"
 
-type Filter = "all" | "kickbase" | "managers" | "bids"
+type Filter = "all" | "targets" | "kickbase" | "managers" | "bids"
+
+const DEFAULT_THRESHOLD = 250_000
 
 const POSITION_CHIPS = Object.entries(POSITIONS).map(([value, meta]) => ({ value: Number(value), label: meta.short }))
 
@@ -38,6 +40,15 @@ function MarketView({ players }: { players: MarketPlayer[] }) {
   const [positions, setPositions] = useState<number[]>([])
   const [search, setSearch] = useState("")
   const [bidding, setBidding] = useState<MarketPlayer | null>(null)
+  const automation = useAutomationSettings()
+  const runScout = useRunScout()
+  const threshold = automation.data?.scoutThreshold ?? DEFAULT_THRESHOLD
+  const isTarget = (p: MarketPlayer) => p.forecast != null && p.forecast >= threshold
+  // Opening the market compares the scouting list with the forecasts, the server throttles it
+  const autoScout = automation.data?.autoScout
+  useEffect(() => {
+    if (autoScout) runScout.mutate()
+  }, [autoScout])
   // Nobody bids on the players they listed themselves
   const selfId = useMemo(() => [...managers.values()].find((manager) => manager.isSelf)?.id, [managers])
   const canBid = (player: MarketPlayer) => player.sellerId == null || player.sellerId !== selfId
@@ -45,16 +56,18 @@ function MarketView({ players }: { players: MarketPlayer[] }) {
   const counts = useMemo(
     () => ({
       all: players.length,
+      targets: players.filter(isTarget).length,
       kickbase: players.filter((p) => p.isFreeAgent).length,
       managers: players.filter((p) => !p.isFreeAgent).length,
       bids: players.filter((p) => p.ownBid != null).length,
     }),
-    [players],
+    [players, threshold],
   )
 
   const rows = useMemo(() => {
     const needle = search.trim().toLowerCase()
     return players.filter((p) => {
+      if (filter === "targets" && !isTarget(p)) return false
       if (filter === "kickbase" && !p.isFreeAgent) return false
       if (filter === "managers" && p.isFreeAgent) return false
       if (filter === "bids" && p.ownBid == null) return false
@@ -62,7 +75,7 @@ function MarketView({ players }: { players: MarketPlayer[] }) {
       if (needle && !playerName(p).toLowerCase().includes(needle)) return false
       return true
     })
-  }, [players, filter, positions, search])
+  }, [players, filter, positions, search, threshold])
 
   const bidTotal = players.reduce((sum, p) => sum + (p.ownBid ?? 0), 0)
   const nextExpiry = players
@@ -93,6 +106,13 @@ function MarketView({ players }: { players: MarketPlayer[] }) {
           )}
         </div>
       )),
+      numberColumn<MarketPlayer>("forecast", "Prognose", (p) => p.forecast, (value, p) => (
+        <span className="inline-flex items-center justify-end gap-1" title={p.projection.length ? `Hochrechnung: ${p.projection.map((v) => compactMoney(v)).join(" → ")}` : undefined}>
+          {isTarget(p) && <Flame className="size-3.5 text-warn" aria-label="Transferziel" />}
+          <Delta value={value} compact />
+        </span>
+      )),
+      numberColumn<MarketPlayer>("bidLow", "Empfehlung", (p) => p.bidLow, (_, p) => <Recommendation player={p} />, { hideBelow: "md" }),
       numberColumn<MarketPlayer>("ownBid", "Dein Gebot", (p) => p.ownBid, (value, p) => (
         <div className="flex items-center justify-end gap-2">
           {value == null ? (
@@ -106,27 +126,45 @@ function MarketView({ players }: { players: MarketPlayer[] }) {
           {canBid(p) && <BidButton hasBid={value != null} onClick={() => setBidding(p)} compact />}
         </div>
       )),
-      numberColumn<MarketPlayer>("today", "Heute", (p) => p.today, (v) => <Delta value={v} compact />, { hideBelow: "md" }),
+      {
+        id: "rivals",
+        header: "Konkurrenz",
+        accessorFn: (p) => p.rivals.filter((r) => r.probability >= 0.35).length,
+        cell: ({ row }) => <RivalStack player={row.original} />,
+        sortDescFirst: true,
+        meta: { hideBelow: "lg" },
+      },
+      numberColumn<MarketPlayer>("expectedPoints", "Erw. Pkt.", (p) => p.expectedPoints, (value, p) => (
+        <span className="tabular-nums" title={[p.playProbability != null ? `spielt in ${Math.round(p.playProbability * 100)} % der Spiele` : null, p.odds ? `Quoten ${p.odds.map((o) => o ?? "–").join(" | ")}` : null].filter(Boolean).join(" · ")}>
+          {decimal(value)}
+        </span>
+      ), { hideBelow: "2xl" }),
+      numberColumn<MarketPlayer>("margin", "Bis Spieltag", (p) => p.marginToMatchday, (value, p) => (
+        <span title={`${p.updatesToMatchday} Marktwert-Updates bis zur Deadline, abzüglich Aufpreis`}>
+          <Delta value={value} compact />
+        </span>
+      ), { hideBelow: "2xl" }),
+      numberColumn<MarketPlayer>("today", "Heute", (p) => p.today, (v) => <Delta value={v} compact />, { hideBelow: "2xl" }),
       numberColumn<MarketPlayer>("yesterday", "Gestern", (p) => p.yesterday, (v) => <Delta value={v} compact />, {
-        hideBelow: "2xl",
+        hideBelow: "3xl",
       }),
       numberColumn<MarketPlayer>("sevenDays", "7 Tage", (p) => p.sevenDays, (v) => <Delta value={v} compact />, {
-        hideBelow: "lg",
+        hideBelow: "2xl",
       }),
       numberColumn<MarketPlayer>("thirtyDays", "30 Tage", (p) => p.thirtyDays, (v) => <Delta value={v} compact />, {
-        hideBelow: "2xl",
+        hideBelow: "3xl",
       }),
       numberColumn<MarketPlayer>("averagePoints", "Ø Punkte", (p) => p.averagePoints, (v, p) => (
         <span className="tabular-nums" title={`${number(p.totalPoints)} Punkte gesamt`}>
           {number(v)}
         </span>
-      ), { hideBelow: "2xl" }),
+      ), { hideBelow: "3xl" }),
       {
         id: "seller",
         header: "Verkäufer",
         accessorFn: (p) => p.sellerName ?? "Kickbase",
         cell: ({ row }) => <Seller player={row.original} image={managers.get(row.original.sellerId ?? "")?.image} />,
-        meta: { hideBelow: "md" },
+        meta: { hideBelow: "xl" },
       },
       {
         ...numberColumn<MarketPlayer>(
@@ -139,7 +177,7 @@ function MarketView({ players }: { players: MarketPlayer[] }) {
         sortDescFirst: false,
       },
     ],
-    [managers, now, selfId],
+    [managers, now, selfId, threshold],
   )
 
   return (
@@ -155,6 +193,8 @@ function MarketView({ players }: { players: MarketPlayer[] }) {
         />
       </Card>
 
+      <BuyPlanner onBid={setBidding} />
+
       <Card>
         <div className="flex flex-col gap-3 p-4 sm:p-5 lg:flex-row lg:items-center lg:justify-between">
           <Segmented
@@ -162,6 +202,7 @@ function MarketView({ players }: { players: MarketPlayer[] }) {
             onChange={setFilter}
             options={[
               { value: "all", label: "Alle", count: counts.all },
+              { value: "targets", label: "Transferziele", count: counts.targets },
               { value: "kickbase", label: "Kickbase", count: counts.kickbase },
               { value: "managers", label: "Manager", count: counts.managers },
               { value: "bids", label: "Meine Gebote", count: counts.bids },
@@ -179,7 +220,7 @@ function MarketView({ players }: { players: MarketPlayer[] }) {
           getRowId={(p) => p.id}
           onRowClick={(p) => open(p.id)}
           rowClassName={(p) => p.ownBid != null && "bg-accent-soft/40"}
-          mobileCard={(p) => <MarketCard player={p} now={now} onBid={canBid(p) ? () => setBidding(p) : undefined} />}
+          mobileCard={(p) => <MarketCard player={p} now={now} target={isTarget(p)} onBid={canBid(p) ? () => setBidding(p) : undefined} />}
         />
       </Card>
       <BidDialog player={bidding} onClose={() => setBidding(null)} />
@@ -214,6 +255,11 @@ function Seller({ player, image }: { player: MarketPlayer; image?: string | null
     <span className="inline-flex items-center gap-2">
       <Avatar name={player.sellerName ?? "?"} image={image} size={22} />
       <span className="max-w-32 truncate">{player.sellerName}</span>
+      {player.sellerInMinus && (
+        <span title="Verkäufer steht geschätzt im Minus" className="text-down">
+          <ShieldAlert className="size-3.5" />
+        </span>
+      )}
     </span>
   )
 }
@@ -234,41 +280,217 @@ function Expiry({ expiresAt, now }: { expiresAt: string | null; now: number }) {
   )
 }
 
-function MarketCard({ player, now, onBid }: { player: MarketPlayer; now: number; onBid?: () => void }) {
+function Rivals({ player, limit = 4 }: { player: MarketPlayer; limit?: number }) {
+  if (player.ownClubFull) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-down" title="Du hast schon 3 Spieler dieses Vereins">
+        <AlertTriangle className="size-3.5" /> Du: 3/3 Verein
+      </span>
+    )
+  }
+  if (player.rivals.length === 0) {
+    return <span className="text-xs font-medium text-up">{player.rivalsByBudget ? "Keiner kann mithalten" : "Keine Konkurrenz"}</span>
+  }
+  const shown = player.rivals.filter((r) => r.probability >= 0.2).slice(0, limit)
+  if (shown.length === 0) return <span className="text-xs font-medium text-up">Kaum Konkurrenz</span>
   return (
-    <div className="space-y-2">
-      <div className="flex items-start justify-between gap-3">
-        <PlayerCell player={player} sub={<span className="truncate">{player.isFreeAgent ? "Kickbase" : player.sellerName}</span>} />
-        <div className="text-right">
-          <div className="text-sm font-semibold tabular-nums">{compactMoney(player.price ?? player.marketValue)}</div>
-          <div className="text-xs text-muted tabular-nums">MW {compactMoney(player.marketValue)}</div>
-        </div>
-      </div>
-      <div className="flex items-center justify-between gap-3 text-xs">
-        <span className="flex items-center gap-3">
-          <span>
-            <span className="text-muted">Heute </span>
-            <Delta value={player.today} compact />
-          </span>
-          <span>
-            <span className="text-muted">7 T. </span>
-            <Delta value={player.sevenDays} compact />
-          </span>
-        </span>
-        <Expiry expiresAt={player.expiresAt} now={now} />
-      </div>
-      {(player.ownBid != null || onBid) && (
-        <div className="flex items-center justify-between gap-3">
-          {player.ownBid != null ? (
-            <div className="rounded-lg bg-accent-soft px-2.5 py-1.5 text-xs">
-              Dein Gebot: <span className="font-semibold tabular-nums">{compactMoney(player.ownBid)}</span>
-            </div>
-          ) : (
-            <span />
+    <span className="inline-flex flex-wrap items-center gap-1">
+      {shown.map((rival) => (
+        <span
+          key={rival.managerId}
+          title={[
+            rival.name,
+            `${rival.clubPlayers}/3 vom Verein`,
+            `${rival.squadSize} Spieler im Kader`,
+            `bietet mit ca. ${Math.round(rival.probability * 100)} %`,
+            rival.expectedBid != null ? `vermutlich ca. ${compactMoney(rival.expectedBid)}` : null,
+            ...rival.reasons,
+            rival.estimatedBalance != null ? `Kontostand ca. ${compactMoney(rival.estimatedBalance)}` : null,
+            rival.maxBid != null ? `max. Gebot ca. ${compactMoney(rival.maxBid)}` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+          className={cn(
+            "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
+            rival.probability >= 0.6 ? "bg-down/15" : rival.probability >= 0.35 ? "bg-warn/15" : "bg-surface-2",
           )}
-          {onBid && <BidButton hasBid={player.ownBid != null} onClick={onBid} />}
-        </div>
+        >
+          <Avatar name={rival.name} image={rival.image} size={14} />
+          <span className="max-w-20 truncate">{rival.name}</span>
+          <span className="tabular-nums">{Math.round(rival.probability * 100)} %</span>
+          {rival.inMinus && <ShieldAlert className="size-3 text-down" />}
+        </span>
+      ))}
+      {player.rivals.length > shown.length && <span className="text-[11px] text-muted">+{player.rivals.length - shown.length}</span>}
+    </span>
+  )
+}
+
+/** The likely bidders as overlapping avatars, the details in the tooltip. Keeps table rows short. */
+function RivalStack({ player }: { player: MarketPlayer }) {
+  if (player.ownClubFull) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-down" title="Du hast schon 3 Spieler dieses Vereins">
+        <AlertTriangle className="size-3.5" /> 3/3
+      </span>
+    )
+  }
+  const likely = player.rivals.filter((r) => r.probability >= 0.35)
+  if (likely.length === 0) return <span className="text-xs font-medium text-up">kaum</span>
+  const title = player.rivals
+    .filter((r) => r.probability >= 0.2)
+    .map((r) => `${r.name}: ${Math.round(r.probability * 100)} %${r.expectedBid ? `, ca. ${compactMoney(r.expectedBid)}` : ""}${r.inMinus ? ", im Minus" : ""}`)
+    .join("\n")
+  const top = Math.max(...likely.map((r) => r.probability))
+  return (
+    <span className="inline-flex items-center gap-2" title={title}>
+      <span className="flex -space-x-1.5">
+        {likely.slice(0, 4).map((r) => (
+          <Avatar key={r.managerId} name={r.name} image={r.image} size={22} className="ring-2 ring-surface" />
+        ))}
+      </span>
+      <span className={cn("text-xs tabular-nums", top >= 0.6 ? "text-down" : "text-warn")}>{Math.round(top * 100)} %</span>
+    </span>
+  )
+}
+
+function Recommendation({ player }: { player: MarketPlayer }) {
+  if (player.bidLow == null || player.bidHigh == null) return <span className="text-muted">–</span>
+  const range =
+    player.bidHigh > player.bidLow ? `${compactMoney(player.bidLow)}–${compactMoney(player.bidHigh)}` : compactMoney(player.bidLow)
+  return (
+    <span className="inline-flex flex-col items-end leading-tight" title="Von „sicher günstig“ bis „schlägt die wahrscheinlichen Bieter“">
+      <span className="tabular-nums">{range}</span>
+      {player.marginLow != null && (
+        <span className={cn("text-[11px] tabular-nums", player.marginLow >= 0 ? "text-up" : "text-down")}>
+          Marge {player.marginLow >= 0 ? "+" : ""}
+          {compactMoney(player.marginLow)}
+        </span>
       )}
+    </span>
+  )
+}
+
+function BuyPlanner({ onBid }: { onBid: (player: MarketPlayer) => void }) {
+  const query = useBuyPlanner()
+  const [open, setOpen] = useState(false)
+  const options = query.data ?? []
+  const shown = open ? options : options.filter((o) => !o.blocked).slice(0, 3)
+  return (
+    <Card>
+      <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center justify-between gap-3 px-4 pt-4 pb-2 text-left sm:px-5">
+        <span>
+          <span className="inline-flex items-center gap-2 text-[15px] font-semibold">
+            <ShoppingCart className="size-4" /> Kaufplaner
+          </span>
+          <span className="mt-0.5 block text-sm text-muted">Jetzt kaufen, bis zum Spieltag halten: Wertgewinn abzüglich Aufpreis und Punkte-Plus für deine beste Elf.</span>
+        </span>
+        <ChevronDown className={cn("size-5 shrink-0 text-muted transition-transform", open && "rotate-180")} />
+      </button>
+      <div className="divide-y divide-line px-1 pb-2">
+        {query.isPending && <p className="px-4 py-3 text-sm text-muted">Rechne …</p>}
+        {!query.isPending && shown.length === 0 && <p className="px-4 py-3 text-sm text-muted">Gerade nichts Lohnendes auf dem Markt.</p>}
+        {shown.map((option) => (
+          <div key={option.player.id} className={cn("flex items-center justify-between gap-2 px-3 py-2.5 sm:px-4", option.blocked && "opacity-60")}>
+            <PlayerCell
+              player={option.player}
+              className="flex-1"
+              sub={
+                <span className="truncate">
+                  {option.blocked ?? (
+                    <>
+                      {compactMoney(option.bid)} · Marge{" "}
+                      <span className={(option.margin ?? 0) >= 0 ? "text-up" : "text-down"}>
+                        {option.margin == null ? "–" : `${option.margin >= 0 ? "+" : ""}${compactMoney(option.margin)}`}
+                      </span>
+                      {option.pointsGain > 0 && <> · +{decimal(option.pointsGain)} Pkt.</>}
+                    </>
+                  )}
+                </span>
+              }
+            />
+            {!option.blocked && <BidButton hasBid={option.player.ownBid != null} onClick={() => onBid(option.player)} compact />}
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
+function MarketCard({ player, now, target, onBid }: { player: MarketPlayer; now: number; target: boolean; onBid?: () => void }) {
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-start justify-between gap-3">
+        <PlayerCell
+          player={player}
+          className="flex-1"
+          sub={
+            <span className="flex min-w-0 items-center gap-1">
+              <span className="truncate">{player.isFreeAgent ? "Kickbase" : player.sellerName}</span>
+              {player.sellerInMinus && <ShieldAlert className="size-3.5 shrink-0 text-down" aria-label="Verkäufer im Minus" />}
+            </span>
+          }
+        />
+        <div className="shrink-0 text-right">
+          <div className="text-sm font-semibold tabular-nums">{compactMoney(player.price ?? player.marketValue)}</div>
+          <Expiry expiresAt={player.expiresAt} now={now} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 rounded-xl bg-surface-2 px-3 py-2 text-xs">
+        <Metric label="Heute">
+          <Delta value={player.today} compact />
+        </Metric>
+        <Metric label={target ? "Prognose 🔥" : "Prognose"}>
+          <Delta value={player.forecast} compact />
+        </Metric>
+        <Metric label={player.marginToMatchday != null ? "bis Spieltag" : "Erw. Pkt."}>
+          {player.marginToMatchday != null ? (
+            <Delta value={player.marginToMatchday} compact />
+          ) : (
+            <span className="tabular-nums">{decimal(player.expectedPoints)}</span>
+          )}
+        </Metric>
+      </div>
+
+      <div className="flex items-start gap-1.5 text-xs">
+        <Users className="mt-0.5 size-3.5 shrink-0 text-muted" />
+        <Rivals player={player} limit={3} />
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 text-xs">
+          {player.ownBid != null ? (
+            <span className="rounded-lg bg-accent-soft px-2 py-1">
+              Dein Gebot <span className="font-semibold tabular-nums">{compactMoney(player.ownBid)}</span>
+            </span>
+          ) : player.bidLow != null ? (
+            <span>
+              <span className="text-muted">Empfohlen </span>
+              <span className="tabular-nums">
+                {compactMoney(player.bidLow)}
+                {player.bidHigh != null && player.bidHigh > player.bidLow ? `–${compactMoney(player.bidHigh)}` : ""}
+              </span>
+              {player.marginLow != null && (
+                <span className={cn("ml-1 tabular-nums", player.marginLow >= 0 ? "text-up" : "text-down")}>
+                  ({player.marginLow >= 0 ? "+" : ""}
+                  {compactMoney(player.marginLow)})
+                </span>
+              )}
+            </span>
+          ) : null}
+        </div>
+        {onBid && <BidButton hasBid={player.ownBid != null} onClick={onBid} />}
+      </div>
+    </div>
+  )
+}
+
+function Metric({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <div className="truncate text-[11px] text-muted">{label}</div>
+      <div className="truncate font-medium">{children}</div>
     </div>
   )
 }

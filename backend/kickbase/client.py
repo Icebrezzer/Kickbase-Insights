@@ -307,6 +307,20 @@ class KickbaseClient:
             "DELETE", f"/v4/leagues/{league_id}/market/{player_id}/offers/{offer_id}", retries=0
         )
 
+    ### A sale to Kickbase cannot be undone, so a failed attempt is never sent a second time
+    async def sell_to_kickbase(self, league_id: str, player_id: str) -> Any:
+        return await self.request("POST", f"/v4/leagues/{league_id}/market/{player_id}/sell", retries=0)
+
+    async def lineup(self, league_id: str) -> Any:
+        """The saved lineup of the logged in user, as Kickbase sends it."""
+        return await self.request("GET", f"/v4/leagues/{league_id}/lineup")
+
+    async def set_lineup(self, league_id: str, formation: str, player_ids: list[str]) -> Any:
+        """Saves the starting eleven. `player_ids` go goalkeeper first, then defence, midfield, attack."""
+        return await self.request(
+            "POST", f"/v4/leagues/{league_id}/lineup", json={"type": formation, "players": player_ids}
+        )
+
     async def scouted_players(self, league_id: str) -> models.ScoutedPlayers:
         return await self._get(models.ScoutedPlayers, f"/v4/leagues/{league_id}/scoutedplayers")
 
@@ -389,6 +403,10 @@ class KickbaseClient:
         return await self._get(
             models.PlayerCenter, f"/v4/competitions/{competition_id}/playercenter/{player_id}", params or None
         )
+
+    async def match_betlink(self, match_id: str) -> Any:
+        """The betting link of a match. Kickbase does not document it; it may carry the odds."""
+        return await self.request("GET", f"/v4/matches/{match_id}/betlink", retries=1)
 
     async def event_types(self, language: str | None = None) -> models.EventTypes:
         headers = {"Accept-Language": language} if language else None

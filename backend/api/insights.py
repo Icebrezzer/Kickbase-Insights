@@ -9,11 +9,12 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from statistics import median
 
 from sqlmodel import Session, select
 
+from api.context import load_context
 from api.schemas import (
     BattleEntryOut,
     BattleOut,
@@ -34,13 +35,29 @@ from api.schemas import (
     OverpayStatsOut,
     PlayerDetailOut,
     PlayerOut,
+    RivalOut,
+    RivalProfileOut,
+    RivalsOut,
+    BalancePointOut,
+    BuyOptionOut,
+    LostAuctionOut,
+    AchievementCheckOut,
+    AchievementOut,
+    BalanceCorrectionOut,
+    LearningOut,
+    ManagerDetailOut,
+    ManagerSquadPlayerOut,
+    SeasonPointOut,
+    ValueSplitOut,
     TeamOut,
     TransferOut,
     TurnoverOut,
     WatchedPlayerOut,
 )
-from core import analytics
+from core import achievements, analytics, coach, learning
 from db.models import (
+    AchievementSnapshot,
+    BidHistory,
     Battle,
     BattleEntry,
     Fixture,
@@ -50,22 +67,47 @@ from db.models import (
     MarketBid,
     MarketListing,
     MarketValueHistory,
+    MatchdayLineup,
     MatchdayRanking,
     Player,
+    PlayerForm,
     SquadEntry,
     Team,
     Transfer,
     UserLeague,
 )
 from kickbase.models import ScoutedPlayer
+from sync.learning import achievement_mode, bidder_model
+
+
+### Overpay is read from the purchases of the last weeks once there are enough of them
+RECENT_DAYS = 45
+### The balance correction never moves an estimate further than this
+MAX_CORRECTION = 25_000_000
+MIN_RECENT = 5
+MIN_RECENT_LEAGUE = 10
 
 
 class Insights:
-    def __init__(self, session: Session, league: League, viewer_id: str | None = None):
+    def __init__(
+        self,
+        session: Session,
+        league: League,
+        viewer_id: str | None = None,
+        model: coach.ForecastModel | None = None,
+        max_squad: int = 18,
+    ):
         self.session = session
         self.league = league
         self.league_id = league.id
         self.viewer_id = viewer_id
+        self.model = model or coach.ForecastModel()
+        self.max_squad = max_squad
+        self._match_points: dict[str, list[tuple[int, int]]] | None = None
+        self._form_rows: dict[str, list] | None = None
+        self._estimates: dict[str, int] | None = None
+        self._prizes: dict[str, int] | None = None
+        self._correction: BalanceCorrectionOut | None = None
         ### Empty until the first sync after an update has stored it
         self.season = session.get(LeagueSeason, league.id) or LeagueSeason(league_id=league.id)
 
@@ -96,6 +138,335 @@ class Insights:
         if player_ids is not None:
             query = query.where(MarketValueHistory.player_id.in_(player_ids))
         return dict(self.session.exec(query).all())
+
+    def match_points(self) -> dict[str, list[tuple[int, int]]]:
+        """`(market value day, points)` per player from the stored forms, loaded once per answer."""
+        if self._match_points is None:
+            self._match_points = {
+                pid: [(int(m[4]), int(m[1])) for m in matches if len(m) > 4 and m[4] is not None]
+                for pid, matches in self.session.exec(select(PlayerForm.player_id, PlayerForm.matches)).all()
+            }
+        return self._match_points
+
+    def fixture_infos(self) -> list[coach.FixtureInfo]:
+        return [
+            coach.FixtureInfo(f.day, f.kickoff, f.status, f.team1_id, f.team2_id)
+            for f in self.session.exec(
+                select(Fixture).where(Fixture.competition_id == self.league.competition_id)
+            )
+        ]
+
+    def own_budget(self) -> int | None:
+        if not self.viewer_id:
+            return None
+        membership = self.session.get(UserLeague, (self.viewer_id, self.league_id))
+        return membership.budget if membership else None
+
+    def estimated_balances(self) -> dict[str, int]:
+        """Start money, plus sales, minus purchases, plus the prize money of the season's achievements.
+        Login bonuses are not visible."""
+        if self._estimates is None:
+            events = analytics.transfer_events(self._transfer_records())
+            start_money = self.season.start_money or analytics.DEFAULT_START_MONEY
+            prizes = self.achievement_totals()
+            raw = {
+                m.id: analytics.estimate_balance(m.id, events, start_money) + prizes.get(m.id, 0)
+                for m in self._managers()
+            }
+            correction = self.balance_correction(raw)
+            self._estimates = {mid: value + correction.amount for mid, value in raw.items()}
+            self._correction = correction
+        return self._estimates
+
+    def balance_correction(self, raw: dict[str, int]) -> BalanceCorrectionOut:
+        """What the estimates miss (login bonuses, wrong achievements), learned from the members whose
+        real budget is known: the median of real minus estimated, added to everybody's estimate."""
+        fresh_since = datetime.now(UTC) - timedelta(days=2)
+        known = [
+            (m.user_id, m.budget)
+            for m in self.session.exec(select(UserLeague).where(UserLeague.league_id == self.league_id))
+            if m.budget is not None and m.budget_updated_at is not None and m.budget_updated_at >= fresh_since
+        ]
+        residuals = [budget - raw[uid] for uid, budget in known if uid in raw]
+        if not residuals:
+            return BalanceCorrectionOut(amount=0, members=0)
+        amount = int(median(residuals))
+        amount = max(-MAX_CORRECTION, min(MAX_CORRECTION, amount))
+        return BalanceCorrectionOut(amount=amount, members=len(residuals), residuals=sorted(residuals))
+
+    def balances(self) -> dict[str, tuple[int, int]]:
+        """Per manager the balance and the highest possible bid. The viewer's own come from the real
+        budget, the others are estimates (see `estimated_balances`)."""
+        estimates = self.estimated_balances()
+        own_budget = self.own_budget()
+        result = {}
+        for manager in self._managers():
+            estimated = estimates.get(manager.id, 0)
+            balance = own_budget if manager.id == self.viewer_id and own_budget is not None else estimated
+            result[manager.id] = (balance, analytics.max_bid(balance, manager.team_value or 0))
+        return result
+
+    ### ================================================================================================
+    ### Manager detail
+    ### ================================================================================================
+
+    def manager_detail(
+        self, manager_id: str, balances: bool, current_lineup: list[str] | None, day: int | None = None
+    ) -> ManagerDetailOut | None:
+        managers = sorted(self._managers(), key=lambda m: (m.placement is None, m.placement or 0, m.name))
+        manager = next((m for m in managers if m.id == manager_id), None)
+        if manager is None:
+            return None
+        index = managers.index(manager)
+        squad_entries = {pid: e for pid, e in self._squad().items() if e.manager_id == manager_id}
+        lineups = self.lineups_by_day().get(manager_id, {})
+        lineup_ids = list(lineups.get(day, [])) if day is not None else list(current_lineup or [])
+        if day is None and not lineup_ids and lineups:
+            lineup_ids = list(lineups[max(lineups)])
+        players = {p.id: p for p in self.session.exec(select(Player).where(Player.id.in_(list(squad_entries))))}
+        histories = self._histories(list(squad_entries))
+        market_ids = set(self._market())
+        all_squad = self._squad()
+        points = self.matchday_points()
+        forms = self._forms()
+
+        squad_out = []
+        for pid in squad_entries:
+            player = players.get(pid)
+            if player is None:
+                continue
+            club_matches = sorted((m for m in forms.get(pid, []) if m and m[0] is not None), key=lambda m: m[0])
+            out = self._player_out(
+                player,
+                histories.get(pid),
+                all_squad,
+                market_ids,
+                ManagerSquadPlayerOut,
+                in_lineup=pid in lineup_ids,
+                form=[(int(m[0]), int(m[1]) if (len(m) < 4 or m[3] in (3, 5) or (m[2] or 0) > 0) else None) for m in club_matches[-5:]],
+                starts=sum(1 for m in club_matches[-10:] if len(m) > 3 and m[3] == coach.ROLE_START) if club_matches else None,
+                day_points=points.get((pid, day)) if day is not None else None,
+            )
+            squad_out.append(out)
+        squad_out.sort(key=lambda p: (not p.in_lineup, p.position, -(p.average_points or 0)))
+
+        def split(ids: list[str]) -> ValueSplitOut:
+            chosen = [p for p in squad_out if p.id in ids]
+            return ValueSplitOut(
+                team_value=sum(p.market_value for p in chosen), today=sum(p.today or 0 for p in chosen)
+            )
+
+        records = self._transfer_records()
+        own_records = [t for t in records if manager_id in (t.buyer, t.seller)]
+        names = self._manager_names()
+        turnovers = [t for t in self.turnovers() if t.manager_id == manager_id or t.manager == manager_id]
+        own_purchases = [p for p in self._purchases() if p.transfer.buyer == manager_id]
+        earned = achievements.evaluate(
+            self.achievement_seasons()[manager_id], achievement_mode(self.session) == "player"
+        )
+        shown = balances or manager_id == self.viewer_id
+        money = self.balances().get(manager_id) if shown else None
+        clubs = Counter(p.team_id for p in squad_out if p.team_id)
+        rankings = sorted(
+            self.session.exec(
+                select(MatchdayRanking).where(
+                    MatchdayRanking.league_id == self.league_id, MatchdayRanking.manager_id == manager_id
+                )
+            ),
+            key=lambda r: r.day,
+        )
+        kickoffs: dict[int, datetime] = {}
+        for f in self.session.exec(select(Fixture).where(Fixture.competition_id == self.league.competition_id)):
+            if f.kickoff and (f.day not in kickoffs or f.kickoff < kickoffs[f.day]):
+                kickoffs[f.day] = f.kickoff
+
+        return ManagerDetailOut(
+            id=manager.id,
+            name=manager.name,
+            image=manager.image,
+            is_self=manager.id == self.viewer_id,
+            placement=manager.placement,
+            points=manager.points,
+            previous_id=managers[index - 1].id if index > 0 else None,
+            next_id=managers[index + 1].id if index + 1 < len(managers) else None,
+            transfers=len(own_records),
+            squad_size=len(squad_out),
+            max_squad=self.max_squad,
+            total=split([p.id for p in squad_out]),
+            lineup=split(lineup_ids),
+            bench=split([p.id for p in squad_out if p.id not in lineup_ids]),
+            transfer_profit=sum(t.profit or 0 for t in turnovers),
+            overpay_average=(sum(p.overpay_share for p in own_purchases) / len(own_purchases)) if own_purchases else None,
+            clubs=clubs.most_common(),
+            positions=dict(Counter(p.position for p in squad_out)),
+            estimated_balance=money[0] if money else None,
+            max_bid=money[1] if money else None,
+            lineup_day=day,
+            lineup_ids=lineup_ids,
+            days=sorted(lineups),
+            squad=squad_out,
+            turnovers=turnovers,
+            transfer_list=[self._transfer_out(t, names) for t in self._own_transfers(manager_id)],
+            achievements=[
+                AchievementOut(
+                    key=e.rule.key,
+                    group=e.rule.group,
+                    name=e.rule.name,
+                    description=e.rule.description,
+                    reward=e.rule.reward,
+                    kind=e.rule.kind,
+                    count=e.count,
+                    amount=e.amount,
+                )
+                for e in earned
+            ],
+            achievements_total=achievements.total(earned),
+            season=[
+                SeasonPointOut(day=r.day, points=r.points, season_points=r.season_points, placement=r.placement)
+                for r in rankings
+            ],
+            team_values=self.team_value_history(manager_id),
+            matchday_dates=[(d, k.date().isoformat()) for d, k in sorted(kickoffs.items()) if k <= datetime.now(UTC)],
+        )
+
+    def _own_transfers(self, manager_id: str) -> list[Transfer]:
+        rows = self.session.exec(
+            select(Transfer).where(
+                Transfer.league_id == self.league_id,
+                (Transfer.buyer_id == manager_id) | (Transfer.seller_id == manager_id),
+            )
+        ).all()
+        return sorted((t for t in rows if self._this_season(t)), key=lambda t: t.date, reverse=True)
+
+    def team_value_history(self, manager_id: str) -> list[tuple[str, int]]:
+        """The team value every evening since the season start: the squad of that day at that day's values.
+
+        The squad is rebuilt backwards from today's through the transfers: a purchase after a day means
+        the player was not there yet, a sale after it means he still was.
+        """
+        start = self.season_start()
+        if start is None:
+            return []
+        today = analytics.market_value_day(datetime.now(UTC))
+        first = analytics.market_value_day(start)
+        squad = {pid for pid, e in self._squad().items() if e.manager_id == manager_id}
+        events = sorted(
+            (e for e in analytics.transfer_events(self._transfer_records()) if e.manager == manager_id),
+            key=lambda e: e.date,
+            reverse=True,
+        )
+        involved = squad | {e.player_id for e in events}
+        histories = self._histories(list(involved))
+        result = []
+        held = set(squad)
+        pending = list(events)
+        for day in range(today, first - 1, -1):
+            ### Undo everything that happened after this day's market value update
+            while pending and analytics.market_value_day(pending[0].date) >= day:
+                event = pending.pop(0)
+                if event.kind == "buy":
+                    held.discard(event.player_id)
+                else:
+                    held.add(event.player_id)
+            value = sum(analytics.value_on_day(histories.get(pid) or [], day) or 0 for pid in held)
+            result.append((analytics.day_to_date(day).isoformat(), value))
+        result.reverse()
+        return result
+
+    ### ================================================================================================
+    ### Achievements
+    ### ================================================================================================
+
+    def _forms(self) -> dict[str, list]:
+        if self._form_rows is None:
+            self._form_rows = dict(self.session.exec(select(PlayerForm.player_id, PlayerForm.matches)).all())
+        return self._form_rows
+
+    def matchday_points(self) -> dict[tuple[str, int], int]:
+        """(player, matchday) -> Kickbase points, for every player whose form is stored."""
+        return {
+            (pid, int(m[0])): int(m[1])
+            for pid, matches in self._forms().items()
+            for m in matches
+            if m and m[0] is not None
+        }
+
+    def lineups_by_day(self) -> dict[str, dict[int, list[str]]]:
+        result: dict[str, dict[int, list[str]]] = defaultdict(dict)
+        for row in self.session.exec(select(MatchdayLineup).where(MatchdayLineup.league_id == self.league_id)):
+            result[row.manager_id][row.day] = list(row.players)
+        return result
+
+    def achievement_seasons(self) -> dict[str, achievements.ManagerSeason]:
+        rankings: dict[str, list] = defaultdict(list)
+        for r in self.session.exec(select(MatchdayRanking).where(MatchdayRanking.league_id == self.league_id)):
+            rankings[r.manager_id].append((r.day, r.points, r.placement, r.team_value))
+        points = self.matchday_points()
+        best: dict[int, tuple[int, set[str]]] = {}
+        for (pid, day), value in points.items():
+            top = best.get(day)
+            if top is None or value > top[0]:
+                best[day] = (value, {pid})
+            elif value == top[0]:
+                top[1].add(pid)
+        best_by_day = {day: ids for day, (_, ids) in best.items()}
+        lineups = self.lineups_by_day()
+        records = self._transfer_records()
+        turnovers = self._turnovers()
+        squad_sizes = Counter(e.manager_id for e in self._squad().values())
+        result = {}
+        for manager in self._managers():
+            own_lineups = lineups.get(manager.id, {})
+            result[manager.id] = achievements.ManagerSeason(
+                manager_id=manager.id,
+                matchdays=sorted(rankings.get(manager.id, [])),
+                season_points=manager.points or 0,
+                lineup_points={day: [points.get((pid, day), 0) for pid in ids] for day, ids in own_lineups.items()},
+                mvp_days=achievements.mvp_days(own_lineups, best_by_day),
+                profits=[t.profit for t in turnovers if t.manager == manager.id and t.profit is not None],
+                transfers=sum(1 for t in records if manager.id in (t.buyer, t.seller)),
+                squad_size=squad_sizes.get(manager.id, 0),
+            )
+        return result
+
+    def learning_view(self, status: dict) -> LearningOut:
+        """What the app has learned, with the viewer's own achievements next to Kickbase's counters."""
+        self.estimated_balances()
+        checks: list[AchievementCheckOut] = []
+        checked_at = None
+        if self.viewer_id:
+            snapshot = self.session.exec(
+                select(AchievementSnapshot)
+                .where(AchievementSnapshot.user_id == self.viewer_id, AchievementSnapshot.league_id == self.league_id)
+                .order_by(AchievementSnapshot.at.desc())
+            ).first()
+            season = self.achievement_seasons().get(self.viewer_id)
+            if season is not None:
+                own = {
+                    e.rule.key: e
+                    for e in achievements.evaluate(season, achievement_mode(self.session) == "player")
+                }
+                for rule in achievements.RULES:
+                    kickbase = snapshot.counts.get(rule.key) if snapshot else None
+                    checks.append(
+                        AchievementCheckOut(key=rule.key, name=rule.name, kickbase=kickbase, app=own[rule.key].count)
+                    )
+            checked_at = snapshot.at if snapshot else None
+        return LearningOut(
+            **status,
+            balance_correction=self._correction,
+            achievements=checks,
+            achievements_checked_at=checked_at,
+        )
+
+    def achievement_totals(self) -> dict[str, int]:
+        if self._prizes is None:
+            per_player = achievement_mode(self.session) == "player"
+            self._prizes = {
+                mid: achievements.total(achievements.evaluate(season, per_player))
+                for mid, season in self.achievement_seasons().items()
+            }
+        return self._prizes
 
     def season_start(self) -> datetime | None:
         """The start Kickbase reports. Otherwise the first stored transfer or the first kick-off."""
@@ -149,6 +520,11 @@ class Insights:
         **extra,
     ) -> PlayerOut:
         owner = squad.get(player.id)
+        prediction = (
+            coach.forecast(mv_history, self.model, matches=self.match_points().get(player.id))
+            if mv_history
+            else None
+        )
         return model(
             id=player.id,
             first_name=player.first_name,
@@ -169,6 +545,8 @@ class Insights:
             purchase_price=owner.purchase_price if owner else None,
             on_market=player.id in market_ids,
             **analytics.market_value_deltas(mv_history or []),
+            forecast=prediction.next_change if prediction else None,
+            projection=list(prediction.projection) if prediction else [],
             **extra,
         )
 
@@ -230,7 +608,57 @@ class Insights:
             transfers=[self._transfer_out(t, names) for t in transfers if self._this_season(t)],
         )
 
-    def market(self) -> list[MarketPlayerOut]:
+    ### ================================================================================================
+    ### Rivals, bidders and the market
+    ### ================================================================================================
+
+    def _club_counts(self) -> coach.ClubCounts:
+        return coach.ClubCounts.build(
+            (entry.manager_id, team_id)
+            for entry, team_id in self.session.exec(
+                select(SquadEntry, Player.team_id)
+                .join(Player, Player.id == SquadEntry.player_id)
+                .where(SquadEntry.league_id == self.league_id)
+            )
+        )
+
+    def bidder_profiles(self, purchases: list[analytics.Purchase] | None = None) -> dict[str, coach.BidderProfile]:
+        """What every manager did on the market: overpay, price classes, activity and squad shape."""
+        purchases = purchases if purchases is not None else self._purchases()
+        recent_since = datetime.now(UTC) - timedelta(days=14)
+        records = self._transfer_records()
+        fit_positions: dict[str, Counter] = defaultdict(Counter)
+        sizes: Counter = Counter()
+        for entry, position, status in self.session.exec(
+            select(SquadEntry, Player.position, Player.status)
+            .join(Player, Player.id == SquadEntry.player_id)
+            .where(SquadEntry.league_id == self.league_id)
+        ):
+            sizes[entry.manager_id] += 1
+            if status in coach.STATUS_AVAILABILITY:
+                fit_positions[entry.manager_id][position] += 1
+        result = {}
+        recent_cut = datetime.now(UTC) - timedelta(days=RECENT_DAYS)
+        for manager in self._managers():
+            own = [p for p in purchases if p.transfer.buyer == manager.id]
+            ### Prices rise during a season: the recent purchases count when there are enough of them
+            fresh = [p for p in own if p.transfer.date >= recent_cut]
+            if len(fresh) >= MIN_RECENT:
+                own = fresh
+            result[manager.id] = coach.BidderProfile(
+                manager_id=manager.id,
+                overpay_shares=tuple(p.overpay_share for p in own),
+                purchase_values=tuple(p.market_value for p in own),
+                purchases_recent=sum(1 for t in records if t.buyer == manager.id and t.date >= recent_since),
+                positions=dict(fit_positions[manager.id]),
+                squad_size=sizes[manager.id],
+                max_squad=self.max_squad,
+            )
+        return result
+
+    def market(self, balances: bool = False) -> list[MarketPlayerOut]:
+        """`balances` uses the estimated budgets of the others: who cannot pay is no rival, and the
+        expected bids are capped by what each can afford."""
         listings = self._market()
         players = {p.id: p for p in self.session.exec(select(Player).where(Player.id.in_(list(listings))))}
         histories = self._histories(list(listings))
@@ -246,15 +674,68 @@ class Insights:
             if self.viewer_id
             else {}
         )
+        purchases = self._purchases()
         ### Advice comes from others only
-        rival_purchases = [p for p in self._purchases() if p.transfer.buyer != self.viewer_id]
+        rival_purchases = [p for p in purchases if p.transfer.buyer != self.viewer_id]
+        recent_cut = datetime.now(UTC) - timedelta(days=RECENT_DAYS)
+        fresh = [p for p in rival_purchases if p.transfer.date >= recent_cut]
+        league_shares = [p.overpay_share for p in (fresh if len(fresh) >= MIN_RECENT_LEAGUE else rival_purchases)]
+        learned = bidder_model(self.session)
+        gaps = learning.lost_gaps(
+            (a.own_bid, a.own_bid, a.price) for a in self.lost_auctions() if a.date >= recent_cut
+        )
+        clubs = self._club_counts()
+        managers = {m.id: m for m in self._managers()}
+        squad_sizes = Counter(e.manager_id for e in squad.values())
+        money = self.balances()
+        profiles = self.bidder_profiles(purchases)
+        now = datetime.now(UTC)
+        context = load_context(self.session, self.league.competition_id, list(listings), now)
+        upcoming = context.upcoming
+        updates = coach.updates_until(upcoming.deadline if upcoming else None, now)
+        own_max_bid = money[self.viewer_id][1] if self.viewer_id in money else None
         result = []
         for listing in listings.values():
             player = players.get(listing.player_id)
             if player is None:
                 continue
             is_free_agent = listing.seller_id is None
+            price = listing.price or player.market_value
             advice = analytics.bid_advice(rival_purchases, player.market_value) if is_free_agent else None
+            estimates = []
+            for mid in managers:
+                if mid in (self.viewer_id, listing.seller_id) or mid not in profiles:
+                    continue
+                estimate = coach.estimate_bidder(
+                    profiles[mid],
+                    player.position,
+                    player.market_value,
+                    price,
+                    clubs.can_buy(mid, player.team_id),
+                    money[mid][1] if balances and mid in money else None,
+                    league_shares,
+                    learned.probability if learned.learned else None,
+                )
+                if estimate.probability > 0:
+                    estimates.append(estimate)
+            estimates.sort(key=lambda e: -e.probability)
+            matches = context.match_points(player.id)
+            prediction = coach.forecast(histories.get(player.id) or [], self.model, max(updates, 1), matches)
+            gain = prediction.projection[updates - 1] if prediction and updates > 0 else None
+            margin = None if gain is None else gain - max(price - player.market_value, 0)
+            bids = coach.bid_range(
+                player.market_value,
+                price,
+                league_shares,
+                estimates,
+                gain,
+                own_max_bid,
+                gaps.get(coach.price_class(player.market_value)),
+            )
+            own_club = clubs.of(self.viewer_id or "", player.team_id)
+            expectation = context.expectation(player.id, player.position, player.status, player.team_id, player.average_points)
+            fixture = context.fixture_of(player.team_id)
+            odds = context.odds_of(fixture)
             result.append(
                 self._player_out(
                     player,
@@ -271,10 +752,209 @@ class Insights:
                     listed_at=listing.listed_at,
                     is_free_agent=is_free_agent,
                     bid_advice=BidAdviceOut.model_validate(advice) if advice else None,
+                    rivals=[
+                        RivalOut(
+                            manager_id=e.manager_id,
+                            name=managers[e.manager_id].name,
+                            image=managers[e.manager_id].image,
+                            club_players=clubs.of(e.manager_id, player.team_id),
+                            squad_size=squad_sizes.get(e.manager_id, 0),
+                            estimated_balance=money[e.manager_id][0] if balances and e.manager_id in money else None,
+                            max_bid=money[e.manager_id][1] if balances and e.manager_id in money else None,
+                            probability=e.probability,
+                            expected_bid=e.expected_bid,
+                            reasons=list(e.reasons),
+                            in_minus=balances and e.manager_id in money and money[e.manager_id][0] < 0,
+                        )
+                        for e in estimates
+                    ],
+                    rivals_by_budget=balances,
+                    own_club_players=own_club,
+                    own_club_full=own_club >= coach.MAX_PER_CLUB,
+                    margin_to_matchday=margin,
+                    updates_to_matchday=updates,
+                    bid_low=bids.low,
+                    bid_high=bids.high,
+                    margin_low=bids.margin_low,
+                    margin_high=bids.margin_high,
+                    expected_points=expectation.expected,
+                    play_probability=expectation.play_probability,
+                    next_opponent_id=expectation.opponent_id,
+                    next_home=expectation.home,
+                    odds=list(odds) if odds else None,
+                    bidders_learned=learned.learned,
+                    seller_in_minus=bool(
+                        balances and listing.seller_id in money and money[listing.seller_id][0] < 0
+                    ),
                 )
             )
         far_future = datetime.max.replace(tzinfo=UTC)
         result.sort(key=lambda p: (p.expires_at or far_future, -p.market_value))
+        return result
+
+    def lost_auctions(self) -> list[LostAuctionOut]:
+        """Auctions the viewer bid in and another manager won."""
+        if not self.viewer_id:
+            return []
+        bids = self.session.exec(
+            select(BidHistory).where(BidHistory.league_id == self.league_id, BidHistory.user_id == self.viewer_id)
+        ).all()
+        if not bids:
+            return []
+        names = self._manager_names()
+        transfers = self.session.exec(
+            select(Transfer).where(
+                Transfer.league_id == self.league_id, Transfer.player_id.in_([b.player_id for b in bids])
+            )
+        ).all()
+        result = []
+        for bid in bids:
+            won = next(
+                (
+                    t
+                    for t in sorted(transfers, key=lambda t: t.date)
+                    if t.player_id == bid.player_id
+                    and bid.first_seen - timedelta(days=1) <= t.date <= bid.last_seen + timedelta(days=2)
+                ),
+                None,
+            )
+            if won is None or not won.buyer_id or won.buyer_id == self.viewer_id:
+                continue
+            result.append(
+                LostAuctionOut(
+                    player_id=bid.player_id,
+                    player_name=won.player_name,
+                    date=won.date,
+                    own_bid=bid.price,
+                    price=won.price,
+                    winner_id=won.buyer_id,
+                    winner=names.get(won.buyer_id, won.buyer or "?"),
+                )
+            )
+        result.sort(key=lambda a: a.date, reverse=True)
+        return result
+
+    def rival_profiles(self, balances: bool) -> RivalsOut:
+        """Every manager as a bidder: habits, needs, weaknesses and money."""
+        purchases = self._purchases()
+        profiles = self.bidder_profiles(purchases)
+        money = self.balances()
+        clubs = self._club_counts()
+        records = self._transfer_records()
+        events = analytics.transfer_events(records)
+        start_money = self.season.start_money or analytics.DEFAULT_START_MONEY
+        lost = self.lost_auctions()
+        now = datetime.now(UTC)
+        context = load_context(self.session, self.league.competition_id, [], now)
+        squads: dict[str, list[Player]] = defaultdict(list)
+        for entry, player in self.session.exec(
+            select(SquadEntry, Player)
+            .join(Player, Player.id == SquadEntry.player_id)
+            .where(SquadEntry.league_id == self.league_id)
+        ):
+            squads[entry.manager_id].append(player)
+
+        def overpay_by_class(shares_values: list[tuple[float, int]]) -> list[float | None]:
+            result: list[float | None] = []
+            for index in range(len(coach.PRICE_CLASSES)):
+                values = [share for share, value in shares_values if coach.price_class(value) == index]
+                result.append(median(values) if values else None)
+            return result
+
+        league_overpay = overpay_by_class([(p.overpay_share, p.market_value) for p in purchases])
+        out = []
+        for manager in self._managers():
+            profile = profiles[manager.id]
+            own_purchases = [p for p in purchases if p.transfer.buyer == manager.id]
+            hours = Counter(
+                t.date.astimezone(analytics.MARKET_VALUE_TIMEZONE).hour for t in records if t.buyer == manager.id
+            )
+            unavailable = [p for p in squads[manager.id] if p.status not in coach.STATUS_AVAILABILITY]
+            needs = [pos for pos in coach.IDEAL_SQUAD if coach.position_need(profile, pos) >= 0.5]
+            shown = balances or manager.id == self.viewer_id
+            history = []
+            if shown:
+                balance = start_money
+                for event in sorted((e for e in events if e.manager == manager.id), key=lambda e: e.date):
+                    balance += event.price if event.kind == "sell" else -event.price
+                    history.append((event.date, balance))
+            balance_now = money.get(manager.id, (None, None))
+            last = max((t.date for t in records if manager.id in (t.buyer, t.seller)), default=None)
+            out.append(
+                RivalProfileOut(
+                    id=manager.id,
+                    name=manager.name,
+                    image=manager.image,
+                    is_self=manager.id == self.viewer_id,
+                    squad_size=profile.squad_size,
+                    fit_positions={pos: profile.positions.get(pos, 0) for pos in coach.IDEAL_SQUAD},
+                    needs=needs,
+                    unavailable=[p.id for p in unavailable],
+                    blocked_clubs=[team for team, count in clubs.counts.get(manager.id, Counter()).items() if count >= coach.MAX_PER_CLUB],
+                    purchases=len(own_purchases),
+                    purchases_recent=profile.purchases_recent,
+                    overpay_median=median(profile.overpay_shares) if profile.overpay_shares else None,
+                    overpay_by_class=overpay_by_class([(p.overpay_share, p.market_value) for p in own_purchases]),
+                    active_hours=[hour for hour, _ in hours.most_common(3)],
+                    last_activity=last,
+                    estimated_balance=balance_now[0] if shown else None,
+                    max_bid=balance_now[1] if shown else None,
+                    in_minus=bool(shown and balance_now[0] is not None and balance_now[0] < 0),
+                    balance_history=[BalancePointOut(date=d, balance=b) for d, b in history[-60:]],
+                    lost_to=[a for a in lost if a.winner_id == manager.id],
+                )
+            )
+        out.sort(key=lambda r: (not r.is_self, -(r.purchases_recent or 0)))
+        return RivalsOut(
+            league_overpay_by_class=league_overpay,
+            price_classes=[high for _, high in coach.PRICE_CLASSES[:-1]],
+            deadline=context.upcoming.deadline if context.upcoming else None,
+            managers=out,
+            lost=lost,
+        )
+
+    def buy_options(self) -> list[BuyOptionOut]:
+        """Market players worth buying now: value gain until the deadline and more expected points."""
+        if not self.viewer_id:
+            return []
+        market = {p.id: p for p in self.market(balances=False)}
+        own_ids = [pid for pid, e in self._squad().items() if e.manager_id == self.viewer_id]
+        now = datetime.now(UTC)
+        context = load_context(self.session, self.league.competition_id, [*own_ids, *market], now)
+        own_players = list(self.session.exec(select(Player).where(Player.id.in_(own_ids))))
+        squad = [
+            coach.LineupCandidate(
+                p.id,
+                p.position,
+                context.expectation(p.id, p.position, p.status, p.team_id, p.average_points).expected,
+                p.market_value,
+            )
+            for p in own_players
+        ]
+        money = self.balances()
+        own_max = money.get(self.viewer_id, (None, None))[1]
+        result = []
+        for player in market.values():
+            if player.seller_id == self.viewer_id:
+                continue
+            candidate = coach.LineupCandidate(player.id, player.position, player.expected_points or 0.0, player.market_value)
+            blocked = None
+            if player.own_club_full:
+                blocked = "3 Spieler vom Verein"
+            elif len(own_ids) >= self.max_squad:
+                blocked = "Kader voll – erst verkaufen"
+            elif own_max is not None and (player.bid_low or 0) > own_max:
+                blocked = "Max. Gebot reicht nicht"
+            result.append(
+                BuyOptionOut(
+                    player=player,
+                    bid=player.bid_low or player.price or player.market_value,
+                    margin=player.margin_low,
+                    points_gain=coach.points_gain(squad, candidate),
+                    blocked=blocked,
+                )
+            )
+        result.sort(key=lambda o: (o.blocked is not None, -((o.margin or 0) + o.points_gain * 10_000)))
         return result
 
     def watchlist(self, scouted: list[ScoutedPlayer]) -> list[WatchedPlayerOut]:
@@ -509,7 +1189,7 @@ class Insights:
         previous_points: int | None = None
         for manager in managers:
             own_events = [e for e in events if e.manager == manager.id]
-            estimated = analytics.estimate_balance(manager.id, own_events, start_money)
+            estimated = self.estimated_balances().get(manager.id, start_money)
             is_self = manager.id == self.viewer_id
             budget = own_budget if is_self else None
             balance = budget if budget is not None else estimated

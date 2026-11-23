@@ -34,7 +34,7 @@ function BidForm({ player, onDone }: { player: MarketPlayer; onDone: () => void 
   const me = managers.data?.find((manager) => manager.isSelf)
   // Kickbase sells at the market value, managers at the price they asked for
   const base = player.isFreeAgent ? player.marketValue : (player.price ?? player.marketValue)
-  const [input, setInput] = useState(String(player.ownBid ?? roundUp(base)))
+  const [input, setInput] = useState(String(player.ownBid ?? player.bidLow ?? roundUp(base)))
   const amount = Number(input.replace(/\D/g, "")) || 0
   const busy = place.isPending || withdraw.isPending
   const error = place.error ?? withdraw.error
@@ -122,6 +122,11 @@ function BidForm({ player, onDone }: { player: MarketPlayer; onDone: () => void 
         })}
       </div>
 
+      {/* Recommendation from the likely bidders and the forecast until the deadline */}
+      {player.bidLow != null && player.bidHigh != null && (
+        <Recommendation player={player} amount={amount} onPick={(value) => setInput(String(value))} />
+      )}
+
       {/* Bid advice section */}
       {player.bidAdvice && (
         <Advice advice={player.bidAdvice} marketValue={player.marketValue} amount={amount} onPick={(value) => setInput(String(value))} />
@@ -205,6 +210,49 @@ function Advice({
           Dein Gebot hätte {beaten} von {total} Käufen der anderen Manager überboten.
         </p>
       )}
+    </div>
+  )
+}
+
+function Recommendation({ player, amount, onPick }: { player: MarketPlayer; amount: number; onPick: (value: number) => void }) {
+  const likely = player.rivals.filter((r) => r.probability >= 0.35)
+  const gain = player.marginToMatchday != null ? player.marginToMatchday + Math.max((player.price ?? player.marketValue) - player.marketValue, 0) : null
+  const margin = gain != null && amount > 0 ? gain - (amount - player.marketValue) : null
+  return (
+    <div className="space-y-1.5 rounded-xl border border-accent/40 bg-accent-soft/30 p-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-sm font-medium">Empfehlung</span>
+        {margin != null && (
+          <span className={cn("text-xs tabular-nums", margin >= 0 ? "text-up" : "text-down")}>
+            Marge bis Spieltag {margin >= 0 ? "+" : ""}
+            {compactMoney(margin)}
+          </span>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        {[
+          { label: "Sicher günstig", value: player.bidLow! },
+          { label: likely.length ? `schlägt ${likely.map((r) => r.name).join(", ")}` : "Obergrenze", value: player.bidHigh! },
+        ].map((option) => (
+          <button
+            key={option.label}
+            type="button"
+            onClick={() => onPick(option.value)}
+            className={cn(
+              "rounded-lg border px-2 py-1.5 text-left transition-colors",
+              amount === option.value ? "border-accent bg-accent-soft" : "border-line bg-surface hover:bg-surface-2",
+            )}
+          >
+            <span className="block truncate text-xs text-muted">{option.label}</span>
+            <span className="block text-sm font-semibold tabular-nums">{compactMoney(option.value)}</span>
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-muted">
+        {likely.length
+          ? `Wahrscheinliche Bieter: ${likely.map((r) => `${r.name} (${Math.round(r.probability * 100)} %)`).join(", ")}.`
+          : "Kein Manager bietet hier wahrscheinlich mit."}
+      </p>
     </div>
   )
 }

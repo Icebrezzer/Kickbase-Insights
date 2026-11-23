@@ -25,6 +25,11 @@ const queryClient: QueryClient = new QueryClient({
   },
 })
 
+// Needed for push messages, on the iPhone only from the home screen app
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {})
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>

@@ -19,7 +19,7 @@ import contextlib
 import logging
 import time
 from collections import defaultdict
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, TypeVar
@@ -30,6 +30,7 @@ from sqlmodel import Session, select
 from core import analytics
 from core.config import Settings
 from db.models import (
+    BidHistory,
     Battle,
     BattleEntry,
     Fixture,
@@ -39,6 +40,7 @@ from db.models import (
     MarketBid,
     MarketListing,
     MarketValueHistory,
+    MatchdayLineup,
     MatchdayRanking,
     Player,
     SquadEntry,
@@ -136,6 +138,8 @@ class SyncService:
         self._idle.set()
         self._closed = False
         self.last_manual_trigger: dict[str, datetime] = {}
+        ### Called with the league id after every successful sync (sync.automation)
+        self.after_sync: Callable[[str], Awaitable[None]] | None = None
 
     def running(self, league_id: str | None = None) -> bool:
         if league_id is None:
@@ -261,6 +265,8 @@ class SyncService:
         stats["duration_seconds"] = round(time.monotonic() - started, 1)
         requests = client.request_count - requests_before
         run = await asyncio.to_thread(self._finish_run, run_id, status, error, requests, stats)
+        if status == "success" and self.after_sync is not None:
+            await self.after_sync(league_id)
         log.info(
             "Sync of %s %s after %.1fs with %d requests",
             league_name,
@@ -845,6 +851,14 @@ class SyncService:
                             final=r.current_day is not None and day < r.current_day,
                         )
                     )
+                    session.merge(
+                        MatchdayLineup(
+                            league_id=league_id,
+                            day=day,
+                            manager_id=entry.id,
+                            players=[pid for pid in entry.lineup if pid],
+                        )
+                    )
 
             new_transfers = _store_transfers(session, r)
 
@@ -910,10 +924,18 @@ def _write_personal(
     session.add(membership)
 
     session.exec(delete(MarketBid).where(MarketBid.league_id == league_id, MarketBid.user_id == user_id))
+    now = utcnow()
     for entry in market.players:
         bid = entry.own_bid(user_id)
         if bid is not None:
             session.add(MarketBid(league_id=league_id, user_id=user_id, player_id=entry.id, price=bid))
+            ### Kept beyond the auction, so a lost one can be told apart from one that was never fought
+            history = session.get(BidHistory, (league_id, user_id, entry.id))
+            if history is None or now - history.last_seen > timedelta(days=3):
+                history = BidHistory(league_id=league_id, user_id=user_id, player_id=entry.id, first_seen=now)
+            history.price = bid
+            history.last_seen = now
+            session.add(history)
 
 
 def _first(*values):
