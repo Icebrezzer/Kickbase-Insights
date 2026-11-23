@@ -29,6 +29,9 @@ def main() -> None:
     assert c.live_matchday(fixtures, t(27, 20)) == 13
     assert not c.lineup_open(fixtures, t(27, 20))
     assert c.updates_until(t(27, 19, 29), t(23, 8)) == 4
+    ### A replay three weeks later does not block the lineup of the matchday in between
+    replay = [*fixtures, c.FixtureInfo(12, datetime(2026, 12, 16, 19, 30, tzinfo=UTC), 0, "5", "6")]
+    assert c.live_matchday(replay, t(25, 12)) is None and c.lineup_open(replay, t(25, 12))
 
     ### Expected points
     placements = {"1": 1, "2": 5, "3": 18, "4": 10}

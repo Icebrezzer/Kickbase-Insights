@@ -78,14 +78,22 @@ def next_matchday(fixtures: Iterable[FixtureInfo], now: datetime) -> Matchday | 
     return None
 
 
+### Matches this long after a matchday's first kick-off belong to it. Later ones are replays.
+MATCHDAY_SPAN = timedelta(days=4)
+
+
 def live_matchday(fixtures: Iterable[FixtureInfo], now: datetime) -> int | None:
-    """The matchday that has started and still has matches to play, if any."""
+    """The matchday that has started and still has regular matches to play, if any.
+
+    A replay moved weeks later does not keep its old matchday "live", so it does not block the lineup.
+    """
     for day, matches in sorted(_matchdays(fixtures).items()):
         first = min(m.kickoff for m in matches if m.kickoff)
-        if first <= now and not all(_over(m, now) for m in matches):
-            ### A lone replay weeks later must not keep an old matchday "live"
-            if any(_running(m, now) for m in matches) or first + timedelta(days=5) > now:
-                return day
+        if first > now:
+            continue
+        regular = [m for m in matches if m.kickoff and m.kickoff <= first + MATCHDAY_SPAN]
+        if not all(_over(m, now) for m in regular):
+            return day
     return None
 
 
