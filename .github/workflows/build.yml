@@ -51,6 +51,52 @@ jobs:
       - name: Type check and build
         run: npm run build
 
+  ui-audit:
+    ### Screenshots of every page on phones, tablet and desktop, plus an overflow report (artifact "ui-audit")
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build
+        run: |
+          pip install ./backend
+          cd frontend && npm ci --no-audit --no-fund && npm run build
+      - name: Start the app in demo mode
+        env:
+          KBI_DEMO: "true"
+          KBI_DATA_DIR: /tmp/kbi
+          KBI_FRONTEND_DIR: ${{ github.workspace }}/frontend/dist
+          KBI_PUSH__SUBJECT: mailto:test@example.org
+          KBI_ALLOW__BALANCES_USERS: "1001"
+        run: |
+          cd backend && nohup python main.py start > /tmp/kbi.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8000/api/health && break; sleep 2; done
+          curl -s -c /tmp/c -H 'Content-Type: application/json' -d '{"email":"demo@demo.de","password":"demo"}' http://127.0.0.1:8000/api/auth/login > /dev/null
+          for i in $(seq 1 90); do curl -s -b /tmp/c http://127.0.0.1:8000/api/status | grep -q '"syncedAt":"' && break; sleep 2; done
+      - name: Screenshots
+        working-directory: tools/ui-audit
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium webkit
+          OUT=${{ github.workspace }}/ui-audit EXTRA_ROUTES="${{ vars.UI_AUDIT_EXTRA_ROUTES }}" node audit.mjs
+      - name: App log
+        if: always()
+        run: tail -50 /tmp/kbi.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-audit
+          path: ui-audit
+          retention-days: 7
+
   image:
     needs: [backend, frontend]
     runs-on: ubuntu-latest
