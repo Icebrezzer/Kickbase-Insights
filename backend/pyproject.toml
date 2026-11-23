@@ -19,6 +19,7 @@ dependencies = [
     "croniter>=6.0",
     "tzdata>=2025.1",
     "cryptography>=44",
+    "pywebpush>=2.0",
 ]
 
 [project.optional-dependencies]

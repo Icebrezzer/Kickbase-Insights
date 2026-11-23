@@ -7,6 +7,8 @@ import {
   Activity,
   ArrowLeftRight,
   BadgeEuro,
+  Bot,
+  CalendarClock,
   Check,
   ChevronsUpDown,
   ClipboardList,
@@ -41,6 +43,7 @@ type NavItem = { to: string; label: string; short?: string; icon: LucideIcon; en
 
 const NAV: NavItem[] = [
   { to: "/", label: "Übersicht", icon: LayoutDashboard, end: true, primary: true },
+  { to: "/spieltag", label: "Spieltag", icon: CalendarClock, primary: true },
   { to: "/markt", label: "Transfermarkt", short: "Markt", icon: Store, primary: true },
   { to: "/live", label: "Live", icon: Radio, primary: true },
   { to: "/liga", label: "Liga", icon: Trophy, primary: true },
@@ -50,6 +53,7 @@ const NAV: NavItem[] = [
   { to: "/fair-value", label: "Fair Value", icon: BadgeEuro },
   { to: "/transfers", label: "Transfers", icon: ArrowLeftRight },
   { to: "/planer", label: "Aufstellungsplaner", short: "Planer", icon: ClipboardList },
+  { to: "/automatik", label: "Automatik & Push", short: "Automatik", icon: Bot },
   { to: "/status", label: "Status", icon: Activity },
 ]
 

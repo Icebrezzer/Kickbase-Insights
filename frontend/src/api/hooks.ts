@@ -3,7 +3,15 @@ import { useMemo } from "react"
 import { useLeagueId } from "@/lib/league"
 import { api } from "./client"
 import type {
+  AutomationEvent,
+  AutomationSettings,
   BidResult,
+  Coach,
+  ForecastQuality,
+  LineupApplied,
+  PushKey,
+  ScoutRun,
+  SellResult,
   Battle,
   FairValues,
   Fixtures,
@@ -253,3 +261,71 @@ export function useOwnManager() {
   const { data } = useManagers()
   return useMemo(() => data?.find((manager) => manager.isSelf) ?? null, [data])
 }
+
+// ---------------------------------------------------------------------------
+// Manager tools
+// ---------------------------------------------------------------------------
+
+/** The viewer's next matchday, asked from Kickbase live: squad, budget, saved lineup */
+export const useCoach = () => useLeagueQuery<Coach>(["coach"], "/coach", { staleTime: 60_000, refetchInterval: 5 * 60_000 })
+
+export function useApplyLineup() {
+  const client = useQueryClient()
+  const leagueId = useLeagueId()
+  return useMutation({
+    mutationFn: () => api<LineupApplied>(withLeague("/coach/lineup", leagueId), { method: "POST" }),
+    onSuccess: () => Promise.all(["coach", "lineups", "automation-events"].map((key) => client.invalidateQueries({ queryKey: [key] }))),
+  })
+}
+
+/** Sells a player of the viewer to Kickbase right away */
+export function useSell() {
+  const client = useQueryClient()
+  const leagueId = useLeagueId()
+  return useMutation({
+    mutationFn: (playerId: string) => api<SellResult>(withLeague(`/squad/${playerId}/sell`, leagueId), { method: "POST" }),
+    onSuccess: () =>
+      Promise.all(
+        ["coach", "managers", "market", "players", "automation-events", "status"].map((key) =>
+          client.invalidateQueries({ queryKey: [key] }),
+        ),
+      ),
+  })
+}
+
+export const useAutomationSettings = () => useLeagueQuery<AutomationSettings>(["automation-settings"], "/automation/settings")
+export const useAutomationEvents = () =>
+  useLeagueQuery<AutomationEvent[]>(["automation-events"], "/automation/events", { refetchInterval: 60_000 })
+export const useForecastQuality = () => useLeagueQuery<ForecastQuality>(["forecast-quality"], "/automation/forecast", { staleTime: 10 * 60_000 })
+
+export function useSaveAutomation() {
+  const client = useQueryClient()
+  const leagueId = useLeagueId()
+  return useMutation({
+    mutationFn: (settings: AutomationSettings) =>
+      api<AutomationSettings>(withLeague("/automation/settings", leagueId), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings),
+      }),
+    onSuccess: (data) => client.setQueryData(["automation-settings", leagueId], data),
+  })
+}
+
+/** Compares the scouting list with the forecasts. Called when the market opens, the server throttles it. */
+export function useRunScout() {
+  const client = useQueryClient()
+  const leagueId = useLeagueId()
+  return useMutation({
+    mutationFn: () => api<ScoutRun>(withLeague("/automation/scout", leagueId), { method: "POST" }),
+    onSuccess: (run) => {
+      if (run.added.length || run.removed.length) {
+        client.invalidateQueries({ queryKey: ["watchlist"] })
+        client.invalidateQueries({ queryKey: ["automation-events"] })
+      }
+    },
+  })
+}
+
+export const usePushKey = () =>
+  useQuery({ queryKey: ["push-key"], queryFn: () => api<PushKey>("/push/key"), staleTime: 10 * 60_000 })

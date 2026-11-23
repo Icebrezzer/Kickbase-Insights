@@ -69,6 +69,8 @@ class AppState:
     sync: SyncService
     live: LiveService
     scheduler: Scheduler
+    automation: Any = None # sync.automation.AutomationService, set up in api.app
+    push: Any = None # sync.push.PushService
     ### Computed responses, valid until the league is synced again
     cache: dict[tuple, Any] = field(default_factory=dict)
     tasks: set[asyncio.Task] = field(default_factory=set)
@@ -152,7 +154,8 @@ def cached(
 
 
 def insights(state: AppState, session: Session, league: League, viewer: Viewer | None = None) -> Insights:
-    return Insights(session, league, viewer.user_id if viewer else None)
+    model = state.automation.model if state.automation is not None else None
+    return Insights(session, league, viewer.user_id if viewer else None, model)
 
 
 ### ===============================================================================
@@ -347,7 +350,11 @@ def player(player_id: str, state: StateDep, session: SessionDep, league: LeagueD
 @router.get("/market", response_model=list[MarketPlayerOut])
 def market(state: StateDep, session: SessionDep, league: LeagueDep, viewer: ViewerDep):
     return cached(
-        state, league, ("market",), lambda: insights(state, session, league, viewer).market(), viewer
+        state,
+        league,
+        ("market",),
+        lambda: insights(state, session, league, viewer).market(shows_balances(state.settings, viewer)),
+        viewer,
     )
 
 
@@ -519,6 +526,8 @@ async def unwatch(
 ) -> WatchOut:
     """Removes a player from the viewer's watchlist at Kickbase."""
     await ask_kickbase(state, viewer, lambda client: client.remove_scouted_player(league_id, player_id))
+    if state.automation is not None:
+        await asyncio.to_thread(state.automation.dismiss_scout, viewer.user_id, league_id, player_id)
     return WatchOut(watched=False)
 
 

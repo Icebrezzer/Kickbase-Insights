@@ -94,6 +94,10 @@ export type Player = {
   ownerId: string | null
   purchasePrice: number | null
   onMarket: boolean
+  /** Expected change of the next market value update */
+  forecast: number | null
+  /** Expected change against today after 1, 2, 3 updates */
+  projection: number[]
 }
 
 export type BidAdvice = {
@@ -112,6 +116,25 @@ export type MarketPlayer = Player & {
   listedAt: string | null
   isFreeAgent: boolean
   bidAdvice: BidAdvice | null // Only for Kickbase's own listings
+  /** Managers who may still buy a player of this club, the richest first */
+  rivals: Rival[]
+  /** Rivals who cannot afford the price are left out as well */
+  rivalsByBudget: boolean
+  ownClubPlayers: number
+  ownClubFull: boolean
+  /** Forecast value change until the next deadline, minus the markup on the price */
+  marginToMatchday: number | null
+  updatesToMatchday: number
+}
+
+export type Rival = {
+  managerId: string
+  name: string
+  image: string | null
+  clubPlayers: number
+  squadSize: number
+  estimatedBalance: number | null
+  maxBid: number | null
 }
 
 export type WatchedPlayer = Player & {
@@ -356,3 +379,101 @@ export type PlayerMatch = {
 export type PlayerMatches = { season: string | null; matches: PlayerMatch[] }
 
 export type BidResult = { ownBid: number | null }
+
+// ---------------------------------------------------------------------------
+// Manager tools
+// ---------------------------------------------------------------------------
+
+export type Expectation = {
+  playerId: string
+  expected: number
+  form: number | null
+  seasonAverage: number | null
+  availability: number
+  opponentFactor: number
+  opponentId: string | null
+  home: boolean | null
+  reasons: string[]
+}
+
+export type SquadPlayer = {
+  id: string
+  firstName: string | null
+  lastName: string
+  teamId: string | null
+  image: string | null
+  position: number
+  status: number
+  statusText: string | null
+  marketValue: number
+  averagePoints: number | null
+  purchasePrice: number | null
+  expected: Expectation
+  inLineup: boolean
+  inBest: boolean
+}
+
+export type Check = { level: "ok" | "info" | "warn" | "error"; message: string }
+
+export type Coach = {
+  matchday: { day: number; firstKickoff: string; deadline: string } | null
+  liveDay: number | null
+  lineupOpen: boolean
+  budget: number | null
+  squad: SquadPlayer[]
+  savedFormation: string | null
+  savedLineup: string[]
+  savedExpected: number
+  bestFormation: string
+  bestLineup: string[]
+  bestExpected: number
+  rescue: {
+    sales: string[]
+    budgetAfter: number
+    expectedBefore: number
+    expectedAfter: number
+    expectedLoss: number
+    enough: boolean
+  } | null
+  checks: Check[]
+  lineupSource: "kickbase" | "ranking"
+}
+
+export type LineupApplied = { formation: string; playerIds: string[]; confirmed: boolean; response: string | null }
+export type SellResult = { playerId: string; budget: number | null; response: string | null }
+
+export type AutomationSettings = {
+  autoScout: boolean
+  scoutThreshold: number
+  scoutLimit: number
+  autoLineup: boolean
+  deadlineAlerts: boolean
+  sessionExpiresAt?: string | null
+  usesServiceAccount?: boolean
+}
+
+export type AutomationEvent = {
+  id: number
+  at: string
+  kind: "lineup" | "scout" | "alert" | "sell" | "push" | string
+  ok: boolean
+  message: string
+  details: Record<string, unknown>
+}
+
+export type ScoutRun = { added: string[]; removed: string[]; flagged: string[] }
+
+export type ForecastQuality = {
+  weights: number[]
+  features: string[]
+  learned: boolean
+  trainingRows: number
+  error: number | null
+  naiveError: number | null
+  checked: number
+  directionHits: number | null
+  meanAbsError: number | null
+  flagPrecision: number | null
+}
+
+export type PushKey = { publicKey: string | null; subscribed: number }

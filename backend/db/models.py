@@ -272,3 +272,72 @@ class MarketBid(SQLModel, table=True):
 class SchemaInfo(SQLModel, table=True):
     id: int = Field(default=1, primary_key=True)
     version: int
+
+
+### ===============================================================================
+### Manager tools (automation, forecasts, push). New tables only, so no schema bump is needed.
+### ===============================================================================
+
+class UserAutomation(SQLModel, table=True):
+    """What a user lets the app do for them in one league. Everything is off until they switch it on."""
+    user_id: str = Field(primary_key=True)
+    league_id: str = Field(primary_key=True)
+    ### Put players with a forecast of at least `scout_threshold` on the Kickbase scouting list
+    auto_scout: bool = False
+    scout_threshold: int = _money(250_000)
+    ### At most this many players are put on the list by the app
+    scout_limit: int = 30
+    ### Keep the best eleven saved at Kickbase whenever the lineup can be changed
+    auto_lineup: bool = False
+    ### Push warnings before the deadline (negative budget, gaps or unavailable players in the eleven)
+    deadline_alerts: bool = True
+    updated_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+
+
+class AutoScout(SQLModel, table=True):
+    """A player the app put on a user's scouting list. Only these are ever taken off again by the app."""
+    user_id: str = Field(primary_key=True)
+    league_id: str = Field(primary_key=True)
+    player_id: str = Field(primary_key=True)
+    added_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+    ### The user took the player off by hand: not added again until the forecast drops below the threshold
+    dismissed: bool = False
+
+
+class PlayerForm(SQLModel, table=True):
+    """Points of a player's matches this season from `/performance`, as `[day, points, minutes]`,
+    newest first. Matches the player did not play in have 0 points."""
+    player_id: str = Field(primary_key=True)
+    matches: list = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    synced_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+
+
+class ForecastLog(SQLModel, table=True):
+    """A market value forecast and, once it is known, the real change. Shows how good the forecasts are."""
+    player_id: str = Field(primary_key=True)
+    day: int = Field(primary_key=True) # The market value day the forecast is for
+    predicted: int = _money(0)
+    actual: int | None = _money()
+
+
+class AutomationEvent(SQLModel, table=True):
+    """What the automation did or tried, per user. Also remembers which deadline alerts were sent."""
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True)
+    league_id: str = Field(index=True)
+    at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime, index=True)
+    kind: str # lineup, scout, alert, sell, push
+    key: str | None = Field(default=None, index=True) # Deduplicates alerts, e.g. "alert:14:60"
+    ok: bool = True
+    message: str = ""
+    details: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+
+
+class PushSubscription(SQLModel, table=True):
+    """A browser or home screen app that receives push messages. The id is the SHA-256 of the endpoint."""
+    id: str = Field(primary_key=True)
+    user_id: str = Field(index=True)
+    endpoint: str
+    p256dh: str
+    auth: str
+    created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)

@@ -19,7 +19,7 @@ import contextlib
 import logging
 import time
 from collections import defaultdict
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, TypeVar
@@ -136,6 +136,8 @@ class SyncService:
         self._idle.set()
         self._closed = False
         self.last_manual_trigger: dict[str, datetime] = {}
+        ### Called with the league id after every successful sync (sync.automation)
+        self.after_sync: Callable[[str], Awaitable[None]] | None = None
 
     def running(self, league_id: str | None = None) -> bool:
         if league_id is None:
@@ -261,6 +263,8 @@ class SyncService:
         stats["duration_seconds"] = round(time.monotonic() - started, 1)
         requests = client.request_count - requests_before
         run = await asyncio.to_thread(self._finish_run, run_id, status, error, requests, stats)
+        if status == "success" and self.after_sync is not None:
+            await self.after_sync(league_id)
         log.info(
             "Sync of %s %s after %.1fs with %d requests",
             league_name,
