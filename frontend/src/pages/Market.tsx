@@ -138,13 +138,13 @@ function MarketView({ players }: { players: MarketPlayer[] }) {
         <span className="tabular-nums" title={[p.playProbability != null ? `spielt in ${Math.round(p.playProbability * 100)} % der Spiele` : null, p.odds ? `Quoten ${p.odds.map((o) => o ?? "–").join(" | ")}` : null].filter(Boolean).join(" · ")}>
           {decimal(value)}
         </span>
-      ), { hideBelow: "xl" }),
+      ), { hideBelow: "2xl" }),
       numberColumn<MarketPlayer>("margin", "Bis Spieltag", (p) => p.marginToMatchday, (value, p) => (
         <span title={`${p.updatesToMatchday} Marktwert-Updates bis zur Deadline, abzüglich Aufpreis`}>
           <Delta value={value} compact />
         </span>
       ), { hideBelow: "2xl" }),
-      numberColumn<MarketPlayer>("today", "Heute", (p) => p.today, (v) => <Delta value={v} compact />, { hideBelow: "xl" }),
+      numberColumn<MarketPlayer>("today", "Heute", (p) => p.today, (v) => <Delta value={v} compact />, { hideBelow: "2xl" }),
       numberColumn<MarketPlayer>("yesterday", "Gestern", (p) => p.yesterday, (v) => <Delta value={v} compact />, {
         hideBelow: "3xl",
       }),
@@ -164,7 +164,7 @@ function MarketView({ players }: { players: MarketPlayer[] }) {
         header: "Verkäufer",
         accessorFn: (p) => p.sellerName ?? "Kickbase",
         cell: ({ row }) => <Seller player={row.original} image={managers.get(row.original.sellerId ?? "")?.image} />,
-        meta: { hideBelow: "lg" },
+        meta: { hideBelow: "xl" },
       },
       {
         ...numberColumn<MarketPlayer>(
