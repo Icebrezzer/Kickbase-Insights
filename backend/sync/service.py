@@ -40,6 +40,7 @@ from db.models import (
     MarketBid,
     MarketListing,
     MarketValueHistory,
+    MatchdayLineup,
     MatchdayRanking,
     Player,
     SquadEntry,
@@ -848,6 +849,14 @@ class SyncService:
                             team_value=entry.team_value,
                             placement=entry.matchday_placement,
                             final=r.current_day is not None and day < r.current_day,
+                        )
+                    )
+                    session.merge(
+                        MatchdayLineup(
+                            league_id=league_id,
+                            day=day,
+                            manager_id=entry.id,
+                            players=[pid for pid in entry.lineup if pid],
                         )
                     )
 

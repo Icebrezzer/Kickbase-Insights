@@ -52,8 +52,9 @@ jobs:
         run: npm run build
 
   ui-audit:
-    ### Screenshots of every page on phones, tablet and desktop, plus an overflow report (artifact "ui-audit")
-    runs-on: ubuntu-latest
+    ### Screenshots of every page on phones, tablet and desktop, plus an overflow report (artifact "ui-audit").
+    ### Pinned to 24.04: Playwright's browsers lag behind the newest runner image
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4

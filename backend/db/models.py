@@ -375,3 +375,11 @@ class MarketSeen(SQLModel, table=True):
     seller_id: str | None = None
     price: int | None = _money()
     seen_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+
+
+class MatchdayLineup(SQLModel, table=True):
+    """The eleven a manager fielded on a matchday, from the matchday's ranking."""
+    league_id: str = Field(primary_key=True)
+    day: int = Field(primary_key=True)
+    manager_id: str = Field(primary_key=True)
+    players: list = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
