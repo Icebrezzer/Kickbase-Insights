@@ -12,6 +12,15 @@ const DetailedValueChartImpl = lazy(() => charts().then((m) => ({ default: m.Det
 const DailyChangeChartImpl = lazy(() => charts().then((m) => ({ default: m.DailyChangeChart })))
 const MatchPointsChartImpl = lazy(() => charts().then((m) => ({ default: m.MatchPointsChart })))
 const FairValueChartImpl = lazy(() => charts().then((m) => ({ default: m.FairValueChart })))
+const SeasonPointsChartImpl = lazy(() => charts().then((m) => ({ default: m.SeasonPointsChart })))
+
+export function SeasonPointsChart(props: ComponentProps<typeof SeasonPointsChartImpl>) {
+  return (
+    <Suspense fallback={<Skeleton className="w-full" style={{ height: props.height ?? 240 }} />}>
+      <SeasonPointsChartImpl {...props} />
+    </Suspense>
+  )
+}
 
 export function ManagerLineChart(props: ComponentProps<typeof ManagerLineChartImpl>) {
   return (

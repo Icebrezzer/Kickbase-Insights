@@ -5,6 +5,7 @@
 
 import { AlertTriangle, Clock, Gavel, ShieldAlert, Target } from "lucide-react"
 import type { ReactNode } from "react"
+import { Link } from "react-router"
 import { usePlayers, useRivals, useTeamMap } from "@/api/hooks"
 import type { RivalProfile, Rivals as RivalsData } from "@/api/types"
 import { Avatar, TeamLogo } from "@/components/kickbase"
@@ -38,7 +39,7 @@ function RivalsView({ data }: { data: RivalsData }) {
     <div className="space-y-4">
       <Card className="grid grid-cols-2 gap-4 p-4 sm:p-5 lg:grid-cols-4">
         {data.leagueOverpayByClass.map((share, index) => (
-          <Stat key={index} label={`Ø Aufpreis Liga ${classLabel(index, data.priceClasses)}`} value={percent(share)} hint="Median über Marktwert" />
+          <Stat key={index} label={`Ø Aufpreis ${classLabel(index, data.priceClasses)}`} value={percent(share)} hint="Median der Liga" />
         ))}
         <Stat label="Verlorene Auktionen" value={data.lost.length} hint={data.lost[0] ? `zuletzt ${data.lost[0].playerName ?? ""}` : "keine erfasst"} />
       </Card>
@@ -78,12 +79,14 @@ function RivalCard({ manager, bounds }: { manager: RivalProfile; bounds: number[
   const names = new Map((players.data ?? []).map((p) => [p.id, p.lastName]))
   return (
     <Card className={cn(manager.inMinus && "border-down/50")}>
-      <div className="flex items-start justify-between gap-3 p-4 sm:p-5">
-        <div className="flex min-w-0 items-center gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3 p-4 sm:p-5">
+        <div className="flex min-w-0 flex-1 basis-56 items-center gap-3">
           <Avatar name={manager.name} image={manager.image} size={40} />
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="truncate font-semibold">{manager.name}</h2>
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+              <Link to={`/liga/manager/${manager.id}`} className="truncate font-semibold hover:text-accent">
+                {manager.name}
+              </Link>
               {manager.isSelf && <Badge>Du</Badge>}
               {manager.inMinus && (
                 <Badge className="bg-down/15 text-down">
@@ -98,7 +101,7 @@ function RivalCard({ manager, bounds }: { manager: RivalProfile; bounds: number[
           </div>
         </div>
         {manager.maxBid != null && (
-          <div className="text-right">
+          <div className="shrink-0 text-right">
             <div className="text-xs text-muted">max. Gebot</div>
             <div className="font-semibold tabular-nums">{compactMoney(manager.maxBid)}</div>
             <div className={cn("text-xs tabular-nums", (manager.estimatedBalance ?? 0) < 0 ? "text-down" : "text-muted")}>
@@ -173,8 +176,8 @@ function Row({ icon, label, children }: { icon: ReactNode; label: string; childr
   return (
     <div className="flex items-start gap-3">
       <span className="mt-0.5 text-muted">{icon}</span>
-      <span className="w-24 shrink-0 text-muted">{label}</span>
-      <span className="min-w-0">{children}</span>
+      <span className="w-20 shrink-0 text-muted sm:w-24">{label}</span>
+      <span className="min-w-0 break-words">{children}</span>
     </div>
   )
 }

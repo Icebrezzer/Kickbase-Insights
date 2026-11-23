@@ -3,12 +3,12 @@
  * bring a negative budget back to zero. Everything here is asked from Kickbase live.
  */
 
-import { AlertTriangle, CheckCircle2, Info, Lock, Save, ShieldAlert, TrendingDown, XCircle } from "lucide-react"
+import { AlertTriangle, BadgeEuro, CheckCircle2, Info, Lock, Save, ShieldAlert, TrendingDown, XCircle } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useApplyLineup, useCoach, useSell, useTeamMap } from "@/api/hooks"
 import type { Check, Coach, SquadPlayer } from "@/api/types"
 import { Dialog } from "@/components/Dialog"
-import { Avatar, Money, PlayerCell, PositionBadge, TeamLogo } from "@/components/kickbase"
+import { Avatar, Money, PlayerCell, TeamLogo } from "@/components/kickbase"
 import { Badge, Button, Card, CardHeader, PageHeader, QueryState, Stat } from "@/components/ui"
 import { cn } from "@/lib/cn"
 import { compactMoney, countdown, decimal, money, weekdayTime } from "@/lib/format"
@@ -188,33 +188,40 @@ function LineupCard({ coach, byId }: { coach: Coach; byId: Map<string, SquadPlay
 }
 
 function LineupPlayer({ player }: { player: SquadPlayer }) {
-  const e = player.expected
   return (
-    <div className={cn("flex items-center justify-between gap-3 rounded-xl border border-line px-3 py-2", !player.inLineup && "border-accent/50 bg-accent-soft/30")}>
-      <PlayerCell player={player} size={32} sub={<Opponent player={player} />} />
-      <div className="text-right">
-        <div className={cn("text-sm font-semibold tabular-nums", e.availability === 0 && "text-down")}>{decimal(e.expected)}</div>
-        <div className="text-[11px] text-muted">{player.inLineup ? "gespeichert" : "neu"}</div>
+    <div className={cn("flex min-w-0 items-center justify-between gap-2 rounded-xl border border-line px-3 py-2", !player.inLineup && "border-accent/50 bg-accent-soft/30")}>
+      <PlayerCell player={player} size={32} className="flex-1" sub={<Opponent player={player} />} />
+      <ExpectedBadge player={player} note={player.inLineup ? "gespeichert" : "neu"} />
+    </div>
+  )
+}
+
+/** Expected points on the right of a row, with the chance to play below */
+function ExpectedBadge({ player, note }: { player: SquadPlayer; note?: string }) {
+  const e = player.expected
+  const chance = e.playProbability
+  return (
+    <div className="shrink-0 text-right" title={e.reasons.join(", ") || undefined}>
+      <div className={cn("text-sm font-semibold tabular-nums", e.availability === 0 && "text-down")}>{decimal(e.expected)}</div>
+      <div className={cn("text-[11px] tabular-nums", chance != null && chance < 0.5 ? "text-warn" : "text-muted")}>
+        {e.availability === 0 ? (e.reasons[0] ?? "fällt aus") : chance != null ? `spielt ${Math.round(chance * 100)} %` : note}
       </div>
     </div>
   )
 }
 
+/** Opponent of the next match, kept to one line */
 function Opponent({ player }: { player: SquadPlayer }) {
   const teams = useTeamMap()
   const e = player.expected
-  if (!e.opponentId) return <span className="text-down">{e.reasons.join(", ") || "kein Spiel"}</span>
+  if (!e.opponentId) return <span className="truncate text-down">{e.reasons.join(", ") || "kein Spiel"}</span>
   const team = teams.get(e.opponentId)
   return (
-    <span className="inline-flex min-w-0 items-center gap-1">
-      {e.home ? "vs" : "@"}
+    <span className="flex min-w-0 items-center gap-1">
+      <span className="shrink-0">{e.home ? "vs" : "@"}</span>
       <TeamLogo teamId={e.opponentId} size={14} />
       <span className="truncate">{team?.name ?? "?"}</span>
-      {e.winProbability != null && <span className="text-muted">· Sieg {Math.round(e.winProbability * 100)} %</span>}
-      {e.playProbability != null && e.playProbability < 1 && (
-        <span className={cn(e.playProbability < 0.5 ? "text-warn" : "text-muted")}>· spielt {Math.round(e.playProbability * 100)} %</span>
-      )}
-      {e.reasons.length > 0 && <span className="text-warn">· {e.reasons.join(", ")}</span>}
+      {e.winProbability != null && <span className="shrink-0 text-muted">· {Math.round(e.winProbability * 100)} %</span>}
     </span>
   )
 }
@@ -292,28 +299,21 @@ function SquadCard({ coach, onSell }: { coach: Coach; onSell: (p: SquadPlayer) =
       <CardHeader title={`Kader · ${coach.squad.length} Spieler`} description="Erwartete Punkte aus Form (letzte 5 Spiele), Saisonschnitt, Status und Gegnerstärke." />
       <div className="divide-y divide-line px-1 pt-2 pb-2">
         {coach.squad.map((player) => (
-          <div key={player.id} className="flex items-center justify-between gap-3 px-3 py-2.5 sm:px-4">
-            <div className="flex min-w-0 items-center gap-2">
-              <PositionBadge value={player.position} className="hidden sm:inline-flex" />
-              <PlayerCell player={player} size={32} sub={<Opponent player={player} />} />
+          <div key={player.id} className="flex items-center justify-between gap-2 px-3 py-2.5 sm:px-4">
+            <PlayerCell player={player} size={32} className="flex-1" sub={<Opponent player={player} />} />
+            <div className="hidden text-right text-xs sm:block">
+              <div className="text-muted">Form</div>
+              <div className="tabular-nums">{decimal(player.expected.form)}</div>
             </div>
-            <div className="flex shrink-0 items-center gap-3">
-              <div className="hidden text-right text-xs sm:block">
-                <div className="text-muted">Form</div>
-                <div className="tabular-nums">{decimal(player.expected.form)}</div>
-              </div>
-              <div className="text-right text-xs">
-                <div className="text-muted">Erw.</div>
-                <div className={cn("font-semibold tabular-nums", player.inBest ? "text-fg" : "text-muted")}>{decimal(player.expected.expected)}</div>
-              </div>
-              <div className="hidden text-right text-xs md:block">
-                <div className="text-muted">MW</div>
-                <Money value={player.marketValue} />
-              </div>
-              <Button size="sm" variant="ghost" onClick={() => onSell(player)} title="Sofort an Kickbase verkaufen">
-                Verkaufen
-              </Button>
+            <div className="hidden text-right text-xs md:block">
+              <div className="text-muted">MW</div>
+              <Money value={player.marketValue} />
             </div>
+            <ExpectedBadge player={player} />
+            <Button size="sm" variant="ghost" onClick={() => onSell(player)} title="Sofort an Kickbase verkaufen" className="px-2">
+              <BadgeEuro className="size-4" />
+              <span className="hidden sm:inline">Verkaufen</span>
+            </Button>
           </div>
         ))}
       </div>

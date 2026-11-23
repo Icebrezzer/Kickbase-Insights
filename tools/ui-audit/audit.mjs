@@ -7,7 +7,7 @@ const BASE = process.env.BASE ?? "http://127.0.0.1:8000"
 const OUT = process.env.OUT ?? "out"
 const ROUTES = [
   "/", "/spieltag", "/markt", "/konkurrenz", "/live", "/liga", "/spieler", "/merkliste", "/vergleich",
-  "/fair-value", "/transfers", "/planer", "/automatik", "/status",
+  "/fair-value", "/transfers", "/planer", "/automatik", "/status", "/liga/manager/1002",
   ...(process.env.EXTRA_ROUTES ? process.env.EXTRA_ROUTES.split(",") : []),
 ]
 const TARGETS = [
@@ -72,15 +72,16 @@ for (const target of TARGETS) {
     // A few interactions: the "Mehr" sheet on phones, the bid dialog, a player screen
     if (target.name.startsWith("iphone")) {
       await page.goto(BASE + "/", { waitUntil: "networkidle" })
-      await page.getByRole("button", { name: "Mehr" }).click().catch(() => {})
-      await page.waitForTimeout(600)
+      await page.waitForTimeout(800)
+      await page.locator("nav button", { hasText: "Mehr" }).last().click().catch(() => {})
+      await page.waitForTimeout(1200)
       await page.screenshot({ path: `${OUT}/${target.name}-${scheme}-sheet-mehr.png` })
     }
     await page.goto(BASE + "/markt", { waitUntil: "networkidle" })
     const bid = page.getByRole("button", { name: /Bieten/ }).first()
     if (await bid.count()) {
       await bid.click().catch(() => {})
-      await page.waitForTimeout(600)
+      await page.waitForTimeout(1500)
       await page.screenshot({ path: `${OUT}/${target.name}-${scheme}-dialog-gebot.png` })
       report.push({ name: `${target.name}-${scheme}-dialog-gebot`, ...(await page.evaluate(inspect)) })
       await page.keyboard.press("Escape")

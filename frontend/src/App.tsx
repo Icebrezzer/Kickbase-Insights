@@ -13,6 +13,7 @@ const Market = lazy(() => import("./pages/Market"))
 const Matchday = lazy(() => import("./pages/Matchday"))
 const Automation = lazy(() => import("./pages/Automation"))
 const Rivals = lazy(() => import("./pages/Rivals"))
+const ManagerDetail = lazy(() => import("./pages/ManagerDetail"))
 const Players = lazy(() => import("./pages/Players"))
 const Watchlist = lazy(() => import("./pages/Watchlist"))
 const Compare = lazy(() => import("./pages/Compare"))
@@ -56,6 +57,7 @@ export function App() {
         <Route path="transfers" element={<Transfers />} />
         <Route path="live" element={<Live />} />
         <Route path="liga" element={<League />} />
+        <Route path="liga/manager/:id" element={<ManagerDetail />} />
         <Route path="status" element={<Status />} />
         <Route path="*" element={<NotFound />} />
       </Route>

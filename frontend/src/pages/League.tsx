@@ -1,7 +1,7 @@
 import type { ColumnDef } from "@tanstack/react-table"
 import { Info } from "lucide-react"
 import { useMemo } from "react"
-import { useSearchParams } from "react-router"
+import { useNavigate, useSearchParams } from "react-router"
 import { useBattles, useManagers, useMe, useStatus, useTeams } from "@/api/hooks"
 import type { Battle, Manager, Team } from "@/api/types"
 import { DataTable, numberColumn } from "@/components/DataTable"
@@ -57,6 +57,7 @@ function ManagerCell({ manager }: { manager: Manager }) {
 
 function Standings() {
   const query = useManagers()
+  const navigate = useNavigate()
   const columns = useMemo<ColumnDef<Manager, any>[]>(
     () => [
       numberColumn<Manager>("placement", "#", (m) => m.placement, (v) => <span className="font-semibold text-muted">{v ?? "–"}</span>, {
@@ -87,6 +88,7 @@ function Standings() {
             columns={columns}
             initialSorting={[{ id: "placement", desc: false }]}
             getRowId={(m) => m.id}
+            onRowClick={(m) => navigate(`/liga/manager/${m.id}`)}
             rowClassName={(m) => m.isSelf && "bg-accent-soft/40"}
             className="pt-1"
           />

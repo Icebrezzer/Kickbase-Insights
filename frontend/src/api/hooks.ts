@@ -7,6 +7,7 @@ import type {
   AutomationSettings,
   BidResult,
   BuyOption,
+  ManagerDetail,
   Rivals,
   Coach,
   ForecastQuality,
@@ -334,3 +335,8 @@ export const usePushKey = () =>
 
 export const useRivals = () => useLeagueQuery<Rivals>(["rivals"], "/rivals")
 export const useBuyPlanner = () => useLeagueQuery<BuyOption[]>(["buys"], "/planner/buys")
+
+export const useManagerDetail = (id: string, day: number | null) =>
+  useLeagueQuery<ManagerDetail>(["manager-detail", id, day ?? "current"], `/managers/${id}/detail${day ? `?day=${day}` : ""}`, {
+    staleTime: 60_000,
+  })

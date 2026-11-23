@@ -11,6 +11,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
   Line,
   LineChart,
   ReferenceDot,
@@ -613,6 +614,37 @@ export function MatchPointsChart({
             ))}
           </Bar>
         </BarChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+
+/** Points per matchday as bars, the season total as a line on its own axis */
+export function SeasonPointsChart({
+  rows,
+  height = 240,
+}: {
+  rows: { day: number; points: number | null; seasonPoints: number | null }[]
+  height?: number
+}) {
+  const data = rows.map((row) => ({ label: `ST ${row.day}`, points: row.points ?? 0, total: row.seasonPoints }))
+  return (
+    <div style={{ height }} className="w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={data} margin={{ top: 8, right: 4, bottom: 0, left: -8 }}>
+          <CartesianGrid vertical={false} stroke="var(--line)" />
+          <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={11} stroke="var(--muted)" interval="preserveStartEnd" />
+          <YAxis yAxisId="day" tickLine={false} axisLine={false} fontSize={11} stroke="var(--muted)" width={44} tickFormatter={(v) => number(v)} />
+          <YAxis yAxisId="total" orientation="right" tickLine={false} axisLine={false} fontSize={11} stroke="var(--muted)" width={48} tickFormatter={(v) => number(v)} />
+          <Tooltip
+            cursor={{ fill: "var(--surface-2)" }}
+            contentStyle={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, fontSize: 12 }}
+            formatter={(value, name) => [number(Number(value)), name === "points" ? "Spieltag" : "Gesamt"]}
+          />
+          <Bar yAxisId="day" dataKey="points" radius={[4, 4, 0, 0]} fill="var(--accent)" />
+          <Line yAxisId="total" dataKey="total" stroke="var(--warn)" strokeWidth={2} dot={{ r: 2 }} type="monotone" />
+        </ComposedChart>
       </ResponsiveContainer>
     </div>
   )

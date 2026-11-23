@@ -566,3 +566,58 @@ export type BuyOption = {
   pointsGain: number
   blocked: string | null
 }
+
+export type ManagerSquadPlayer = Player & {
+  inLineup: boolean
+  /** (matchday, points) of the club's last five matches, oldest first. Points null: did not play */
+  form: [number, number | null][]
+  starts: number | null
+  dayPoints: number | null
+}
+
+export type ValueSplit = { teamValue: number; today: number }
+
+export type Achievement = {
+  key: string
+  group: string
+  name: string
+  description: string
+  reward: number
+  kind: "each" | "milestone" | "once_per_league"
+  count: number | null
+  amount: number
+}
+
+export type ManagerDetail = {
+  id: string
+  name: string
+  image: string | null
+  isSelf: boolean
+  placement: number | null
+  points: number | null
+  previousId: string | null
+  nextId: string | null
+  transfers: number
+  squadSize: number
+  maxSquad: number
+  total: ValueSplit
+  lineup: ValueSplit
+  bench: ValueSplit
+  transferProfit: number
+  overpayAverage: number | null
+  clubs: [string, number][]
+  positions: Record<string, number>
+  estimatedBalance: number | null
+  maxBid: number | null
+  lineupDay: number | null
+  lineupIds: string[]
+  days: number[]
+  squad: ManagerSquadPlayer[]
+  turnovers: Turnover[]
+  transferList: Transfer[]
+  achievements: Achievement[]
+  achievementsTotal: number
+  season: { day: number; points: number | null; seasonPoints: number | null; placement: number | null }[]
+  teamValues: [string, number][]
+  matchdayDates: [number, string][]
+}
