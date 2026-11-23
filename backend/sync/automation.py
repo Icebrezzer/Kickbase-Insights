@@ -793,7 +793,7 @@ class AutomationService:
                 async with self._lock(*key):
                     view = await self.coach_view(league, row.user_id, client)
                     gain = view.best_expected - view.saved_expected
-                    if not set(view.best_lineup) == set(view.saved_lineup) and (gain >= MIN_GAIN or len(view.saved_lineup) < 11):
+                    if set(view.best_lineup) != set(view.saved_lineup) and (gain >= MIN_GAIN or len(view.saved_lineup) < 11):
                         try:
                             await self.apply_lineup(league, row.user_id, client, view, reason="automatisch")
                         except KickbaseError as e:
