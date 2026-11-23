@@ -26,6 +26,10 @@ services:
       ### Verschlüsselt die gespeicherten Kickbase-Sitzungen. Einmal festlegen, nie wieder ändern
       ### (z. B. mit: openssl rand -hex 32)
       KBI_AUTH__SECRET_KEY: "<lange Zufallszeichenkette>"
+      ### Kadergröße deiner Liga (base-xi zeigt 18)
+      KBI_AUTOMATION__MAX_SQUAD_SIZE: "18"
+      ### Optional, nur falls Kickbase keine Quoten liefert: Schlüssel von the-odds-api.com
+      # KBI_ODDS__API_KEY: "<schlüssel>"
     volumes:
       ### Datenbank, Push-Schlüssel und Sitzungen. Beim Wechsel vom Original-Image denselben Pfad
       ### wie bisher verwenden, dann bleiben alle Daten erhalten. Der Ordner muss UID 1000 gehören.

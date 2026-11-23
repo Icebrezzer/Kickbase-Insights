@@ -39,6 +39,11 @@ Home-Bildschirm-App.
 Für Mitspieler läuft die Automatik, solange ihre Anmeldung gültig ist. Die App warnt zwei Tage vor
 Ablauf per Push.
 
+## Quoten prüfen
+Die App fragt Kickbases Wett-Link jedes Spiels ab. Was Kickbase dort liefert, ist nicht dokumentiert:
+`https://kickbase.bananaflixx.eu/api/odds/sample` zeigt die gespeicherten Antworten. Enthalten sie
+keine Quoten, kann ein kostenloser Schlüssel von the-odds-api.com als `KBI_ODDS__API_KEY` gesetzt werden.
+
 ## Erste echte Läufe prüfen
 Speichern der Aufstellung und Sofortverkauf nutzen Kickbase-Schnittstellen, die nur von der
 Community dokumentiert sind. Die Antwort von Kickbase steht im Protokoll (*Automatik → Protokoll*).
@@ -52,4 +57,8 @@ Nach dem ersten Speichern der Aufstellung in der Kickbase-App gegenprüfen.
 | `KBI_AUTOMATION__LINEUP_CHECK_MINUTES_CLOSE` | 5 | …in den letzten `CLOSE_HOURS` Stunden |
 | `KBI_AUTOMATION__CLOSE_HOURS` | 3 | |
 | `KBI_AUTOMATION__ALERT_MINUTES` | 180,60,15 | Zeitpunkte der Deadline-Warnungen |
+| `KBI_AUTOMATION__MARKET_WATCH_MINUTES` | 10 | Wie oft der Markt auf neue Listings geprüft wird |
+| `KBI_AUTOMATION__MAX_SQUAD_SIZE` | 18 | Kadergröße der Liga (für Kaufplaner und Bieter) |
+| `KBI_AUTOMATION__SELL_ADVICE_HOUR` | 20 | Uhrzeit der täglichen Verkaufsempfehlung |
+| `KBI_ODDS__API_KEY` | – | Optional: Schlüssel von the-odds-api.com, falls Kickbase keine Quoten liefert |
 | `KBI_SYNC__SCHEDULE` | `10 2,6,10,14,18,22 * * *` | Voller Abgleich (22:10 = direkt nach dem Marktwert-Update) |
