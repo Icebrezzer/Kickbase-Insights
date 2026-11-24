@@ -96,6 +96,7 @@ class Insights:
         viewer_id: str | None = None,
         model: coach.ForecastModel | None = None,
         max_squad: int = 18,
+        max_per_club: int = 3,
     ):
         self.session = session
         self.league = league
@@ -103,6 +104,7 @@ class Insights:
         self.viewer_id = viewer_id
         self.model = model or coach.ForecastModel()
         self.max_squad = max_squad
+        self.max_per_club = max_per_club
         self._match_points: dict[str, list[tuple[int, int]]] | None = None
         self._form_rows: dict[str, list] | None = None
         self._estimates: dict[str, int] | None = None
@@ -711,7 +713,7 @@ class Insights:
                     player.position,
                     player.market_value,
                     price,
-                    clubs.can_buy(mid, player.team_id),
+                    clubs.can_buy(mid, player.team_id, self.max_per_club),
                     money[mid][1] if balances and mid in money else None,
                     league_shares,
                     learned.probability if learned.learned else None,
@@ -770,7 +772,7 @@ class Insights:
                     ],
                     rivals_by_budget=balances,
                     own_club_players=own_club,
-                    own_club_full=own_club >= coach.MAX_PER_CLUB,
+                    own_club_full=own_club >= self.max_per_club,
                     margin_to_matchday=margin,
                     updates_to_matchday=updates,
                     bid_low=bids.low,
@@ -890,7 +892,7 @@ class Insights:
                     fit_positions={pos: profile.positions.get(pos, 0) for pos in coach.IDEAL_SQUAD},
                     needs=needs,
                     unavailable=[p.id for p in unavailable],
-                    blocked_clubs=[team for team, count in clubs.counts.get(manager.id, Counter()).items() if count >= coach.MAX_PER_CLUB],
+                    blocked_clubs=[team for team, count in clubs.counts.get(manager.id, Counter()).items() if count >= self.max_per_club],
                     purchases=len(own_purchases),
                     purchases_recent=profile.purchases_recent,
                     overpay_median=median(profile.overpay_shares) if profile.overpay_shares else None,
@@ -940,7 +942,7 @@ class Insights:
             candidate = coach.LineupCandidate(player.id, player.position, player.expected_points or 0.0, player.market_value)
             blocked = None
             if player.own_club_full:
-                blocked = "3 Spieler vom Verein"
+                blocked = f"Vereinslimit erreicht ({self.max_per_club})"
             elif len(own_ids) >= self.max_squad:
                 blocked = "Kader voll – erst verkaufen"
             elif own_max is not None and (player.bid_low or 0) > own_max:
@@ -1269,6 +1271,41 @@ class Insights:
             turnovers, [m.id for m in managers], start.astimezone(UTC).date(), datetime.now(UTC).date()
         )
         return ChartOut(managers=managers, rows=rows)
+
+    def wealth_chart(self, balances: bool) -> ChartOut:
+        """Comparable trading/valuation history, excluding undated rewards and login bonuses.
+
+        A missing historical player value is a gap, never zero. Cash and squad are both
+        reconstructed at the market value update boundary to avoid counting a trade twice.
+        """
+        managers = [m for m in self._chart_managers() if balances or m.id == self.viewer_id]
+        start = self.season_start()
+        if start is None:
+            return ChartOut(managers=managers, rows=[])
+        first = analytics.market_value_day(start)
+        today = analytics.market_value_day(datetime.now(UTC))
+        events = analytics.transfer_events(self._transfer_records())
+        squad = self._squad()
+        involved = set(squad) | {e.player_id for e in events}
+        histories = self._histories(list(involved))
+        rows = {day: {"date": analytics.day_to_date(day).isoformat()} for day in range(first, today + 1)}
+        for manager in managers:
+            own_events = sorted((e for e in events if e.manager == manager.id), key=lambda e: e.date)
+            held = {pid for pid, entry in squad.items() if entry.manager_id == manager.id}
+            cash = analytics.estimate_balance(manager.id, own_events, self.season.start_money if self.season.start_money is not None else analytics.DEFAULT_START_MONEY)
+            pending = list(own_events)
+            for day in range(today, first - 1, -1):
+                while pending and analytics.market_value_day(pending[-1].date) >= day:
+                    event = pending.pop()
+                    if event.kind == "buy":
+                        held.discard(event.player_id)
+                        cash += event.price
+                    else:
+                        held.add(event.player_id)
+                        cash -= event.price
+                values = [analytics.value_on_day(histories.get(pid) or [], day) for pid in held]
+                rows[day][manager.id] = cash + sum(values) if all(v is not None for v in values) else None
+        return ChartOut(managers=managers, rows=list(rows.values()))
 
     def matchday_charts(self) -> MatchdayChartsOut:
         managers = self._chart_managers()

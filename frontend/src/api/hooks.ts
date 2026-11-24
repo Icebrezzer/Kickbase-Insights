@@ -86,6 +86,26 @@ export function useLogout() {
   })
 }
 
+export function useLeaguePreference() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...settings }: { id: string; inactive?: boolean; analysisSquadLimit?: number; analysisClubLimit?: number }) =>
+      api<Me>(withLeague("/leagues/preference", id), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings),
+      }),
+    onSuccess: (me) => {
+      client.setQueryData(["me"], me)
+      void client.invalidateQueries()
+    },
+  })
+}
+
+export function useWealthChart() {
+  return useLeagueQuery<RevenueChart>(["wealth"], "/charts/wealth")
+}
+
 // ---------------------------------------------------------------------------
 // League data
 // ---------------------------------------------------------------------------

@@ -8,7 +8,9 @@ import { useMemo, useState } from "react"
 import { useApplyLineup, useCoach, useSell, useTeamMap } from "@/api/hooks"
 import type { Check, Coach, SquadPlayer } from "@/api/types"
 import { Dialog } from "@/components/Dialog"
-import { Avatar, Money, PlayerCell, TeamLogo } from "@/components/kickbase"
+import { Avatar, Money, PlayerAvatar, PlayerCell, TeamLogo } from "@/components/kickbase"
+import { PitchLines } from "@/components/Pitch"
+import { usePlayerSheet } from "@/components/PlayerSheet"
 import { Badge, Button, Card, CardHeader, PageHeader, QueryState, Stat } from "@/components/ui"
 import { cn } from "@/lib/cn"
 import { compactMoney, countdown, decimal, money, weekdayTime } from "@/lib/format"
@@ -19,7 +21,7 @@ export default function Matchday() {
   const query = useCoach()
   return (
     <>
-      <PageHeader title="Spieltag" description="Deadline, beste Elf und Budget – live aus Kickbase." />
+      <PageHeader title="Dein Team für den Spieltag" description="Aufstellung, Ausfälle und Budget gemeinsam im Blick" />
       <QueryState query={query}>{(coach) => <MatchdayView coach={coach} />}</QueryState>
     </>
   )
@@ -47,9 +49,9 @@ function MatchdayView({ coach }: { coach: Coach }) {
         <Stat
           label="Budget"
           value={<span className={cn(coach.budget != null && coach.budget < 0 ? "text-down" : "text-up")}>{compactMoney(coach.budget)}</span>}
-          hint={coach.budget != null && coach.budget < 0 ? "Muss bis zur Deadline ≥ 0 sein" : "Bereit für den Spieltag"}
+          hint={coach.budget == null ? "Budget nicht verfügbar" : coach.budget < 0 ? "Bis zur Deadline ausgleichen" : "Budget ausgeglichen"}
         />
-        <Stat label="Erwartete Punkte" value={decimal(coach.savedExpected)} hint="deine gespeicherte Elf" />
+        <Stat label="Erwartete Punkte" value={decimal(coach.savedExpected)} hint={coach.lineupSource === "ranking" ? "Elf aus der Rangliste · Ersatzquelle" : "deine gespeicherte Elf"} />
         <Stat
           label="Beste Elf"
           value={decimal(coach.bestExpected)}
@@ -139,6 +141,7 @@ function Rescue({ coach, byId, onSell }: { coach: Coach; byId: Map<string, Squad
 
 function LineupCard({ coach, byId }: { coach: Coach; byId: Map<string, SquadPlayer> }) {
   const apply = useApplyLineup()
+  const { open } = usePlayerSheet()
   const same = coach.bestLineup.length === coach.savedLineup.length && coach.bestLineup.every((id) => coach.savedLineup.includes(id))
   const rows = [1, 2, 3, 4].map((position) => ({
     position,
@@ -171,7 +174,21 @@ function LineupCard({ coach, byId }: { coach: Coach; byId: Map<string, SquadPlay
           {apply.data.confirmed ? "Gespeichert – Kickbase bestätigt die neue Aufstellung." : "Gesendet, aber Kickbase meldet eine andere Aufstellung zurück. Bitte in der App prüfen."}
         </p>
       )}
-      <div className="grid gap-3 p-4 sm:p-5">
+      <div className="grid gap-6 p-4 sm:p-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="relative mx-auto flex aspect-[68/92] w-full max-w-lg flex-col justify-around overflow-hidden rounded-xl px-2 py-4">
+          <PitchLines />
+          {[...rows].reverse().map(({ position, players }) => <div key={position} className="relative z-10 flex justify-evenly gap-1">
+            {players.map((player) => <button key={player.id} type="button" onClick={() => open(player.id)}
+              aria-label={`${playerName(player)}, ${decimal(player.expected.expected)} erwartete Punkte`}
+              className="flex min-h-16 min-w-0 flex-1 flex-col items-center rounded-lg px-1 text-white transition-colors hover:bg-black/20">
+              <PlayerAvatar image={player.image} teamId={player.teamId} size={36} />
+              <span className="mt-1 max-w-full rounded bg-black/65 px-1 text-center text-[11px] leading-4">{player.lastName}</span>
+              <span className="mt-1 rounded bg-black/65 px-2 text-xs font-medium tabular-nums">{decimal(player.expected.expected)}</span>
+            </button>)}
+            {players.length === 0 && <span className="rounded bg-black/65 px-3 py-2 text-xs text-white">{POSITIONS[position].plural}: unbesetzt</span>}
+          </div>)}
+        </div>
+        <div className="grid content-start gap-4">
         {rows.map(({ position, players }) => (
           <div key={position}>
             <div className="mb-1.5 text-xs font-medium text-muted">{POSITIONS[position].plural}</div>
@@ -182,6 +199,7 @@ function LineupCard({ coach, byId }: { coach: Coach; byId: Map<string, SquadPlay
             </div>
           </div>
         ))}
+        </div>
       </div>
     </Card>
   )

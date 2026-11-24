@@ -18,6 +18,7 @@ import { cn } from "@/lib/cn"
 import { compactMoney, dateShort, money, number, percent, signedMoney } from "@/lib/format"
 import { POSITIONS, pointsGrade } from "@/lib/kickbase"
 import { fromKickbase, type Lineup } from "@/lib/lineup"
+import { useLeague } from "@/lib/league"
 
 type Tab = "squad" | "transfers" | "achievements" | "season"
 type Split = "total" | "lineup" | "bench"
@@ -35,9 +36,10 @@ function DetailView({ detail, day, onDay }: { detail: Detail; day: number | null
   const [tab, setTab] = useState<Tab>("squad")
   const [split, setSplit] = useState<Split>("total")
   const teams = useTeamMap()
+  const clubLimit = useLeague().league?.analysisClubLimit ?? 3
   const values = detail[split]
   const shown = split === "total" ? detail.squadSize : split === "lineup" ? detail.lineupIds.length : detail.squadSize - detail.lineupIds.length
-  const full = detail.clubs.filter(([, n]) => n >= 3).length
+  const full = detail.clubs.filter(([, n]) => n >= clubLimit).length
 
   return (
     <>
@@ -107,17 +109,17 @@ function DetailView({ detail, day, onDay }: { detail: Detail; day: number | null
           <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="text-[15px] font-semibold">Vereine im Kader</h2>
             <span className="text-xs text-muted">
-              {detail.clubs.length} Vereine · {full} am Limit (max. 3) ·{" "}
+              {detail.clubs.length} Vereine · {full} am persönlichen Analyselimit ({clubLimit}) ·{" "}
               {[1, 2, 3, 4].map((pos) => `${detail.positions[String(pos)] ?? 0} ${POSITIONS[pos].short}`).join(" · ")}
             </span>
           </div>
           <div className="flex flex-wrap gap-3">
             {detail.clubs.map(([team, count]) => (
-              <span key={team} className="relative" title={`${teams.get(team)?.name ?? team}: ${count}/3`}>
+              <span key={team} className="relative" title={`${teams.get(team)?.name ?? team}: ${count}/${clubLimit}`}>
                 <span
                   className={cn(
                     "grid size-11 place-items-center rounded-full border-2",
-                    count >= 3 ? "border-down" : count === 2 ? "border-warn" : "border-line",
+                    count >= clubLimit ? "border-down" : count === clubLimit - 1 ? "border-warn" : "border-line",
                   )}
                 >
                   <TeamLogo teamId={team} size={24} />
@@ -125,10 +127,10 @@ function DetailView({ detail, day, onDay }: { detail: Detail; day: number | null
                 <span
                   className={cn(
                     "absolute -right-1 -bottom-1 rounded-full px-1 text-[10px] font-semibold tabular-nums",
-                    count >= 3 ? "bg-down text-white" : "bg-surface-3",
+                    count >= clubLimit ? "bg-down text-white" : "bg-surface-3",
                   )}
                 >
-                  {count}/3
+                  {count}/{clubLimit}
                 </span>
               </span>
             ))}

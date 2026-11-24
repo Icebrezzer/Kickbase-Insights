@@ -1,6 +1,9 @@
 // Mirrors backend/api/schemas.py. Dates arrive as ISO 8601 strings.
 
 export type League = {
+  inactive?: boolean
+  analysisSquadLimit: number
+  analysisClubLimit: number
   id: string
   name: string
   image: string | null

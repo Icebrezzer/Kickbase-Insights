@@ -26,6 +26,7 @@ from api.schemas import (
     FairValuesOut,
     FixturesOut,
     LeagueOut,
+    LeaguePreferenceIn,
     LineupsOut,
     LiveOut,
     LivePlayerOut,
@@ -52,7 +53,7 @@ from api.schemas import (
 from auth.accounts import Accounts, LoginError, Viewer
 from core import analytics
 from core.config import Settings
-from db.models import League, LeagueSeason, SyncRun, utcnow
+from db.models import League, LeagueSeason, SyncRun, UserLeague, utcnow
 from kickbase import KickbaseAuthError, KickbaseClient, KickbaseError
 from sync.scheduler import Scheduler
 from sync.service import SyncService
@@ -155,8 +156,11 @@ def cached(
 
 def insights(state: AppState, session: Session, league: League, viewer: Viewer | None = None) -> Insights:
     model = state.automation.model if state.automation is not None else None
+    membership = session.get(UserLeague, (viewer.user_id, league.id)) if viewer else None
     return Insights(
-        session, league, viewer.user_id if viewer else None, model, state.settings.automation.max_squad_size
+        session, league, viewer.user_id if viewer else None, model,
+        membership.analysis_squad_limit if membership else state.settings.automation.max_squad_size,
+        membership.analysis_club_limit if membership else 3,
     )
 
 
@@ -172,11 +176,37 @@ def _me(session: Session, viewer: Viewer, settings: Settings) -> MeOut:
     leagues = {
         league.id: league for league in session.exec(select(League).where(League.id.in_(viewer.league_ids)))
     }
+    memberships = {
+        row.league_id: row for row in session.exec(select(UserLeague).where(UserLeague.user_id == viewer.user_id))
+    }
     return MeOut(
         user=UserOut(id=viewer.user_id, name=viewer.name, image=viewer.image),
-        leagues=[LeagueOut.model_validate(leagues[lid]) for lid in viewer.league_ids if lid in leagues],
+        leagues=[
+            LeagueOut.model_validate(leagues[lid]).model_copy(update={
+                "inactive": memberships[lid].inactive if lid in memberships else False,
+                "analysis_squad_limit": memberships[lid].analysis_squad_limit if lid in memberships else 18,
+                "analysis_club_limit": memberships[lid].analysis_club_limit if lid in memberships else 3,
+            })
+            for lid in viewer.league_ids if lid in leagues
+        ],
         balances=shows_balances(settings, viewer),
     )
+
+
+@router.put("/leagues/preference", response_model=MeOut)
+def set_league_preference(
+    body: LeaguePreferenceIn, league_id: LeagueIdDep, viewer: ViewerDep, session: SessionDep, state: StateDep,
+) -> MeOut:
+    membership = session.get(UserLeague, (viewer.user_id, league_id))
+    if membership is None:
+        raise HTTPException(404, "Diese Liga gibt es nicht oder du bist kein Mitglied.")
+    for key, value in body.model_dump(exclude_unset=True).items():
+        if value is not None:
+            setattr(membership, key, value)
+    session.add(membership)
+    session.commit()
+    state.cache.clear()
+    return _me(session, viewer, state.settings)
 
 
 @router.post("/auth/login", response_model=MeOut)
@@ -396,6 +426,12 @@ def fair_value(state: StateDep, session: SessionDep, league: LeagueDep):
 @router.get("/charts/revenue", response_model=ChartOut)
 def revenue_chart(state: StateDep, session: SessionDep, league: LeagueDep):
     return cached(state, league, ("revenue",), lambda: insights(state, session, league).revenue_chart())
+
+
+@router.get("/charts/wealth", response_model=ChartOut)
+def wealth_chart(state: StateDep, session: SessionDep, league: LeagueDep, viewer: ViewerDep):
+    return cached(state, league, ("wealth",),
+                  lambda: insights(state, session, league, viewer).wealth_chart(shows_balances(state.settings, viewer)), viewer)
 
 
 @router.get("/charts/matchdays", response_model=MatchdayChartsOut)

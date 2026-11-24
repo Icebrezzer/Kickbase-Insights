@@ -42,11 +42,7 @@ def create_db_engine(url: str) -> Engine:
 
 
 def init_db(engine: Engine) -> None:
-    """Create the tables, rebuilding them when they were created by an older version.
-
-    Everything except the accounts is synced from Kickbase again afterwards, so a rebuild only costs
-    one full sync and the users have to log in once more.
-    """
+    """Create tables and apply additive changes; never discard existing user data."""
     tables = set(inspect(engine).get_table_names())
     stored: int | None = None
     if "schemainfo" in tables:
@@ -63,8 +59,10 @@ def init_db(engine: Engine) -> None:
             f"(schema {stored}, this is {SCHEMA_VERSION})."
         )
     if stored is not None and stored < SCHEMA_VERSION:
-        log.warning("Database schema %s is outdated, rebuilding it as schema %s", stored, SCHEMA_VERSION)
-        SQLModel.metadata.drop_all(engine)
+        raise RuntimeError(
+            f"Database schema {stored} needs a migration to {SCHEMA_VERSION}. "
+            "No data was changed. Back up the database and use a supported migration before upgrading."
+        )
 
     SQLModel.metadata.create_all(engine)
     _add_transfer_ids(engine)
@@ -97,6 +95,11 @@ def _add_transfer_ids(engine: Engine) -> None:
 
 ### Columns added to tables after they were first created: table -> column -> SQL type and default
 _LATER_COLUMNS = {
+    "userleague": {
+        "inactive": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "analysis_squad_limit": "INTEGER NOT NULL DEFAULT 18",
+        "analysis_club_limit": "INTEGER NOT NULL DEFAULT 3",
+    },
     "userautomation": {"listing_alerts": "BOOLEAN DEFAULT TRUE", "sell_alerts": "BOOLEAN DEFAULT TRUE"},
 }
 

@@ -197,7 +197,7 @@ const LENGTH = 92
 const STRIPES = 12
 
 /** Grass with mowing stripes and the markings, drawn to scale on a 68 x 92 field */
-function PitchLines() {
+export function PitchLines() {
   return (
     <svg viewBox={`0 0 68 ${LENGTH}`} className="absolute inset-0 size-full" aria-hidden>
       {Array.from({ length: STRIPES }, (_, i) => (

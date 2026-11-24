@@ -28,7 +28,7 @@ import {
 } from "lucide-react"
 import { Suspense, useEffect, useRef, useState } from "react"
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router"
-import { useLogout, useMe, useStatus } from "@/api/hooks"
+import { useLeaguePreference, useLogout, useMe, useStatus } from "@/api/hooks"
 import type { League } from "@/api/types"
 import { cn } from "@/lib/cn"
 import { relativeTime } from "@/lib/format"
@@ -43,21 +43,44 @@ import { Badge, Skeleton } from "./ui"
 type NavItem = { to: string; label: string; short?: string; icon: LucideIcon; end?: boolean; primary?: boolean }
 
 const NAV: NavItem[] = [
-  { to: "/", label: "Übersicht", icon: LayoutDashboard, end: true, primary: true },
-  { to: "/spieltag", label: "Spieltag", icon: CalendarClock, primary: true },
+  { to: "/", label: "Heute", icon: LayoutDashboard, end: true, primary: true },
+  { to: "/spieltag", label: "Mein Team", icon: CalendarClock, primary: true },
   { to: "/markt", label: "Transfermarkt", short: "Markt", icon: Store, primary: true },
-  { to: "/live", label: "Live", icon: Radio, primary: true },
+  { to: "/live", label: "Live", icon: Radio },
   { to: "/liga", label: "Liga", icon: Trophy, primary: true },
   { to: "/konkurrenz", label: "Konkurrenz", icon: Swords },
   { to: "/spieler", label: "Spieler", icon: Users },
   { to: "/merkliste", label: "Watchlist", icon: Star },
   { to: "/vergleich", label: "Vergleich", icon: Scale },
   { to: "/fair-value", label: "Fair Value", icon: BadgeEuro },
-  { to: "/transfers", label: "Transfers", icon: ArrowLeftRight },
+  { to: "/transfers", label: "Finanzen", icon: ArrowLeftRight, primary: true },
   { to: "/planer", label: "Aufstellungsplaner", short: "Planer", icon: ClipboardList },
   { to: "/automatik", label: "Automatik & Push", short: "Automatik", icon: Bot },
   { to: "/status", label: "Status", icon: Activity },
 ]
+
+const GROUPS = [
+  ["/markt", "/spieler", "/merkliste", "/vergleich", "/fair-value"],
+  ["/spieltag", "/planer", "/live"],
+  ["/liga", "/konkurrenz"],
+]
+
+function SectionNav() {
+  const { pathname } = useLocation()
+  const group = GROUPS.find((paths) => paths.some((path) => pathname === path || pathname.startsWith(`${path}/`)))
+  if (!group) return null
+  return (
+    <nav aria-label="Bereiche" className="mb-6 flex flex-wrap gap-2">
+      {group.map((path) => {
+        const item = NAV.find((entry) => entry.to === path)!
+        return <NavLink key={path} to={path} end className={({ isActive }) => cn(
+          "inline-flex min-h-11 items-center gap-2 rounded-lg border px-3 text-sm transition-colors",
+          isActive ? "border-line bg-surface-2 text-fg" : "border-transparent text-muted hover:bg-surface",
+        )}><item.icon size={16} strokeWidth={1.5} />{item.label}</NavLink>
+      })}
+    </nav>
+  )
+}
 
 export function AppShell() {
   const [moreOpen, setMoreOpen] = useState(false)
@@ -80,20 +103,23 @@ export function AppShell() {
   return (
     <div className="min-h-dvh">
       <Sidebar />
-      <TopBar onLeagues={() => setLeaguesOpen(true)} />
+      <TopBar onLeagues={() => setLeaguesOpen(true)} onMore={() => setMoreOpen(true)} />
 
       <main className="px-4 pt-4 pb-28 sm:px-6 lg:ml-64 lg:px-8 lg:pt-8 lg:pb-12 2xl:px-10">
         <div className="mx-auto max-w-[1760px]">
+          <SectionNav />
+          <div key={location.pathname} className="animate-page-enter">
           <Suspense fallback={<PageSkeleton />}>
             <Outlet />
           </Suspense>
+          </div>
           <p className="mt-10 text-center text-xs text-muted">
             This is a hobby project and not affiliated with Kickbase in any way.
           </p>
         </div>
       </main>
 
-      <BottomNav onMore={() => setMoreOpen(true)} />
+      <BottomNav />
       <Sheet open={moreOpen} onClose={() => setMoreOpen(false)} title="Mehr">
         <nav className="grid gap-1 p-3">
           {NAV.filter((item) => !item.primary).map((item) => (
@@ -140,7 +166,7 @@ function Sidebar() {
         <LeagueSwitcher />
       </div>
       <nav className="flex-1 space-y-0.5 overflow-y-auto px-3">
-        {NAV.map((item) => (
+        {["/", "/markt", "/spieltag", "/transfers", "/liga", "/automatik", "/status"].map((path) => NAV.find((item) => item.to === path)!).map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
@@ -238,24 +264,51 @@ function LeagueSwitcher() {
 
 function LeagueList() {
   const { league: current, leagues, setLeagueId } = useLeague()
+  const preference = useLeaguePreference()
   return (
-    <ul role="listbox" aria-label="Ligen" className="space-y-0.5">
+    <div>
+    <p className="mb-3 px-2 text-xs text-muted">Inaktiv gilt nur für dich. Die Liga bleibt erreichbar.</p>
+    {preference.error && <p role="alert" className="mb-3 text-sm text-down">Die Einstellung konnte nicht gespeichert werden.</p>}
+    <ul aria-label="Ligen" className="space-y-3">
       {leagues.map((league) => (
-        <li key={league.id}>
+        <li key={league.id} className="rounded-xl border border-line p-2">
           <button
             type="button"
-            role="option"
-            aria-selected={league.id === current?.id}
+            aria-pressed={league.id === current?.id}
             onClick={() => setLeagueId(league.id)}
             className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-surface-2"
           >
             <LeagueAvatar league={league} size={28} />
-            <span className="min-w-0 flex-1 truncate text-sm font-medium">{league.name}</span>
+            <span className="min-w-0 flex-1 text-sm font-medium">
+              <span className="block">{league.name}</span>
+              <span className="mt-1 block text-xs font-normal text-muted">Liga {league.id} · {league.seasonName ?? "Saison unbekannt"}</span>
+              <span className="mt-1 block text-xs font-normal text-muted">{league.inactive ? "Für dich inaktiv" : "Für dich aktiv"}</span>
+            </span>
             {league.id === current?.id && <Check className="size-4 text-accent" />}
           </button>
+          <button type="button" disabled={preference.isPending} onClick={() => preference.mutate({ id: league.id, inactive: !league.inactive })}
+            className="min-h-11 w-full rounded-lg px-2 text-left text-xs text-muted hover:bg-surface-2 disabled:opacity-50">
+            {league.inactive ? "Für mich aktivieren" : "Für mich als inaktiv markieren"}
+          </button>
+          <form className="mt-2 border-t border-line p-2" key={`${league.analysisSquadLimit}-${league.analysisClubLimit}`}
+            onSubmit={(event) => {
+              event.preventDefault()
+              const form = new FormData(event.currentTarget)
+              preference.mutate({ id: league.id, analysisSquadLimit: Number(form.get("squad")), analysisClubLimit: Number(form.get("club")) })
+            }}>
+            <p className="mb-3 text-xs text-muted">Persönliche Analyse-Regeln · keine Änderung in Kickbase</p>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="text-xs text-muted">Kaderplätze<input name="squad" type="number" min={11} max={100} required defaultValue={league.analysisSquadLimit}
+                className="mt-1 min-h-11 w-full rounded-lg border border-line bg-surface px-3 text-sm text-fg" /></label>
+              <label className="text-xs text-muted">Pro Verein<input name="club" type="number" min={1} max={100} required defaultValue={league.analysisClubLimit}
+                className="mt-1 min-h-11 w-full rounded-lg border border-line bg-surface px-3 text-sm text-fg" /></label>
+            </div>
+            <button type="submit" disabled={preference.isPending} className="mt-2 min-h-11 rounded-lg px-3 text-sm text-accent hover:bg-surface-2 disabled:opacity-50">Regeln speichern</button>
+          </form>
         </li>
       ))}
     </ul>
+    </div>
   )
 }
 
@@ -281,7 +334,7 @@ function UserRow() {
   )
 }
 
-function TopBar({ onLeagues }: { onLeagues: () => void }) {
+function TopBar({ onLeagues, onMore }: { onLeagues: () => void; onMore: () => void }) {
   const { league, leagues } = useLeague()
   const { data: status } = useStatus()
   const switchable = leagues.length > 1
@@ -307,15 +360,17 @@ function TopBar({ onLeagues }: { onLeagues: () => void }) {
             )}
           </span>
         </button>
-        <SyncIndicator compact />
+        <div className="flex shrink-0 items-center">
+          <SyncIndicator compact />
+          <button type="button" onClick={onMore} aria-label="Weitere Bereiche und Einstellungen" className="grid size-11 place-items-center rounded-lg text-muted hover:bg-surface-2"><Menu size={20} strokeWidth={1.5} /></button>
+        </div>
       </div>
     </header>
   )
 }
 
-function BottomNav({ onMore }: { onMore: () => void }) {
+function BottomNav() {
   const location = useLocation()
-  const secondaryActive = NAV.some((item) => !item.primary && location.pathname.startsWith(item.to))
   const itemClass = (active: boolean) =>
     cn(
       "flex flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium",
@@ -324,8 +379,8 @@ function BottomNav({ onMore }: { onMore: () => void }) {
   return (
     <nav className="pb-safe fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/90 backdrop-blur-lg lg:hidden">
       <div className="mx-auto flex h-16 max-w-lg">
-        {NAV.filter((item) => item.primary).map((item) => (
-          <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => itemClass(isActive)}>
+        {["/", "/markt", "/spieltag", "/transfers", "/liga"].map((path) => NAV.find((item) => item.to === path)!).map((item) => (
+          <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => itemClass(isActive || !!GROUPS.find((paths) => paths[0] === item.to)?.includes(location.pathname))}>
             <span className="relative">
               <item.icon className="size-[22px]" />
               {item.to === "/live" && <LiveDot className="absolute -top-0.5 -right-1" />}
@@ -333,10 +388,6 @@ function BottomNav({ onMore }: { onMore: () => void }) {
             {item.short ?? item.label}
           </NavLink>
         ))}
-        <button type="button" onClick={onMore} className={itemClass(secondaryActive)}>
-          <Menu className="size-[22px]" />
-          Mehr
-        </button>
       </div>
     </nav>
   )

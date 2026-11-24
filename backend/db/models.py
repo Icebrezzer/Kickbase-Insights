@@ -248,6 +248,9 @@ class UserLeague(SQLModel, table=True):
     league_id: str = Field(primary_key=True, index=True)
     budget: int | None = _money()
     budget_updated_at: datetime | None = _ts()
+    inactive: bool = False
+    analysis_squad_limit: int = 18
+    analysis_club_limit: int = 3
 
 
 class UserSession(SQLModel, table=True):

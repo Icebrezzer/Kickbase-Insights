@@ -27,12 +27,24 @@ export default function Dashboard() {
           {league?.numberOfDays ? ` von ${league.numberOfDays}` : ""}
           {league?.seasonName ? ` · Saison ${league.seasonName}` : ""}
         </p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-[28px]">
-          {own ? `Hallo ${own.name}` : (league?.name ?? "Übersicht")}
+        <h1 className="mt-2 text-3xl font-medium tracking-tight sm:text-4xl">
+          Heute entscheiden
         </h1>
+        <p className="mt-2 max-w-xl text-sm text-muted">Dein Kader, dein Budget und die nächsten Chancen auf dem Markt</p>
       </div>
 
       <OwnStats own={own} total={managers.data?.length} loading={managers.isPending} />
+
+      <nav aria-label="Managerentscheidungen" className="grid gap-3 sm:grid-cols-3">
+        {[
+          { to: "/markt", title: "Wen lohnt es sich zu kaufen?", detail: "Gebotsspanne und mögliche Verstärkungen" },
+          { to: "/spieltag", title: "Ist deine Elf bereit?", detail: "Aufstellung, Ausfälle und Budget prüfen" },
+          { to: "/transfers", title: "Wie wächst dein Kapital?", detail: "Gewinne und Entwicklung der Liga vergleichen" },
+        ].map((item) => <Link key={item.to} to={item.to} className="group flex min-h-24 items-center justify-between gap-4 rounded-xl border border-line bg-surface p-4 transition-colors hover:bg-surface-2">
+          <span><span className="block font-medium">{item.title}</span><span className="mt-1 block text-sm text-muted">{item.detail}</span></span>
+          <ArrowRight className="size-4 shrink-0 text-muted transition-transform group-hover:translate-x-1" />
+        </Link>)}
+      </nav>
 
       <CardColumns
         cards={{

@@ -23,8 +23,8 @@ export function CardHeader({
   className?: string
 }) {
   return (
-    <div className={cn("flex items-start justify-between gap-3 px-4 pt-4 sm:px-5", className)}>
-      <div className="min-w-0">
+    <div className={cn("flex flex-wrap items-start justify-between gap-3 px-4 pt-4 sm:px-5", className)}>
+      <div className="min-w-0 flex-[1_1_12rem]">
         <h2 className="text-[15px] font-semibold tracking-tight">{title}</h2>
         {description && <p className="mt-0.5 text-sm text-muted">{description}</p>}
       </div>
@@ -109,7 +109,7 @@ export function Segmented<T extends string>({
             aria-selected={value === option.value}
             onClick={() => onChange(option.value)}
             className={cn(
-              "flex h-8 items-center gap-1.5 rounded-lg px-3 text-sm font-medium whitespace-nowrap transition-colors",
+                "flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-sm font-medium whitespace-nowrap transition-colors",
               value === option.value ? "bg-surface text-fg shadow-sm" : "text-muted hover:text-fg",
             )}
           >
@@ -301,8 +301,8 @@ export function Stat({
   return (
     <div className={cn("min-w-0", className)}>
       <div className="text-xs font-medium text-muted">{label}</div>
-      <div className="mt-1 truncate text-xl font-semibold tracking-tight tabular-nums sm:text-2xl">{value}</div>
-      {hint && <div className="mt-0.5 line-clamp-2 text-xs text-muted">{hint}</div>}
+      <div className="mt-1 break-words text-xl font-medium tabular-nums sm:text-2xl">{value}</div>
+      {hint && <div className="mt-1 text-xs text-muted">{hint}</div>}
     </div>
   )
 }

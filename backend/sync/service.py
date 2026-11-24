@@ -133,6 +133,8 @@ class SyncService:
         self.accounts = accounts
         self.pictures = pictures
         self._locks: dict[str, asyncio.Lock] = {}
+        self._store_lock = asyncio.Lock()
+        self._analysis_lock = asyncio.Lock()
         self._active = 0
         self._idle = asyncio.Event()
         self._idle.set()
@@ -242,7 +244,9 @@ class SyncService:
         try:
             result = await self._fetch(league_id, client)
             league_name = result.league.name or league_id
-            stats = await asyncio.to_thread(self._store, result)
+            # Different leagues share teams and players; concurrent inserts can collide.
+            async with self._store_lock:
+                stats = await asyncio.to_thread(self._store, result)
 
             members = await asyncio.to_thread(self.accounts.member_clients, league_id, result.user_id)
             refreshed = [await self.refresh_personal(league_id, member) for member in members]
@@ -266,7 +270,9 @@ class SyncService:
         requests = client.request_count - requests_before
         run = await asyncio.to_thread(self._finish_run, run_id, status, error, requests, stats)
         if status == "success" and self.after_sync is not None:
-            await self.after_sync(league_id)
+            # Learning and forecasts share competition-wide rows across leagues.
+            async with self._analysis_lock:
+                await self.after_sync(league_id)
         log.info(
             "Sync of %s %s after %.1fs with %d requests",
             league_name,

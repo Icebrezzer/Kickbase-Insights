@@ -2,7 +2,7 @@ import type { ColumnDef } from "@tanstack/react-table"
 import { ArrowRight } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useSearchParams } from "react-router"
-import { useManagerMap, useManagers, useMatchdayCharts, useOverpay, useRevenueChart, useTransfers, useTurnovers } from "@/api/hooks"
+import { useManagerMap, useManagers, useMatchdayCharts, useOverpay, useRevenueChart, useTransfers, useTurnovers, useWealthChart } from "@/api/hooks"
 import type { Overpay, OverpayManager, OverpayPurchase, OverpayStats, Transfer, Turnover } from "@/api/types"
 import { DataTable, numberColumn } from "@/components/DataTable"
 import { Avatar, Delta, Money, PercentDelta, PlayerAvatar, PositionBadge, TeamLogo } from "@/components/kickbase"
@@ -13,7 +13,7 @@ import { cn } from "@/lib/cn"
 import { compactMoney, dateLong, dateShort, number, percent } from "@/lib/format"
 import { playerName } from "@/lib/kickbase"
 
-type Tab = "turnovers" | "overpay" | "charts" | "feed"
+type Tab = "wealth" | "turnovers" | "overpay" | "charts" | "feed"
 
 const FEW_PURCHASES = 5 // median is unreliable with fewer purchases
 /** Long headers break into several lines when the table gets tight */
@@ -28,29 +28,68 @@ const HIGHLIGHTED_ROW = "bg-accent-soft/40 max-md:[&>td:first-child]:bg-[color-m
 
 export default function Transfers() {
   const [params, setParams] = useSearchParams()
-  const tab = (params.get("tab") as Tab | null) ?? "turnovers"
-  const setTab = (next: Tab) => setParams(next === "turnovers" ? {} : { tab: next }, { replace: true })
+  const tab = (params.get("tab") as Tab | null) ?? "wealth"
+  const setTab = (next: Tab) => setParams(next === "wealth" ? {} : { tab: next }, { replace: true })
 
   return (
     <>
-      <PageHeader title="Transfers" description="Erlöse aus Verkäufen, Overpay bei Käufen, Verläufe der Saison und alle Transfers der Liga." />
+      <PageHeader title="Dein Kapital im Vergleich" description="Vermögen, Handelsgewinn und Kaufpreise getrennt beurteilen." />
       <Segmented
         className="mb-4"
         value={tab}
         onChange={setTab}
         options={[
-          { value: "turnovers", label: "Erlöse" },
+          { value: "wealth", label: "Vermögen" },
+          { value: "turnovers", label: "Handelsgewinn" },
           { value: "overpay", label: "Overpay" },
           { value: "charts", label: "Verlauf" },
           { value: "feed", label: "Alle Transfers" },
         ]}
       />
+      {tab === "wealth" && <Wealth />}
       {tab === "turnovers" && <Turnovers />}
       {tab === "overpay" && <OverpayTab />}
       {tab === "charts" && <Charts />}
       {tab === "feed" && <Feed />}
     </>
   )
+}
+
+function Wealth() {
+  const query = useWealthChart()
+  const managers = useManagers()
+  const own = managers.data?.find((m) => m.isSelf)
+  const [mode, setMode] = useState<"total" | "growth">("growth")
+  return <div className="grid items-start gap-4 xl:grid-cols-[1.3fr_1fr]">
+    <QueryState query={managers}>{(items) => <Card className="order-2 p-4 sm:p-5">
+      <CardHeader className="px-0 pt-0 sm:px-0" title="Vermögen heute" description="Kontostand plus Kaderwert. Fremde Kontostände sind Schätzungen." />
+      <div className="divide-y divide-line">{items.map((manager) => {
+        const cash = manager.budget ?? manager.estimatedBalance
+        const total = cash == null || manager.teamValue == null ? null : cash + manager.teamValue
+        return <div key={manager.id} className="flex items-start justify-between gap-4 py-3">
+          <div className="min-w-0"><p className={cn("text-sm", manager.isSelf && "font-semibold text-accent")}>{manager.name}{manager.isSelf && " · Du"}</p>
+            <p className="mt-1 text-xs text-muted">{cash == null ? "Kontostand nicht freigegeben" : manager.budget == null ? "Kontostand geschätzt" : "Eigener Kontostand aus Kickbase"}</p>
+          </div>
+          <div className="text-right"><Money value={total} className="font-semibold" /><p className="mt-1 text-xs text-muted">Kader <Money value={manager.teamValue} /></p></div>
+        </div>
+      })}</div>
+    </Card>}</QueryState>
+    <Card className="order-1 p-4 sm:p-5">
+      <CardHeader className="px-0 pt-0 sm:px-0" title="Entwicklung durch Handel und Marktwerte"
+        description="Rekonstruierte Schätzung ohne Erfolgsprämien und Login-Boni. Sie zeigt daher nicht deinen vollständigen Kapitalzuwachs." />
+      <Segmented className="mb-4" value={mode} onChange={setMode} options={[{ value: "growth", label: "Zuwachs" }, { value: "total", label: "Absolut" }]} />
+      <QueryState query={query}>{(data) => {
+        const baseline = data.rows.find((row) => data.managers.every((m) => typeof row[m.id] === "number"))
+        const rows = mode === "total" ? data.rows : baseline ? data.rows.filter((r) => String(r.date) >= String(baseline.date)).map((row) => ({ ...row,
+          ...Object.fromEntries(data.managers.map((m) => [m.id, typeof row[m.id] === "number" ? Number(row[m.id]) - Number(baseline[m.id]) : null])),
+        })) : []
+        return rows.length ? <>
+          <ManagerLineChart managers={data.managers} rows={rows} xKey="date" kind="money" highlight={own?.id} />
+          <p className="mt-4 text-xs leading-relaxed text-muted">{mode === "growth" && baseline ? `Gemeinsamer Vergleich ab ${dateShort(String(baseline.date))} ` : ""}Fehlende Spielerwerte bleiben Lücken. Unvollständige Transferhistorien können den Verlauf verzerren. Der heutige Kontostand wird separat berechnet.</p>
+        </> : <p className="py-8 text-sm text-muted">Noch kein gemeinsamer Zeitraum mit ausreichenden Daten verfügbar.</p>
+      }}</QueryState>
+    </Card>
+  </div>
 }
 
 function ManagerFilter({ value, onChange }: { value: string; onChange: (value: string) => void }) {
@@ -123,7 +162,7 @@ function Turnovers() {
           <div className="space-y-4">
             <Card className="grid grid-cols-2 gap-4 p-4 sm:p-5 lg:grid-cols-4">
               <Stat label="Verkäufe" value={number(rows.length)} hint={`${rows.filter((t) => t.starter).length} Startspieler`} />
-              <Stat label="Summe" value={<Delta value={total} compact />} hint={managers.get(manager)?.name ?? "ganze Liga"} />
+              <Stat label="Realisierter Gewinn" value={<Delta value={known.length ? total : null} compact />} hint={`${known.length} von ${rows.length} Verkäufen bewertbar · ${managers.get(manager)?.name ?? "ganze Liga"}`} />
               <Stat
                 label="Bester Deal"
                 value={<Delta value={best?.profit} compact />}
@@ -343,7 +382,7 @@ function Charts() {
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
       <Card className="p-4 sm:p-5 xl:col-span-2">
-        <CardHeader className="px-0 pt-0 pb-4 sm:px-0" title="Summe der Transfererlöse" description="Aufaddierter Gewinn oder Verlust aus allen Verkäufen" />
+        <CardHeader className="px-0 pt-0 pb-4 sm:px-0" title="Realisierter Handelsgewinn" description="Aufaddierter Gewinn oder Verlust aus bewertbaren Verkäufen, kein Gesamtvermögen" />
         <QueryState query={revenue} skeleton={chartSkeleton}>
           {(data) => <ManagerLineChart managers={data.managers} rows={data.rows} xKey="date" kind="money" highlight={own} step />}
         </QueryState>

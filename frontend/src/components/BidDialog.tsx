@@ -231,15 +231,15 @@ function Recommendation({ player, amount, onPick }: { player: MarketPlayer; amou
       </div>
       <div className="grid grid-cols-2 gap-1.5">
         {[
-          { label: "Sicher günstig", value: player.bidLow! },
-          { label: likely.length ? `schlägt ${likely.map((r) => r.name).join(", ")}` : "Obergrenze", value: player.bidHigh! },
+          { label: "Untere Schätzung", value: player.bidLow! },
+          { label: "Obere Schätzung", value: player.bidHigh! },
         ].map((option) => (
           <button
             key={option.label}
             type="button"
             onClick={() => onPick(option.value)}
             className={cn(
-              "rounded-lg border px-2 py-1.5 text-left transition-colors",
+              "min-h-11 rounded-lg border px-2 py-2 text-left transition-colors",
               amount === option.value ? "border-accent bg-accent-soft" : "border-line bg-surface hover:bg-surface-2",
             )}
           >
@@ -251,7 +251,7 @@ function Recommendation({ player, amount, onPick }: { player: MarketPlayer; amou
       <p className="text-xs text-muted">
         {likely.length
           ? `Wahrscheinliche Bieter: ${likely.map((r) => `${r.name} (${Math.round(r.probability * 100)} %)`).join(", ")}.`
-          : "Kein Manager bietet hier wahrscheinlich mit."}
+          : "Keine wahrscheinlichen Bieter im Modell erkannt."} Die Spanne garantiert keinen Zuschlag.
       </p>
     </div>
   )

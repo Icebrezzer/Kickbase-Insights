@@ -15,10 +15,10 @@ type LeagueContextValue = {
 const LeagueContext = createContext<LeagueContextValue>({ league: null, leagues: [], setLeagueId: () => {} })
 
 /** The league the user looks at. Remembered per browser, falls back to the user's preferred one. */
-export function LeagueProvider({ leagues, children }: { leagues: League[]; children: ReactNode }) {
-  const [stored, setStored] = useStoredState<string | null>("kbi-league", null)
+export function LeagueProvider({ leagues, userId, children }: { leagues: League[]; userId: string; children: ReactNode }) {
+  const [stored, setStored] = useStoredState<string | null>(`kbi-league:${userId}`, null)
   const value = useMemo(() => {
-    const league = leagues.find((l) => l.id === stored) ?? leagues[0] ?? null
+    const league = leagues.find((l) => l.id === stored) ?? leagues.find((l) => !l.inactive) ?? leagues[0] ?? null
     return { league, leagues, setLeagueId: setStored }
   }, [leagues, stored, setStored])
   return <LeagueContext.Provider value={value}>{children}</LeagueContext.Provider>

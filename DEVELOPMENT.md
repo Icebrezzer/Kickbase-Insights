@@ -200,9 +200,9 @@ The app has no migration tool. `init_db()` in [`backend/db/__init__.py`](backend
 |---|---|
 | A new table | Just add it, it gets created on the next start |
 | A new column on an existing table | It is not added by itself. Add a small step to `init_db()`, like `_add_transfer_ids()`. |
-| Anything else, or the stored data has to go | Bump `SCHEMA_VERSION` |
+| Incompatible schema change | Supply and test a migration before changing `SCHEMA_VERSION` |
 
 > [!WARNING]
-> Bumping `SCHEMA_VERSION` deletes **every** table on the next start. Everybody has to log in again, and leagues nobody logs in to stay empty. Most data comes back with the next sync, but the transfers of managers who left and market values older than a year do not. Prefer a new table where possible.
+> A schema version mismatch stops startup without deleting data. Back up the database and migrate it explicitly. Personal settings, historical transfers and learned data must not be discarded during an upgrade. Additive columns are registered in `_LATER_COLUMNS`.
 
 A database made by a newer version than the code stops the app from starting, instead of being rebuilt.

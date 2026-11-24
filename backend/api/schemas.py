@@ -24,6 +24,15 @@ class LeagueOut(Schema):
     season_name: str | None = None
     synced_at: datetime | None = None
     market_values_updated_at: datetime | None = None
+    inactive: bool = False
+    analysis_squad_limit: int = 18
+    analysis_club_limit: int = 3
+
+
+class LeaguePreferenceIn(Schema):
+    inactive: bool | None = None
+    analysis_squad_limit: int | None = Field(default=None, ge=11, le=100)
+    analysis_club_limit: int | None = Field(default=None, ge=1, le=100)
 
 
 class LoginIn(Schema):

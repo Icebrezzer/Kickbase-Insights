@@ -25,7 +25,7 @@ export default function Market() {
     <>
       <PageHeader
         title="Transfermarkt"
-        description="Alle Spieler auf dem Markt."
+        description="Verstärkungen finden, Preise prüfen und Gebote abwägen"
       />
       <QueryState query={query}>{(players) => <MarketView players={players} />}</QueryState>
     </>
@@ -283,13 +283,13 @@ function Expiry({ expiresAt, now }: { expiresAt: string | null; now: number }) {
 function Rivals({ player, limit = 4 }: { player: MarketPlayer; limit?: number }) {
   if (player.ownClubFull) {
     return (
-      <span className="inline-flex items-center gap-1 text-xs text-down" title="Du hast schon 3 Spieler dieses Vereins">
-        <AlertTriangle className="size-3.5" /> Du: 3/3 Verein
+      <span className="inline-flex items-center gap-1 text-xs text-down" title="Dein persönlich eingestelltes Vereinslimit ist erreicht">
+        <AlertTriangle className="size-3.5" /> Vereinslimit erreicht
       </span>
     )
   }
   if (player.rivals.length === 0) {
-    return <span className="text-xs font-medium text-up">{player.rivalsByBudget ? "Keiner kann mithalten" : "Keine Konkurrenz"}</span>
+    return <span className="text-xs text-muted">Keine Konkurrenz im Modell ermittelt</span>
   }
   const shown = player.rivals.filter((r) => r.probability >= 0.2).slice(0, limit)
   if (shown.length === 0) return <span className="text-xs font-medium text-up">Kaum Konkurrenz</span>
@@ -300,7 +300,7 @@ function Rivals({ player, limit = 4 }: { player: MarketPlayer; limit?: number })
           key={rival.managerId}
           title={[
             rival.name,
-            `${rival.clubPlayers}/3 vom Verein`,
+            `${rival.clubPlayers} Spieler vom Verein`,
             `${rival.squadSize} Spieler im Kader`,
             `bietet mit ca. ${Math.round(rival.probability * 100)} %`,
             rival.expectedBid != null ? `vermutlich ca. ${compactMoney(rival.expectedBid)}` : null,
@@ -359,7 +359,7 @@ function Recommendation({ player }: { player: MarketPlayer }) {
   const range =
     player.bidHigh > player.bidLow ? `${compactMoney(player.bidLow)}–${compactMoney(player.bidHigh)}` : compactMoney(player.bidLow)
   return (
-    <span className="inline-flex flex-col items-end leading-tight" title="Von „sicher günstig“ bis „schlägt die wahrscheinlichen Bieter“">
+    <span className="inline-flex flex-col items-end leading-tight" title="Modellierte Gebotsspanne aus bisherigen Käufen; keine Zuschlagsgarantie">
       <span className="tabular-nums">{range}</span>
       {player.marginLow != null && (
         <span className={cn("text-[11px] tabular-nums", player.marginLow >= 0 ? "text-up" : "text-down")}>
@@ -441,7 +441,7 @@ function MarketCard({ player, now, target, onBid }: { player: MarketPlayer; now:
         <Metric label="Heute">
           <Delta value={player.today} compact />
         </Metric>
-        <Metric label={target ? "Prognose 🔥" : "Prognose"}>
+        <Metric label={target ? "Prognose · Ziel" : "Prognose"}>
           <Delta value={player.forecast} compact />
         </Metric>
         <Metric label={player.marginToMatchday != null ? "bis Spieltag" : "Erw. Pkt."}>
@@ -453,6 +453,7 @@ function MarketCard({ player, now, target, onBid }: { player: MarketPlayer; now:
         </Metric>
       </div>
 
+      <p className="text-xs text-muted">Konkurrenz · Modellschätzung</p>
       <div className="flex items-start gap-1.5 text-xs">
         <Users className="mt-0.5 size-3.5 shrink-0 text-muted" />
         <Rivals player={player} limit={3} />
@@ -466,7 +467,7 @@ function MarketCard({ player, now, target, onBid }: { player: MarketPlayer; now:
             </span>
           ) : player.bidLow != null ? (
             <span>
-              <span className="text-muted">Empfohlen </span>
+              <span className="text-muted">Gebotsspanne </span>
               <span className="tabular-nums">
                 {compactMoney(player.bidLow)}
                 {player.bidHigh != null && player.bidHigh > player.bidLow ? `–${compactMoney(player.bidHigh)}` : ""}
@@ -489,8 +490,8 @@ function MarketCard({ player, now, target, onBid }: { player: MarketPlayer; now:
 function Metric({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="min-w-0">
-      <div className="truncate text-[11px] text-muted">{label}</div>
-      <div className="truncate font-medium">{children}</div>
+      <div className="text-[11px] text-muted">{label}</div>
+      <div className="break-words font-medium">{children}</div>
     </div>
   )
 }

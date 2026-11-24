@@ -45,7 +45,8 @@ def main() -> None:
 
         for _ in range(120):
             status = client.get("/api/status")
-            if status.status_code == 200 and status.json().get("league", {}) and status.json()["league"].get("syncedAt"):
+            if (status.status_code == 200 and status.json().get("league", {})
+                    and status.json()["league"].get("syncedAt") and not status.json()["sync"]["running"]):
                 break
             time.sleep(1)
         check(status.status_code == 200 and status.json()["league"]["syncedAt"], "first sync finished")
@@ -68,6 +69,10 @@ def main() -> None:
         check(all(p["bidLow"] is None or p["bidLow"] >= p["marketValue"] for p in players), "bids start at the market value")
         check(all(0 <= r["probability"] <= 1 for p in players for r in p["rivals"]), "bidder probabilities are shares")
         check(any(p["expectedPoints"] for p in players), "market players carry expected points")
+
+        wealth = client.get("/api/charts/wealth")
+        check(wealth.status_code == 200, "wealth endpoint")
+        check(len(wealth.json()["managers"]) > 1 and bool(wealth.json()["rows"]), "wealth comparison has managers and dates")
 
         rivals = client.get("/api/rivals")
         check(rivals.status_code == 200, f"rivals ({rivals.status_code} {rivals.text[:300]})")

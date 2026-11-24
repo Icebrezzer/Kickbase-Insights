@@ -70,7 +70,7 @@ function AuthGate({ children }: { children: ReactNode }) {
   const me = useMe()
   const location = useLocation()
 
-  if (me.data) return <LeagueProvider leagues={me.data.leagues}>{children}</LeagueProvider>
+  if (me.data) return <LeagueProvider key={me.data.user.id} userId={me.data.user.id} leagues={me.data.leagues}>{children}</LeagueProvider>
   if (me.isPending) return <FullScreen />
 
   const error = me.error

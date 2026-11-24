@@ -103,6 +103,7 @@ export function ManagerLineChart({
   highlight,
   height = 300,
   step,
+  connectNulls = false,
   colors: fixedColors,
 }: {
   managers: ChartManager[]
@@ -112,6 +113,7 @@ export function ManagerLineChart({
   highlight?: string | null
   height?: number
   step?: boolean
+  connectNulls?: boolean
   colors?: Map<string, string>
 }) {
   const [hidden, setHidden] = useState<string[]>([])
@@ -173,7 +175,7 @@ export function ManagerLineChart({
                 dot={xKey === "day" && rows.length <= 20 ? { r: 2.5, strokeWidth: 0, fill: colors.get(manager.id) } : false}
                 activeDot={{ r: 4 }}
                 hide={hidden.includes(manager.id)}
-                connectNulls
+                connectNulls={connectNulls}
                 isAnimationActive={false}
               />
             ))}

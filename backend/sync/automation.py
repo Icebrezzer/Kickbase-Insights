@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import threading
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from typing import Any
@@ -111,6 +112,10 @@ def parse_lineup(raw: Any) -> tuple[str | None, list[str]]:
             pid = item.get("i") or item.get("pi") or item.get("id")
             if pid is not None:
                 ids.append(str(pid))
+    ids = list(dict.fromkeys(pid for pid in ids if pid and pid != "0"))
+    # Some responses contain the entire squad. Never score it as a starting eleven.
+    if len(ids) > 11:
+        return None, []
     return formation, ids
 
 
@@ -145,6 +150,7 @@ class AutomationService:
         self.push = push
         self.model = coach.ForecastModel()
         self._model_day: int | None = None
+        self._forms_lock = threading.Lock()
         self._last_lineup_check: dict[tuple[str, str], datetime] = {}
         self._locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._task: asyncio.Task | None = None
@@ -544,7 +550,7 @@ class AutomationService:
 
     def _store_forms(self, results: list[tuple[str, list[list[int]]]]) -> None:
         now = utcnow()
-        with Session(self.engine) as session:
+        with self._forms_lock, Session(self.engine) as session:
             for pid, matches in results:
                 session.merge(PlayerForm(player_id=pid, matches=matches, synced_at=now))
             session.commit()
@@ -644,7 +650,7 @@ class AutomationService:
         ranking = await client.ranking(league.id)
         if not saved:
             own = next((u for u in ranking.users if u.id == user_id), None)
-            saved = [pid for pid in (own.lineup if own else []) if pid]
+            _, saved = parse_lineup({"lp": own.lineup if own else []})
             source = "ranking"
         ids = [p.id for p in squad.players]
         await self.refresh_forms(client, league.competition_id, ids)
@@ -678,6 +684,8 @@ class AutomationService:
             rescue = RescueOut(**asdict(plan), expected_loss=plan.expected_loss)
 
         checks = self._checks(real_budget, saved, best, saved_expected, expectations, stored, squad, upcoming, live)
+        if source == "ranking":
+            checks.append(CheckOut(level="info", message="Aufstellung aus der Rangliste: Die aktuell gespeicherte Elf konnte nicht verlässlich gelesen werden."))
         await asyncio.to_thread(self._store_budget, user_id, league.id, real_budget)
 
         ### Sell before the value drops
@@ -765,6 +773,8 @@ class AutomationService:
     def _checks(self, budget, saved, best, saved_expected, expectations, stored, squad, upcoming, live) -> list[CheckOut]:
         checks: list[CheckOut] = []
         names = {p.id: p.last_name for p in squad.players}
+        if budget is None:
+            checks.append(CheckOut(level="warn", message="Budget unbekannt: Spieltagsbereitschaft nicht vollständig prüfbar."))
         if budget is not None and budget < 0:
             checks.append(CheckOut(level="error", message=f"Budget negativ: {budget / 1e6:.2f} Mio. € – bis zur Deadline ausgleichen."))
         fielded = [pid for pid in saved if pid in expectations]
