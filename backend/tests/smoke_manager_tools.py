@@ -72,7 +72,10 @@ def main() -> None:
 
         wealth = client.get("/api/charts/wealth")
         check(wealth.status_code == 200, "wealth endpoint")
-        check(len(wealth.json()["managers"]) > 1 and bool(wealth.json()["rows"]), "wealth comparison has managers and dates")
+        check(
+            len(wealth.json()["managers"]) > 1 and bool(wealth.json()["rows"]),
+            "wealth comparison has managers and dates",
+        )
 
         rivals = client.get("/api/rivals")
         check(rivals.status_code == 200, f"rivals ({rivals.status_code} {rivals.text[:300]})")

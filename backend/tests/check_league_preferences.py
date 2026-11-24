@@ -1,6 +1,7 @@
 """Regression checks for personal league preferences and malformed lineup responses."""
 
 import sys
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,7 +15,7 @@ from api.routes import get_session, get_state, get_viewer, router
 from auth.accounts import Viewer
 from core.config import Settings
 from db import _add_missing_columns, create_db_engine, init_db
-from db.models import League, UserLeague
+from db.models import League, SchemaInfo, UserLeague, UserSession, utcnow
 from sync.automation import parse_lineup
 
 
@@ -66,11 +67,15 @@ def main():
         assert client.put("/api/leagues/preference?league=99", json={"inactive": True}).status_code == 404
         with Session(engine) as session:
             assert not session.get(UserLeague, ("2", "10")).inactive
-            assert session.get(UserLeague, ("2", "10")).analysis_club_limit == 3
-            assert session.get(UserLeague, ("1", "20")).analysis_squad_limit == 18
+            ### Not set: the server's setting applies, so changing it reaches everybody who set nothing
+            assert session.get(UserLeague, ("2", "10")).analysis_club_limit is None
+            assert session.get(UserLeague, ("1", "20")).analysis_squad_limit is None
         app.dependency_overrides.pop(get_viewer)
         app.dependency_overrides[get_viewer] = lambda: Viewer("2", "Two", None, ("10",), "other")
-        assert client.get("/api/auth/me").json()["leagues"][0]["inactive"] is False
+        other = client.get("/api/auth/me").json()["leagues"][0]
+        assert other["inactive"] is False
+        limits = (other["analysisSquadLimit"], other["analysisClubLimit"])
+        assert limits == (Settings().automation.max_squad_size, 3)
 
     old = create_db_engine("sqlite://")
     with old.begin() as connection:
@@ -85,15 +90,40 @@ def main():
             123456,
             0,
         )
+    ### Schema 1 (no schemainfo yet) is migrated, the stored rows stay
+    init_db(old)
+    with old.connect() as connection:
+        assert connection.exec_driver_sql("SELECT budget FROM userleague").scalar_one() == 123456
+        assert connection.exec_driver_sql("SELECT version FROM schemainfo").scalar_one() == 2
+
+    ### Migrating 1 -> 2 ends the sessions, so the next login drops leagues in other game modes
+    now = utcnow()
+    with Session(engine) as session:
+        later = now + timedelta(days=1)
+        session.add(
+            UserSession(id="s", user_id="1", token_encrypted="x", token_expires_at=later, expires_at=later)
+        )
+        session.merge(SchemaInfo(id=1, version=1))
+        session.commit()
+    init_db(engine)
+    with Session(engine) as session:
+        assert session.get(UserSession, "s") is None
+        assert session.get(UserLeague, ("1", "10")).inactive is True
+
+    ### Without a migration path nothing is touched
+    with Session(engine) as session:
+        session.merge(SchemaInfo(id=1, version=0))
+        session.commit()
     try:
-        init_db(old)
+        init_db(engine)
     except RuntimeError as error:
         assert "No data was changed" in str(error)
     else:
-        raise AssertionError("Old schemas must not be silently dropped")
-    with old.connect() as connection:
-        assert connection.exec_driver_sql("SELECT budget FROM userleague").scalar_one() == 123456
-    print("PASS: league isolation, unauthorized league, additive migration and lineup bounds")
+        raise AssertionError("Unknown old schemas must not be silently dropped")
+    with Session(engine) as session:
+        assert session.get(SchemaInfo, 1).version == 0
+        assert session.get(UserLeague, ("1", "10")).analysis_club_limit == 4
+    print("PASS: league isolation, unauthorized league, server defaults, migrations and lineup bounds")
 
 
 if __name__ == "__main__":

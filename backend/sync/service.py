@@ -29,10 +29,11 @@ from sqlmodel import Session, select
 
 from core import analytics
 from core.config import Settings
+from db import exclusive
 from db.models import (
-    BidHistory,
     Battle,
     BattleEntry,
+    BidHistory,
     Fixture,
     League,
     LeagueSeason,
@@ -244,9 +245,9 @@ class SyncService:
         try:
             result = await self._fetch(league_id, client)
             league_name = result.league.name or league_id
-            # Different leagues share teams and players; concurrent inserts can collide.
+            ### Leagues share teams and players, so two stores at once would insert the same rows
             async with self._store_lock:
-                stats = await asyncio.to_thread(self._store, result)
+                stats = await asyncio.to_thread(self._store_exclusive, result)
 
             members = await asyncio.to_thread(self.accounts.member_clients, league_id, result.user_id)
             refreshed = [await self.refresh_personal(league_id, member) for member in members]
@@ -270,7 +271,7 @@ class SyncService:
         requests = client.request_count - requests_before
         run = await asyncio.to_thread(self._finish_run, run_id, status, error, requests, stats)
         if status == "success" and self.after_sync is not None:
-            # Learning and forecasts share competition-wide rows across leagues.
+            ### Learning and forecasts share rows of the whole competition. Only the server runs them
             async with self._analysis_lock:
                 await self.after_sync(league_id)
         log.info(
@@ -594,6 +595,11 @@ class SyncService:
         with Session(self.engine) as session:
             _write_personal(session, league_id, user_id, budget, market)
             session.commit()
+
+    def _store_exclusive(self, r: FetchResult) -> dict:
+        """`_store`, one at a time across every process on this database (server and `main.py sync`)."""
+        with exclusive(self.engine, "store"):
+            return self._store(r)
 
     def _store(self, r: FetchResult) -> dict:
         now = utcnow()

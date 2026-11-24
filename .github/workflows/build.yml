@@ -31,6 +31,12 @@ jobs:
         run: ruff check --extend-ignore E501 core/coach.py sync/automation.py sync/push.py api/coach_routes.py tests
       - name: Unit checks of the manager formulas
         run: python tests/check_coach.py
+      - name: League settings, migrations and lineup bounds
+        run: python tests/check_league_preferences.py
+      - name: Wealth reconstruction
+        run: python tests/check_wealth.py
+      - name: Store lock between processes
+        run: python tests/check_locks.py
       - name: Smoke test against the demo Kickbase
         run: python tests/smoke_manager_tools.py
 

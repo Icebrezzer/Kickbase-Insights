@@ -16,8 +16,8 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from api.live import LiveService
 from api.coach_routes import router as coach_router
+from api.live import LiveService
 from api.routes import AppState, router
 from auth.accounts import Accounts
 from auth.security import TokenCipher

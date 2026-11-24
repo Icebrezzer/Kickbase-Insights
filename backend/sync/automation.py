@@ -685,7 +685,11 @@ class AutomationService:
 
         checks = self._checks(real_budget, saved, best, saved_expected, expectations, stored, squad, upcoming, live)
         if source == "ranking":
-            checks.append(CheckOut(level="info", message="Aufstellung aus der Rangliste: Die aktuell gespeicherte Elf konnte nicht verlässlich gelesen werden."))
+            checks.append(CheckOut(
+                level="info",
+                message="Aufstellung aus der Rangliste: "
+                "Die gespeicherte Elf konnte nicht verlässlich gelesen werden.",
+            ))
         await asyncio.to_thread(self._store_budget, user_id, league.id, real_budget)
 
         ### Sell before the value drops
@@ -774,7 +778,8 @@ class AutomationService:
         checks: list[CheckOut] = []
         names = {p.id: p.last_name for p in squad.players}
         if budget is None:
-            checks.append(CheckOut(level="warn", message="Budget unbekannt: Spieltagsbereitschaft nicht vollständig prüfbar."))
+            message = "Budget unbekannt: Spieltagsbereitschaft nicht vollständig prüfbar."
+            checks.append(CheckOut(level="warn", message=message))
         if budget is not None and budget < 0:
             checks.append(CheckOut(level="error", message=f"Budget negativ: {budget / 1e6:.2f} Mio. € – bis zur Deadline ausgleichen."))
         fielded = [pid for pid in saved if pid in expectations]

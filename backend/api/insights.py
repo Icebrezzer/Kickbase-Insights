@@ -16,16 +16,25 @@ from sqlmodel import Session, select
 
 from api.context import load_context
 from api.schemas import (
+    AchievementCheckOut,
+    AchievementOut,
+    BalanceCorrectionOut,
+    BalancePointOut,
     BattleEntryOut,
     BattleOut,
     BidAdviceOut,
+    BuyOptionOut,
     ChartManager,
     ChartOut,
     FairCurvePointOut,
     FairPlayerOut,
     FairValuesOut,
     FixturesOut,
+    LearningOut,
+    LostAuctionOut,
+    ManagerDetailOut,
     ManagerOut,
+    ManagerSquadPlayerOut,
     MarketPlayerOut,
     MatchdayChartsOut,
     MatchOut,
@@ -38,28 +47,19 @@ from api.schemas import (
     RivalOut,
     RivalProfileOut,
     RivalsOut,
-    BalancePointOut,
-    BuyOptionOut,
-    LostAuctionOut,
-    AchievementCheckOut,
-    AchievementOut,
-    BalanceCorrectionOut,
-    LearningOut,
-    ManagerDetailOut,
-    ManagerSquadPlayerOut,
     SeasonPointOut,
-    ValueSplitOut,
     TeamOut,
     TransferOut,
     TurnoverOut,
+    ValueSplitOut,
     WatchedPlayerOut,
 )
 from core import achievements, analytics, coach, learning
 from db.models import (
     AchievementSnapshot,
-    BidHistory,
     Battle,
     BattleEntry,
+    BidHistory,
     Fixture,
     League,
     LeagueSeason,
@@ -78,7 +78,6 @@ from db.models import (
 )
 from kickbase.models import ScoutedPlayer
 from sync.learning import achievement_mode, bidder_model
-
 
 ### Overpay is read from the purchases of the last weeks once there are enough of them
 RECENT_DAYS = 45
@@ -892,7 +891,11 @@ class Insights:
                     fit_positions={pos: profile.positions.get(pos, 0) for pos in coach.IDEAL_SQUAD},
                     needs=needs,
                     unavailable=[p.id for p in unavailable],
-                    blocked_clubs=[team for team, count in clubs.counts.get(manager.id, Counter()).items() if count >= self.max_per_club],
+                    blocked_clubs=[
+                        team
+                        for team, count in clubs.counts.get(manager.id, Counter()).items()
+                        if count >= self.max_per_club
+                    ],
                     purchases=len(own_purchases),
                     purchases_recent=profile.purchases_recent,
                     overpay_median=median(profile.overpay_shares) if profile.overpay_shares else None,
@@ -1292,7 +1295,10 @@ class Insights:
         for manager in managers:
             own_events = sorted((e for e in events if e.manager == manager.id), key=lambda e: e.date)
             held = {pid for pid, entry in squad.items() if entry.manager_id == manager.id}
-            cash = analytics.estimate_balance(manager.id, own_events, self.season.start_money if self.season.start_money is not None else analytics.DEFAULT_START_MONEY)
+            start_money = self.season.start_money
+            if start_money is None:
+                start_money = analytics.DEFAULT_START_MONEY
+            cash = analytics.estimate_balance(manager.id, own_events, start_money)
             pending = list(own_events)
             for day in range(today, first - 1, -1):
                 while pending and analytics.market_value_day(pending[-1].date) >= day:

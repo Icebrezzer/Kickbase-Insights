@@ -103,7 +103,7 @@ export function ManagerLineChart({
   highlight,
   height = 300,
   step,
-  connectNulls = false,
+  connectNulls = true,
   colors: fixedColors,
 }: {
   managers: ChartManager[]

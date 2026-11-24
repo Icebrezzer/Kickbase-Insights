@@ -18,6 +18,7 @@ How the database of Kickbase Insights works and where its data comes from. For t
   - [Rules for the data](#rules-for-the-data)
   - [Private data](#private-data)
   - [Changing the database](#changing-the-database)
+  - [Processes](#processes)
 
 ## The short version
 
@@ -100,7 +101,7 @@ The Kickbase paths below are all under `/v4`. Kickbase documents none of this, s
 | Table | Holds | Comes from | Kept up to date |
 |---|---|---|---|
 | `User` | A Kickbase account that logged in | `/user/login` | Updated at login |
-| `UserLeague` | Which leagues a user is in, and their real budget | `/leagues/selection`, `/leagues/{id}/me/budget` | Updated at login and by a sync |
+| `UserLeague` | Which leagues a user is in, their real budget and their personal settings for it (inactive, squad and club limit of the analyses, empty means the server setting) | `/leagues/selection`, `/leagues/{id}/me/budget` | Updated at login and by a sync |
 | `UserSession` | A login: the hash of the cookie and the encrypted Kickbase token | `/user/login` | Added at login, removed when it ends or expires |
 | `MarketBid` | A user's own bids | `/leagues/{id}/market` | Rebuilt per user |
 
@@ -194,15 +195,23 @@ Responses are cached in memory per league, viewer and `League.synced_at`, so a n
 
 ## Changing the database
 
-The app has no migration tool. `init_db()` in [`backend/db/__init__.py`](backend/db/__init__.py) runs at every start and creates whatever table is missing.
+The app has no migration tool, only small steps of its own. `init_db()` in [`backend/db/__init__.py`](backend/db/__init__.py) runs at every start and creates whatever table is missing.
 
 | Change | What to do |
 |---|---|
 | A new table | Just add it, it gets created on the next start |
 | A new column on an existing table | It is not added by itself. Add a small step to `init_db()`, like `_add_transfer_ids()`. |
-| Incompatible schema change | Supply and test a migration before changing `SCHEMA_VERSION` |
+| Incompatible schema change | Bump `SCHEMA_VERSION` and add the step from the old version to `_MIGRATIONS` in the same commit, with a check in `backend/tests` |
+
+At the start, `init_db()` runs every step from the stored version to `SCHEMA_VERSION`, after the missing tables and columns were added. Schema 1 to 2 only ends the stored sessions: schema 2 stopped storing leagues in other game modes than Classic, and the next login stores only the Classic memberships again. Everything synced, learned or set by the users stays.
 
 > [!WARNING]
-> A schema version mismatch stops startup without deleting data. Back up the database and migrate it explicitly. Personal settings, historical transfers and learned data must not be discarded during an upgrade. Additive columns are registered in `_LATER_COLUMNS`.
+> If a step is missing, the start stops before anything is changed. Personal settings, historical transfers and learned data must never be discarded during an upgrade. Back up the database before upgrading.
 
-A database made by a newer version than the code stops the app from starting, instead of being rebuilt.
+A database made by a newer version than the code stops the app from starting as well.
+
+## Processes
+
+Run one server (`python main.py start`) per database. The scheduler, the automation and the learning keep state in that process, two servers would sync and push everything twice.
+
+`python main.py sync` may run next to the server. Leagues share the clubs and players, so storing a sync takes a lock that every process on the database shares: an advisory lock on PostgreSQL, a file `kickbase.db.store.lock` next to the SQLite database. `tests/check_locks.py` checks it with two processes.

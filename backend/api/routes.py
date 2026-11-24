@@ -51,7 +51,7 @@ from api.schemas import (
     WatchOut,
 )
 from auth.accounts import Accounts, LoginError, Viewer
-from core import analytics
+from core import analytics, coach
 from core.config import Settings
 from db.models import League, LeagueSeason, SyncRun, UserLeague, utcnow
 from kickbase import KickbaseAuthError, KickbaseClient, KickbaseError
@@ -154,14 +154,21 @@ def cached(
     return state.cache[full_key]
 
 
+def analysis_limits(settings: Settings, membership: UserLeague | None) -> tuple[int, int]:
+    """Squad and club limit for a viewer's analyses: their own setting, else the server's."""
+    squad = membership.analysis_squad_limit if membership else None
+    club = membership.analysis_club_limit if membership else None
+    return (
+        squad if squad is not None else settings.automation.max_squad_size,
+        club if club is not None else coach.MAX_PER_CLUB,
+    )
+
+
 def insights(state: AppState, session: Session, league: League, viewer: Viewer | None = None) -> Insights:
     model = state.automation.model if state.automation is not None else None
     membership = session.get(UserLeague, (viewer.user_id, league.id)) if viewer else None
-    return Insights(
-        session, league, viewer.user_id if viewer else None, model,
-        membership.analysis_squad_limit if membership else state.settings.automation.max_squad_size,
-        membership.analysis_club_limit if membership else 3,
-    )
+    squad, club = analysis_limits(state.settings, membership)
+    return Insights(session, league, viewer.user_id if viewer else None, model, squad, club)
 
 
 ### ===============================================================================
@@ -177,19 +184,28 @@ def _me(session: Session, viewer: Viewer, settings: Settings) -> MeOut:
         league.id: league for league in session.exec(select(League).where(League.id.in_(viewer.league_ids)))
     }
     memberships = {
-        row.league_id: row for row in session.exec(select(UserLeague).where(UserLeague.user_id == viewer.user_id))
+        row.league_id: row
+        for row in session.exec(select(UserLeague).where(UserLeague.user_id == viewer.user_id))
     }
     return MeOut(
         user=UserOut(id=viewer.user_id, name=viewer.name, image=viewer.image),
         leagues=[
-            LeagueOut.model_validate(leagues[lid]).model_copy(update={
-                "inactive": memberships[lid].inactive if lid in memberships else False,
-                "analysis_squad_limit": memberships[lid].analysis_squad_limit if lid in memberships else 18,
-                "analysis_club_limit": memberships[lid].analysis_club_limit if lid in memberships else 3,
-            })
-            for lid in viewer.league_ids if lid in leagues
+            _league_out(leagues[lid], memberships.get(lid), settings)
+            for lid in viewer.league_ids
+            if lid in leagues
         ],
         balances=shows_balances(settings, viewer),
+    )
+
+
+def _league_out(league: League, membership: UserLeague | None, settings: Settings) -> LeagueOut:
+    squad, club = analysis_limits(settings, membership)
+    return LeagueOut.model_validate(league).model_copy(
+        update={
+            "inactive": membership.inactive if membership else False,
+            "analysis_squad_limit": squad,
+            "analysis_club_limit": club,
+        }
     )
 
 
@@ -205,7 +221,8 @@ def set_league_preference(
             setattr(membership, key, value)
     session.add(membership)
     session.commit()
-    state.cache.clear()
+    ### The limits only change this viewer's answers, other users keep their cache
+    forget_private(state, league_id, viewer)
     return _me(session, viewer, state.settings)
 
 
@@ -430,8 +447,10 @@ def revenue_chart(state: StateDep, session: SessionDep, league: LeagueDep):
 
 @router.get("/charts/wealth", response_model=ChartOut)
 def wealth_chart(state: StateDep, session: SessionDep, league: LeagueDep, viewer: ViewerDep):
-    return cached(state, league, ("wealth",),
-                  lambda: insights(state, session, league, viewer).wealth_chart(shows_balances(state.settings, viewer)), viewer)
+    def build() -> ChartOut:
+        return insights(state, session, league, viewer).wealth_chart(shows_balances(state.settings, viewer))
+
+    return cached(state, league, ("wealth",), build, viewer)
 
 
 @router.get("/charts/matchdays", response_model=MatchdayChartsOut)

@@ -8,8 +8,8 @@ from sqlalchemy import JSON, BigInteger, Column, DateTime, Index
 from sqlalchemy.types import TypeDecorator
 from sqlmodel import Field, SQLModel
 
-### Bump when a table or what is stored in it changes. Older databases are rebuilt on startup, see db.init_db.
-### NOTE: A rebuild deletes everything! A new table needs no bump.
+### Bump when a table or what is stored in it changes, together with a migration in db._MIGRATIONS.
+### Without one, an older database stops the start instead of being changed. A new table needs no bump.
 ### 2: leagues in another game mode than Classic are no longer stored
 SCHEMA_VERSION = 2
 
@@ -248,9 +248,10 @@ class UserLeague(SQLModel, table=True):
     league_id: str = Field(primary_key=True, index=True)
     budget: int | None = _money()
     budget_updated_at: datetime | None = _ts()
-    inactive: bool = False
-    analysis_squad_limit: int = 18
-    analysis_club_limit: int = 3
+    ### Personal settings, they change nothing at Kickbase
+    inactive: bool = False # Only for this user, the league stays reachable
+    analysis_squad_limit: int | None = None # None: KBI_AUTOMATION__MAX_SQUAD_SIZE
+    analysis_club_limit: int | None = None # None: coach.MAX_PER_CLUB
 
 
 class UserSession(SQLModel, table=True):

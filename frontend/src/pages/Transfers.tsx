@@ -84,7 +84,7 @@ function Wealth() {
           ...Object.fromEntries(data.managers.map((m) => [m.id, typeof row[m.id] === "number" ? Number(row[m.id]) - Number(baseline[m.id]) : null])),
         })) : []
         return rows.length ? <>
-          <ManagerLineChart managers={data.managers} rows={rows} xKey="date" kind="money" highlight={own?.id} />
+          <ManagerLineChart managers={data.managers} rows={rows} xKey="date" kind="money" highlight={own?.id} connectNulls={false} />
           <p className="mt-4 text-xs leading-relaxed text-muted">{mode === "growth" && baseline ? `Gemeinsamer Vergleich ab ${dateShort(String(baseline.date))} ` : ""}Fehlende Spielerwerte bleiben Lücken. Unvollständige Transferhistorien können den Verlauf verzerren. Der heutige Kontostand wird separat berechnet.</p>
         </> : <p className="py-8 text-sm text-muted">Noch kein gemeinsamer Zeitraum mit ausreichenden Daten verfügbar.</p>
       }}</QueryState>

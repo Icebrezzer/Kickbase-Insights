@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import logging
+import zlib
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
-from sqlalchemy import Engine, create_engine, event, inspect
+from sqlalchemy import Engine, create_engine, event, inspect, text
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel
 
 from db import models  # noqa: F401  - registers the tables on the metadata
 from db.models import SCHEMA_VERSION, SchemaInfo
+
+try:
+    import fcntl
+except ImportError: # Windows, where the app is only developed
+    fcntl = None
 
 log = logging.getLogger(__name__)
 
@@ -58,7 +65,8 @@ def init_db(engine: Engine) -> None:
             f"The database was created by a newer Kickbase Insights "
             f"(schema {stored}, this is {SCHEMA_VERSION})."
         )
-    if stored is not None and stored < SCHEMA_VERSION:
+    pending = range(stored, SCHEMA_VERSION) if stored is not None else range(0)
+    if any(version not in _MIGRATIONS for version in pending):
         raise RuntimeError(
             f"Database schema {stored} needs a migration to {SCHEMA_VERSION}. "
             "No data was changed. Back up the database and use a supported migration before upgrading."
@@ -67,6 +75,10 @@ def init_db(engine: Engine) -> None:
     SQLModel.metadata.create_all(engine)
     _add_transfer_ids(engine)
     _add_missing_columns(engine)
+    ### Migrations run on the current tables, after the additive steps above
+    for version in pending:
+        log.warning("Migrating the database from schema %s to %s", version, version + 1)
+        _MIGRATIONS[version](engine)
     with Session(engine) as session:
         session.merge(SchemaInfo(id=1, version=SCHEMA_VERSION))
         session.commit()
@@ -93,12 +105,28 @@ def _add_transfer_ids(engine: Engine) -> None:
         connection.exec_driver_sql("UPDATE leagueseason SET transfers_complete_since = NULL")
 
 
+def _migrate_1_to_2(engine: Engine) -> None:
+    """Schema 2 stopped storing leagues in another game mode than Classic.
+
+    The database does not know a league's game mode, so the stored sessions end instead: memberships
+    are only synced with a session, and the next login keeps only the Classic leagues. Everything
+    synced, learned or set by the users stays.
+    """
+    with engine.begin() as connection:
+        connection.exec_driver_sql("DELETE FROM usersession")
+
+
+### Schema version -> step that brings a database of that version to the next one
+_MIGRATIONS = {1: _migrate_1_to_2}
+
+
 ### Columns added to tables after they were first created: table -> column -> SQL type and default
 _LATER_COLUMNS = {
     "userleague": {
         "inactive": "BOOLEAN NOT NULL DEFAULT FALSE",
-        "analysis_squad_limit": "INTEGER NOT NULL DEFAULT 18",
-        "analysis_club_limit": "INTEGER NOT NULL DEFAULT 3",
+        ### NULL: the server's setting applies
+        "analysis_squad_limit": "INTEGER",
+        "analysis_club_limit": "INTEGER",
     },
     "userautomation": {"listing_alerts": "BOOLEAN DEFAULT TRUE", "sell_alerts": "BOOLEAN DEFAULT TRUE"},
 }
@@ -121,3 +149,27 @@ def _add_missing_columns(engine: Engine) -> None:
 def session_scope(engine: Engine) -> Iterator[Session]:
     with Session(engine) as session:
         yield session
+
+
+@contextmanager
+def exclusive(engine: Engine, name: str) -> Iterator[None]:
+    """Hold a lock that every process using this database shares, e.g. the server and `main.py sync`.
+
+    PostgreSQL: a transaction advisory lock, released with the transaction even if the process dies.
+    SQLite: an flock on a file next to the database. An in-memory database has only one process.
+    """
+    if engine.dialect.name == "postgresql":
+        with engine.begin() as connection:
+            connection.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": zlib.crc32(name.encode())})
+            yield
+        return
+    path = engine.url.database
+    if engine.dialect.name != "sqlite" or not path or path == ":memory:" or fcntl is None:
+        yield
+        return
+    with open(f"{path}.{name}.lock", "a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
