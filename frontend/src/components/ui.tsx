@@ -99,8 +99,9 @@ export function Segmented<T extends string>({
   className?: string
 }) {
   return (
-    <div className={cn("scrollbar-none -mx-1 overflow-x-auto px-1", className)}>
-      <div role="tablist" className="inline-flex min-w-max gap-1 rounded-xl border border-line bg-surface-2 p-1">
+    <div className={className}>
+      {/* Wraps on narrow screens instead of scrolling sideways, so every option stays in view */}
+      <div role="tablist" className="inline-flex max-w-full flex-wrap gap-1 rounded-xl border border-line bg-surface-2 p-1">
         {options.map((option) => (
           <button
             key={option.value}

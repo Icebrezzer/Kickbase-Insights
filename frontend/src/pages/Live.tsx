@@ -107,7 +107,7 @@ export default function Live() {
         {(live) => (
           <div className="space-y-4">
             {live.matches.length > 0 && (
-              <div className="scrollbar-none -mx-4 flex gap-2 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-2">
                 {live.matches.map((match) => (
                   <MatchTile key={match.id} match={match} />
                 ))}

@@ -192,7 +192,7 @@ function RunHistory() {
                   <th className="px-3 py-2 font-medium">Status</th>
                   <th className="hidden px-3 py-2 text-right font-medium sm:table-cell">Dauer</th>
                   <th className="hidden px-3 py-2 text-right font-medium sm:table-cell">Anfragen</th>
-                  <th className="hidden py-2 pr-5 pl-3 font-medium md:table-cell">Details</th>
+                  <th className="hidden py-2 pr-5 pl-3 font-medium xl:table-cell">Details</th>
                 </tr>
               </thead>
               <tbody>
@@ -210,7 +210,7 @@ function RunHistory() {
                       {duration(run.stats.duration_seconds as number | undefined)}
                     </td>
                     <td className="hidden px-3 py-2 text-right tabular-nums sm:table-cell">{number(run.requests)}</td>
-                    <td className={cn("hidden max-w-xs truncate py-2 pr-5 pl-3 text-xs text-muted md:table-cell", run.error && "text-down")}>
+                    <td className={cn("hidden max-w-xs truncate py-2 pr-5 pl-3 text-xs text-muted xl:table-cell", run.error && "text-down")}>
                       {run.error ??
                         `${number(run.stats.new_transfers as number)} neue Transfers · ${number(run.stats.histories_fetched as number)} Marktwertverläufe`}
                     </td>

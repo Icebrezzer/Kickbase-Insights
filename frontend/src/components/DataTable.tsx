@@ -14,7 +14,7 @@ import {
   useReactTable,
 } from "@tanstack/react-table"
 import { ArrowDown, ArrowDownUp, ArrowUp } from "lucide-react"
-import { type ReactNode, useEffect, useState } from "react"
+import { type ReactNode, useEffect, useLayoutEffect, useState } from "react"
 import { cn } from "@/lib/cn"
 import { Button, EmptyState } from "./ui"
 
@@ -67,6 +67,7 @@ export function DataTable<T>({
 }: Props<T>) {
   const [sorting, setSorting] = useState<SortingState>(initialSorting)
   const [visible, setVisible] = useState(pageSize)
+  const fit = useFitColumns(columns)
 
   // A new filter result starts at the first page again
   useEffect(() => setVisible(pageSize), [data, pageSize])
@@ -74,7 +75,7 @@ export function DataTable<T>({
   const table = useReactTable({
     data,
     columns,
-    state: { sorting },
+    state: { sorting, columnVisibility: fit.hidden },
     onSortingChange: setSorting,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -84,11 +85,13 @@ export function DataTable<T>({
   const rows = table.getRowModel().rows
   if (rows.length === 0) return <>{empty ?? <EmptyState title="Keine Einträge gefunden" />}</>
   const shown = rows.slice(0, visible)
+  // Cards also on wider screens when the table cannot fit even without its optional columns
+  const cards = !!mobileCard && fit.tooNarrow
 
   return (
-    <div className={className}>
+    <div ref={fit.outerRef} className={className}>
       {mobileCard && (
-        <div className="md:hidden">
+        <div className={cards ? undefined : "md:hidden"}>
           <MobileSort table={table} />
           <ul className="divide-y divide-line border-t border-line">
             {shown.map((row) => (
@@ -104,7 +107,7 @@ export function DataTable<T>({
         </div>
       )}
 
-      <div className={cn("overflow-x-auto", mobileCard && "hidden md:block")}>
+      <div ref={fit.ref} className={cn("overflow-x-auto", cards ? "hidden" : mobileCard && "hidden md:block")}>
         <table className="w-full border-collapse text-sm">
           <thead>
             {table.getHeaderGroups().map((group) => (
@@ -195,6 +198,45 @@ export function DataTable<T>({
       )}
     </div>
   )
+}
+
+const RANK = ["sm", "md", "lg", "xl", "2xl", "3xl"]
+
+/**
+ * Hides the optional columns (those with `hideBelow`), the least important first, until the table fits
+ * its box, so it never needs a horizontal scrollbar while there is something left to drop. The box's
+ * width, not the window's, decides: the sidebar and side by side cards take their share.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function useFitColumns<T>(columns: ColumnDef<T, any>[]) {
+  const [element, setElement] = useState<HTMLDivElement | null>(null)
+  const [outer, setOuter] = useState<HTMLDivElement | null>(null)
+  const [count, setCount] = useState(0)
+  const [width, setWidth] = useState(0)
+  // The narrowest the table gets with every optional column gone; below it the cards take over
+  const [need, setNeed] = useState(0)
+  const order = columns
+    .map((column, index) => ({ id: column.id ?? (column as { accessorKey?: string }).accessorKey, rank: RANK.indexOf(column.meta?.hideBelow ?? ""), index }))
+    .filter((c): c is { id: string; rank: number; index: number } => !!c.id && c.rank >= 0)
+    .sort((a, b) => b.rank - a.rank || b.index - a.index)
+    .map((c) => c.id)
+
+  // A wider box may fit more again: start over and drop again below
+  useEffect(() => {
+    if (!outer) return
+    const observer = new ResizeObserver(([entry]) => setWidth(Math.round(entry.contentRect.width)))
+    observer.observe(outer)
+    return () => observer.disconnect()
+  }, [outer])
+  useLayoutEffect(() => setCount(0), [width])
+  useLayoutEffect(() => {
+    if (!element || element.scrollWidth <= element.clientWidth + 1) return
+    if (count < order.length) setCount(count + 1)
+    else if (element.scrollWidth !== need) setNeed(element.scrollWidth)
+  })
+
+  const hidden = Object.fromEntries(order.slice(0, count).map((id) => [id, false]))
+  return { ref: setElement, outerRef: setOuter, hidden, tooNarrow: width > 0 && need > width }
 }
 
 function MobileSort<T>({ table }: { table: Table<T> }) {

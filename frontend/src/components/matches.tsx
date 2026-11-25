@@ -51,7 +51,7 @@ export function MatchTile({ match }: { match: Match }) {
   return (
     <div
       className={cn(
-        "flex w-36 shrink-0 flex-col gap-2 rounded-xl border bg-surface p-3",
+        "flex min-w-0 flex-col gap-2 rounded-xl border bg-surface p-3",
         running ? "border-down/40" : "border-line",
       )}
     >

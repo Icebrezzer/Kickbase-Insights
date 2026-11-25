@@ -310,8 +310,8 @@ export function FairValueChart({
           {/* An axis needs something to scale */}
           <Scatter data={[{ points: 0, value: ticks[0] }]} shape={noMark} isAnimationActive={false} tooltipType="none" />
         </ScatterChart>
-        <div className="min-w-0 flex-1 overflow-x-auto overscroll-x-contain">
-          <div className="h-full min-w-[720px] md:min-w-0">
+        <div className="min-w-0 flex-1">
+          <div className="h-full">
             <ResponsiveContainer width="100%" height="100%">
               <ScatterChart margin={{ top: 8, right: 12, bottom: 0, left: 8 }}>
                 <CartesianGrid stroke="currentColor" strokeOpacity={0.15} />
