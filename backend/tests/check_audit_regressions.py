@@ -268,6 +268,18 @@ class DataTests(unittest.TestCase):
             engine.dispose()
 
 
+class DemoDatabaseTests(unittest.TestCase):
+    def test_demo_never_uses_a_configured_database(self):
+        from api.app import database_url
+
+        folder = Path("/tmp/kbi-demo-test")
+        for database in ({"url": "postgresql+psycopg://u:p@prod/kickbase"}, {"host": "postgres"}, {}):
+            settings = Settings(_env_file=None, demo=True, data_dir=folder, database=database)
+            self.assertEqual(database_url(settings), f"sqlite:///{(folder / 'demo.db').as_posix()}", database)
+        real = Settings(_env_file=None, demo=False, data_dir=folder, database={"url": "postgresql+psycopg://u:p@prod/kickbase"})
+        self.assertEqual(database_url(real), "postgresql+psycopg://u:p@prod/kickbase", "without demo the configured one")
+
+
 class ReconcileTests(unittest.TestCase):
     """Unclear calls are closed only on positive evidence, never just because time passed."""
 

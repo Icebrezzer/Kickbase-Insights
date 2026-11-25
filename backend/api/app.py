@@ -55,8 +55,11 @@ def configure_logging(debug: bool) -> None:
 
 
 def database_url(settings: Settings) -> str:
-    ### Demo data must never end up in a real database
-    if settings.demo and not settings.database.url:
+    ### Demo data must never end up in a real database: in demo mode every configured database (URL,
+    ### PostgreSQL host, the normal SQLite file) is ignored. Another place: set KBI_DATA_DIR
+    if settings.demo:
+        if settings.database.url or settings.database.host:
+            log.warning("Demo mode ignores the configured database and uses its own demo.db")
         return f"sqlite:///{(settings.data_dir / 'demo.db').as_posix()}"
     return settings.database_url
 
