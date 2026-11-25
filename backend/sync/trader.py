@@ -1088,6 +1088,26 @@ class TraderService:
                     session.commit()
             session.commit()
 
+    def backtest(self, league: League, user_id: str, capital: int, folds: int) -> dict:
+        """The profit trading strategies replayed on this league's real auctions (core.backtest)."""
+        from api.insights import Insights
+        from api.routes import analysis_limits
+        from core import backtest
+
+        with Session(self.engine) as session:
+            membership = session.get(UserLeague, (user_id, league.id))
+            max_squad, max_club = analysis_limits(self.settings, membership)
+            history = Insights(session, league, user_id, self.automation.model, max_squad, max_club).auctions()
+            ids = list({pid for _, pid, _, _ in history})
+            histories = dict(
+                session.exec(select(MarketValueHistory.player_id, MarketValueHistory.points).where(MarketValueHistory.player_id.in_(ids))).all()
+            )
+            context = load_context(session, league.competition_id, ids, utcnow())
+            ratio = min(learned_sell_ratio(session) or SAFE_SELL_RATIO, SAFE_SELL_RATIO)
+        auctions = [backtest.Auction(analytics.market_value_day(at), pid, price, value) for at, pid, price, value in history if value > 0]
+        matches = {pid: context.match_points(pid) for pid in ids}
+        return backtest.run(auctions, histories, matches, capital, ratio, folds)
+
     def reset_learning(self, user_id: str, league_id: str, scope: str) -> dict:
         """Back to the starting values: `global` (the base model, all leagues) or `league` (this
         league's bid heights). The values before go to the log, an import restores them."""

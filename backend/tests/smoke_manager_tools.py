@@ -397,6 +397,24 @@ def main() -> None:
         check(ij["options"]["min_gain"] == 4.5 and ij["options"]["daily_bids"] == 30 and ij["ignored"] == ["options.nope"], f"options merged and clamped {ij}")
         check(ij["learned"]["swap_edge"] == 50_000 and ij["learned"]["extra"] == [0.2, 0.5, 1.0], f"learned values clamped {ij['learned']}")
 
+        ### Strategy profiles and the backtest on the league's real auctions
+        profiles = client.get("/api/automation/trader/profiles").json()
+        check(set(profiles) == {"conservative", "balanced", "aggressive"} and profiles["conservative"]["profitShare"] == 30, f"profiles {profiles['conservative']}")
+        import time as _time
+
+        started = _time.time()
+        bt = client.get("/api/automation/trader/backtest?folds=3")
+        took = _time.time() - started
+        bj = bt.json()
+        print(f"    backtest ({took:.1f} s):", bj["data"], bj["windows"])
+        for res in bj["results"]:
+            print("     ", res)
+        check(bt.status_code == 200 and [r["strategy"] for r in bj["results"]] == ["none", "reference", "conservative", "balanced", "aggressive"],
+              f"backtest compares five strategies ({bt.status_code})")
+        none = bj["results"][0]
+        check(none["net_profit"] == 0 and none["bids"] == 0, "no trading makes nothing")
+        check(all(r["won"] + r["lost"] == r["bids"] and r["trades"] <= r["won"] for r in bj["results"]), "consistent counts")
+
         ### League learning: the export shows the base, the league's own and the blend; a reset needs
         ### an admin and logs the old values
         ex2 = client.get("/api/automation/trader/export?days=1").json()

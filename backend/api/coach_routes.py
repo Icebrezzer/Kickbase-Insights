@@ -39,9 +39,11 @@ from api.schemas import (
     SellOut,
     TraderImportIn,
     TraderImportOut,
+    TraderOptionsIn,
     TraderOut,
 )
-from core.trader import Learned, Options
+from core.trader import PROFILES, Learned, Options
+from core.trader import profile as profile_options
 from db.models import utcnow
 from kickbase import KickbaseClient
 
@@ -238,6 +240,26 @@ async def trader_import(state: StateDep, league_id: LeagueIdDep, viewer: ViewerD
     await asyncio.to_thread(automation.trader.import_tuning, viewer.user_id, league_id, body.options, body.learned)
     export = await asyncio.to_thread(automation.trader.export, viewer.user_id, league_id, 1)
     return TraderImportOut(options=export["options"], learned=export["learned"], ignored=ignored)
+
+
+@router.get("/automation/trader/profiles", response_model=dict[str, TraderOptionsIn])
+async def trader_profiles(viewer: ViewerDep) -> dict:
+    """The strategy profiles as complete options: a starting point to apply and adjust."""
+    return {name: TraderOptionsIn(**profile_options(name).__dict__) for name in PROFILES}
+
+
+@router.get("/automation/trader/backtest")
+async def trader_backtest(
+    state: StateDep,
+    league: LeagueDep,
+    viewer: ViewerDep,
+    capital: Annotated[int, Query(ge=1_000_000, le=500_000_000)] = 20_000_000,
+    folds: Annotated[int, Query(ge=1, le=6)] = 3,
+) -> dict:
+    """Profit trading strategies (none, reference, conservative, balanced, aggressive) replayed on the
+    league's real auctions, walk-forward. Takes a few seconds."""
+    automation = _automation(state)
+    return await asyncio.to_thread(automation.trader.backtest, league, viewer.user_id, capital, folds)
 
 
 @router.post("/automation/trader/reset")

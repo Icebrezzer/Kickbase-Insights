@@ -657,6 +657,11 @@ class Insights:
             )
         return result
 
+    def auctions(self) -> list[tuple[datetime, str, int, int]]:
+        """Every purchase from Kickbase in this league: (date, player, price paid, market value then).
+        The real auctions the backtest replays."""
+        return [(p.transfer.date, p.transfer.player_id, p.transfer.price, p.market_value) for p in self._purchases()]
+
     def winning_shares(self) -> list[tuple[int, float]]:
         """`(market value, markup share)` of every purchase from Kickbase another manager won in this
         league, recent ones (45 days) when there are enough: what it took to win an auction here."""

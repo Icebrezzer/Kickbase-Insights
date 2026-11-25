@@ -96,6 +96,27 @@ class Options:
 
 BOOL_OPTIONS = ("shadow", "rescue_override")
 
+### Strategy profiles: starting points the user can apply and then adjust. Hard limits (risk engine,
+### OPTION_LIMITS) hold for every profile. Values are proposals until the backtest calibrates them
+PROFILES: dict[str, dict[str, float | int | bool]] = {
+    "conservative": {
+        "min_gain": 5.0, "max_cost_per_point": 250_000, "min_avg_edge": 15, "min_play": 70, "lineup_share": 80,
+        "profit_share": 30, "reserve": 2_000_000, "min_roi": 2.0, "credit_mode": 1, "daily_bids": 6, "daily_sales": 3,
+        "stop_loss": 1_500_000, "trailing_stop": 4, "position_stop": 6, "max_hold_days": 5, "sell_window": 15,
+    },
+    "balanced": {},
+    "aggressive": {
+        "min_gain": 1.5, "max_cost_per_point": 400_000, "min_avg_edge": 5, "min_play": 50, "lineup_share": 100,
+        "profit_share": 80, "reserve": 0, "min_roi": 1.0, "credit_mode": 2, "daily_bids": 10, "daily_sales": 5,
+        "stop_loss": 5_000_000, "trailing_stop": 8, "position_stop": 15, "max_hold_days": 10, "sell_window": 30,
+    },
+}
+
+
+def profile(name: str) -> Options:
+    """A profile on top of the defaults ("balanced" are the defaults), validated like any import."""
+    return Options.load({**Options().__dict__, **PROFILES[name]})
+
 
 def parse_bool(raw: object) -> bool | None:
     if isinstance(raw, bool):
