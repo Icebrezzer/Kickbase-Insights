@@ -37,9 +37,11 @@ from api.schemas import (
     RivalsOut,
     ScoutRunOut,
     SellOut,
+    TraderImportIn,
+    TraderImportOut,
     TraderOut,
 )
-from core.trader import Options
+from core.trader import Learned, Options
 from db.models import utcnow
 from kickbase import KickbaseClient
 
@@ -211,6 +213,31 @@ async def trader_view(state: StateDep, league_id: LeagueIdDep, viewer: ViewerDep
     """The autotrader's bids and sales, the weekly statistics and what it learned (shared by all leagues)."""
     automation = _automation(state)
     return TraderOut.model_validate(await asyncio.to_thread(automation.trader.view, viewer.user_id, league_id))
+
+
+@router.get("/automation/trader/export")
+async def trader_export(
+    state: StateDep, league_id: LeagueIdDep, viewer: ViewerDep, days: Annotated[int, Query(ge=1, le=60)] = 7
+) -> dict:
+    """Settings, learned values, trades, paper trades, events and every round's decisions as one JSON,
+    to review and tune the trader with an AI."""
+    automation = _automation(state)
+    return await asyncio.to_thread(automation.trader.export, viewer.user_id, league_id, days)
+
+
+@router.post("/automation/trader/import", response_model=TraderImportOut)
+async def trader_import(state: StateDep, league_id: LeagueIdDep, viewer: ViewerDep, body: TraderImportIn) -> TraderImportOut:
+    """Changes the given options of this league and the given learned values (all leagues), clamped.
+    No rebuild needed."""
+    automation = _automation(state)
+    if body.learned is not None and not state.settings.automation.may_tune_learning(viewer.user_id, viewer.name):
+        raise HTTPException(403, "Gelernte Werte gelten für alle Ligen und dürfen nur von KBI_AUTOMATION__TRADER_ADMINS geändert werden.")
+    known_options, known_learned = set(Options.__dataclass_fields__), set(Learned.__dataclass_fields__)
+    ignored = [f"options.{k}" for k in body.options or {} if k not in known_options]
+    ignored += [f"learned.{k}" for k in body.learned or {} if k not in known_learned]
+    await asyncio.to_thread(automation.trader.import_tuning, viewer.user_id, league_id, body.options, body.learned)
+    export = await asyncio.to_thread(automation.trader.export, viewer.user_id, league_id, 1)
+    return TraderImportOut(options=export["options"], learned=export["learned"], ignored=ignored)
 
 
 @router.post("/automation/scout", response_model=ScoutRunOut)

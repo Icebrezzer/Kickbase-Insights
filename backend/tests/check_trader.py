@@ -152,6 +152,29 @@ def main() -> None:
         2, 1, 1, 1, 10_300_000, 700_000, 12.5
     ), w
     assert (w["shadow_trades"], w["shadow_profit"]) == (1, 250_000), w
+    ### Credit: up to the max bid, but only as much debt as the bench pays back
+    assert t.credit(10_000_000, 100_000_000, 50_000_000) == 26_300_000
+    assert t.credit(10_000_000, 100_000_000, 5_000_000) == 5_000_000
+    assert t.credit(-5_000_000, 100_000_000, 3_000_000) == 0
+    assert t.credit(-5_000_000, 100_000_000, 20_000_000) == 15_000_000
+
+    ### Empty squad: a keeper fills a gap with his real points; once one is planned, a second is no need
+    keeper = p("k1", 1, 40, value=2_000_000)
+    first = t.lineup_upgrade([], keeper, OPTS)
+    assert first and first.fills and first.gain == 40 and first.replaced is None, first
+    assert t.lineup_upgrade([replace(keeper, locked=True)], p("k2", 1, 30), OPTS) is None, "no second keeper"
+    assert t.worth_it(first, 40 * OPTS.max_cost_per_point, OPTS)
+    assert not t.worth_it(first, 40 * OPTS.max_cost_per_point + 1_000_000, OPTS), "a gap is no blank cheque"
+
+    ### Repaid from the last market value update before the deadline (22:00 Berlin, +15 min)
+    from zoneinfo import ZoneInfo
+
+    berlin = ZoneInfo("Europe/Berlin")
+    friday = datetime(2026, 11, 27, 20, 30, tzinfo=berlin)
+    assert t.repay_from(friday) == datetime(2026, 11, 26, 22, 15, tzinfo=berlin)
+    late = datetime(2026, 11, 28, 22, 10, tzinfo=berlin)
+    assert t.repay_from(late) == late - timedelta(hours=1)
+
     print("All trader checks passed.")
 
 

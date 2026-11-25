@@ -13,7 +13,10 @@ import {
   usePushKey,
   useSaveAutomation,
   useTrader,
+  useTraderImport,
+  withLeague,
 } from "@/api/hooks"
+import { useLeagueId } from "@/lib/league"
 import type { AutomationSettings, TraderOptions } from "@/api/types"
 import { Badge, Button, Card, CardHeader, EmptyState, PageHeader, QueryState, Stat } from "@/components/ui"
 import { cn } from "@/lib/cn"
@@ -279,6 +282,77 @@ const STATUS_LABELS: Record<string, string> = {
   done: "ausgewertet",
 }
 
+/** Debug export for an AI review, and the import of the values it suggests, without a new build */
+function TraderTuning() {
+  const leagueId = useLeagueId()
+  const [days, setDays] = useState(7)
+  const importer = useTraderImport()
+  const [error, setError] = useState<string | null>(null)
+
+  async function upload(file: File) {
+    setError(null)
+    try {
+      importer.mutate(JSON.parse(await file.text()))
+    } catch {
+      setError("Die Datei ist kein gültiges JSON.")
+    }
+  }
+
+  return (
+    <details className="rounded-xl border border-line px-3 py-2">
+      <summary className="cursor-pointer text-sm font-medium">Debug-Export und Import</summary>
+      <div className="space-y-3 py-3 text-sm">
+        <p className="text-muted">
+          Der Export enthält Einstellungen, gelernte Werte, Gebote, Verkäufe, Schattentransfers und für jede Runde die Begründung je
+          Spieler – zum Prüfen mit einer KI. Deren Vorschlag als JSON <code>{'{"options": {…}, "learned": {…}}'}</code> importieren:
+          nur die genannten Werte ändern sich, alles wird auf die Grenzen begrenzt. Gelernte Werte gelten für alle Ligen.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={days}
+            onChange={(event) => setDays(Number(event.target.value))}
+            aria-label="Zeitraum des Exports"
+            className="h-9 rounded-lg border border-line bg-surface px-2"
+          >
+            {[1, 3, 7, 14, 21].map((d) => (
+              <option key={d} value={d}>
+                letzte {d} {d === 1 ? "Tag" : "Tage"}
+              </option>
+            ))}
+          </select>
+          <a
+            href={`/api${withLeague(`/automation/trader/export?days=${days}`, leagueId)}`}
+            download={`autotrader-${leagueId ?? "liga"}-${new Date().toISOString().slice(0, 10)}.json`}
+            className="inline-flex h-9 items-center rounded-lg border border-line px-3 font-medium hover:bg-surface-2"
+          >
+            Exportieren
+          </a>
+          <label className="inline-flex h-9 cursor-pointer items-center rounded-lg border border-line px-3 font-medium hover:bg-surface-2">
+            Importieren…
+            <input
+              type="file"
+              accept="application/json,.json"
+              className="sr-only"
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                event.target.value = ""
+                if (file) void upload(file)
+              }}
+            />
+          </label>
+        </div>
+        {(error || importer.error) && <p className="text-down">{error ?? importer.error?.message}</p>}
+        {importer.data && (
+          <p className="text-up">
+            Übernommen.
+            {importer.data.ignored.length > 0 && <span className="text-muted"> Unbekannt und ignoriert: {importer.data.ignored.join(", ")}</span>}
+          </p>
+        )}
+      </div>
+    </details>
+  )
+}
+
 function TraderCard() {
   const query = useTrader()
   return (
@@ -316,34 +390,37 @@ function TraderCard() {
                 />
                 <Stat label="Auktionen auf dem Papier" value={`${tr.learned.shadowWon} / ${tr.learned.shadowWon + tr.learned.shadowLost}`} hint="hätte das Gebot gereicht" />
               </div>
+              <TraderTuning />
+
               {tr.weeks.length > 0 && (
                 <div className="overflow-x-auto">
+                  {/* Phones get the five columns that matter, the rest from sm on */}
                   <table className="w-full text-sm tabular-nums">
                     <thead className="text-left text-xs text-muted">
                       <tr>
                         <th className="py-1 pr-3 font-medium">Woche</th>
-                        <th className="py-1 pr-3 font-medium">Gebote</th>
+                        <th className="hidden py-1 pr-3 font-medium sm:table-cell">Gebote</th>
                         <th className="py-1 pr-3 font-medium">Gekauft</th>
                         <th className="py-1 pr-3 font-medium">Verkauft</th>
-                        <th className="py-1 pr-3 font-medium">Ausgaben</th>
-                        <th className="py-1 pr-3 font-medium">Erlöse</th>
+                        <th className="hidden py-1 pr-3 font-medium sm:table-cell">Ausgaben</th>
+                        <th className="hidden py-1 pr-3 font-medium sm:table-cell">Erlöse</th>
                         <th className="py-1 pr-3 font-medium">Gewinn</th>
-                        <th className="py-1 pr-3 font-medium">+Punkte</th>
+                        <th className="hidden py-1 pr-3 font-medium sm:table-cell">+Punkte</th>
                         <th className="py-1 font-medium">Schatten</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-line">
                       {tr.weeks.map((w) => (
                         <tr key={w.week}>
-                          <td className="py-1.5 pr-3">{w.week}</td>
-                          <td className="py-1.5 pr-3">{w.bids}</td>
+                          <td className="py-1.5 pr-3">{w.week.replace(/^\d{4}-/, "")}</td>
+                          <td className="hidden py-1.5 pr-3 sm:table-cell">{w.bids}</td>
                           <td className="py-1.5 pr-3">{w.won}</td>
                           <td className="py-1.5 pr-3">{w.sales}</td>
-                          <td className="py-1.5 pr-3">{compactMoney(w.spent)}</td>
-                          <td className="py-1.5 pr-3">{compactMoney(w.received)}</td>
+                          <td className="hidden py-1.5 pr-3 sm:table-cell">{compactMoney(w.spent)}</td>
+                          <td className="hidden py-1.5 pr-3 sm:table-cell">{compactMoney(w.received)}</td>
                           <td className={cn("py-1.5 pr-3", w.profit > 0 ? "text-up" : w.profit < 0 ? "text-down" : "")}>{compactMoney(w.profit)}</td>
-                          <td className="py-1.5 pr-3">{decimal(w.pointsGain)}</td>
-                          <td className="py-1.5">{w.shadowTrades ? `${compactMoney(w.shadowProfit)} (${w.shadowTrades})` : "–"}</td>
+                          <td className="hidden py-1.5 pr-3 sm:table-cell">{decimal(w.pointsGain)}</td>
+                          <td className="py-1.5">{w.shadowTrades ? compactMoney(w.shadowProfit) : "–"}</td>
                         </tr>
                       ))}
                     </tbody>

@@ -195,6 +195,14 @@ def main() -> None:
         check(any(a.purpose == "lineup" for a in rich), "a lineup purchase is planned when money is there")
         check(sum(1 for a in rich if a.kind == "bid") <= max(slots, 0) + sum(1 for a in rich if a.kind == "sell"), "bids fit the free squad slots")
 
+        ### Empty squad: the eleven first, one keeper at most, nothing for profit or the bench yet
+        empty = squad_now.model_copy(update={"players": []})
+        start, _ = state.automation.trader._plan(league, state.automation.get_settings("1001", "4242"), empty, 200_000_000, market_now, utcnow())
+        positions = {p.id: p.position for p in market_now.players}
+        print("    plan for an empty squad:", [(a.purpose, a.name, positions.get(a.player_id), a.price) for a in start])
+        check(sum(1 for a in start if a.kind == "bid" and positions.get(a.player_id) == 1) <= 1, "one keeper at most")
+        check(all(a.purpose == "lineup" for a in start if a.kind == "bid"), "an empty squad bids for the eleven only")
+
         open_before = sum(p.own_bid("1001") or 0 for p in market_now.players)
         client.put("/api/automation/settings", json={**current, "trader": True, "traderLive": True})
         live = client.portal.call(state.automation.trader.round, league, state.automation.get_settings("1001", "4242"), kb_client, utcnow())
@@ -262,6 +270,16 @@ def main() -> None:
         check(opts.status_code == 200 and opts.json()["traderOptions"]["minGain"] == 5, "trader options are stored")
         bad = client.put("/api/automation/settings", json={**current, "traderOptions": {"dailyBids": 1000}})
         check(bad.status_code == 422, f"out of range options are refused ({bad.status_code})")
+
+        ### Export for an AI review, import of tuned values without a new build
+        export = client.get("/api/automation/trader/export?days=7")
+        ej = export.json()
+        check(export.status_code == 200 and ej["rounds"] and "decision" in ej["rounds"][-1]["data"]["market"][0], "export holds the decisions of the rounds")
+        imported = client.post("/api/automation/trader/import", json={"options": {"min_gain": 4.5, "daily_bids": 999, "nope": 1}, "learned": {"swap_edge": 1, "extra": [0.2, 0.5, 2]}})
+        ij = imported.json()
+        check(imported.status_code == 200, f"import ({imported.status_code} {imported.text[:200]})")
+        check(ij["options"]["min_gain"] == 4.5 and ij["options"]["daily_bids"] == 30 and ij["ignored"] == ["options.nope"], f"options merged and clamped {ij}")
+        check(ij["learned"]["swap_edge"] == 50_000 and ij["learned"]["extra"] == [0.2, 0.5, 1.0], f"learned values clamped {ij['learned']}")
         client.put("/api/automation/settings", json={**current, "trader": False})
 
         events = client.get("/api/automation/events")

@@ -338,6 +338,23 @@ export function useSaveAutomation() {
   })
 }
 
+/** Imports tuned trader options (this league) and learned values (all leagues) from an export review */
+export function useTraderImport() {
+  const client = useQueryClient()
+  const leagueId = useLeagueId()
+  return useMutation({
+    mutationFn: (body: unknown) =>
+      api<{ options: Record<string, unknown>; learned: Record<string, unknown>; ignored: string[] }>(
+        withLeague("/automation/trader/import", leagueId),
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      ),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ["automation-settings"] })
+      client.invalidateQueries({ queryKey: ["trader"] })
+    },
+  })
+}
+
 /** Compares the scouting list with the forecasts. Called when the market opens, the server throttles it. */
 export function useRunScout() {
   const client = useQueryClient()

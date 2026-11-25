@@ -6,19 +6,26 @@ acts. In a dry run (`trader_live` off) nothing is sent to Kickbase: the plan is 
 
 Safeguards, besides the ones in `core.trader`:
 - the server switch KBI_AUTOMATION__TRADER and the per league switch,
-- the budget minus a reserve never goes below zero through its bids: open bids count as spent,
+- bids stay within the balance minus a reserve plus a credit up to the max bid that the players outside
+  the best eleven can pay back; open bids count as spent and as players to come,
 - one sale at most per round, only right before the auction it makes room for, and that bid is placed
   high enough to have a good chance,
 - daily limits of bids and sales, no rebuy of a player it sold within a week,
 - starters stay from shortly before the first kick-off until 5 minutes after it; without the automatic
   lineup they are not sold between matchdays at all,
 - the profit trading pauses for the rest of the week after a realized loss of `stop_loss`,
-- a negative budget shortly before the deadline is fixed by the sales that cost the fewest points.
+- a negative budget is fixed from the last market value update before the deadline on, by the sales
+  that cost the fewest points.
+
+Every round's decisions, with the reason for each market player, go to `TraderDebug` (only when they
+changed), for the export that lets the parameters be tuned from outside.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
@@ -38,6 +45,7 @@ from db.models import (
     ShadowTrade,
     SquadEntry,
     TradeLog,
+    TraderDebug,
     Transfer,
     UserAutomation,
     UserLeague,
@@ -55,17 +63,31 @@ log = logging.getLogger(__name__)
 
 ### Kickbase's instant sale price is unknown before the sale: without a learned ratio count on this share
 SAFE_SELL_RATIO = 0.9
-### A negative budget is fixed this long before the deadline
-RESCUE_BEFORE = timedelta(minutes=60)
 ### Paper purchases started per round and league, the most promising first
 SHADOWS_PER_ROUND = 5
 SHADOW_KEEP = timedelta(days=120)
+### Debug rounds are kept this long
+DEBUG_KEEP = timedelta(days=21)
+
+### Read first by whoever (or whatever AI) reviews an export
+EXPORT_ABOUT = """Kickbase Insights autotrader export. Money in euro, times in UTC.
+options: per league settings, limits in option_limits (min_play and min_avg_edge in percent, sell_window and
+starter_lock in minutes, lineup_share/profit_share in percent of the money). learned: shared by all leagues;
+extra = how far up the bid range (0 = low, 1 = high) per price class, min_margin = euro a profit buy must
+gain after the bid premium, gain_ratio = actual/forecast market value gain, swap_edge = euro per day a swap
+target must rise more than the player sold. constants: fixed rules, a change needs a new build.
+rounds: one entry per round whose decisions changed; market[].decision says why a player was bought or not,
+money = what was available for that bid, credit = the overdraft used on top of cash_free.
+trades: real bids (open/won/lost/expired), sales with profit, and dry run entries (status planned).
+shadows: paper trades, result = euro the paper trade made (buy) or the value change after a real sale (sell).
+To change parameters, upload JSON {"options": {...}, "learned": {...}} on the Automatik page (Import). Only
+the given keys change, everything is clamped to its limits."""
 STATE_KEY = "trader"
 
 
 @dataclass(frozen=True)
 class Action:
-    kind: str # bid or sell
+    kind: str # bid, sell or withdraw
     purpose: str # lineup, cover, profit; sales: room, rescue, turn
     player_id: str
     name: str
@@ -81,6 +103,8 @@ class TraderService:
         self.automation = automation
         self.engine = automation.engine
         self.settings = automation.settings
+        self._pushes: list[tuple[str, str, str, str]] = [] # Filled while planning in a thread, sent after
+        self._last_debug: dict[tuple[str, str], str] = {}
 
     ### ==============================================================================================
     ### Round
@@ -116,6 +140,9 @@ class TraderService:
         sales = [_shadow_sale(a) for a in actions if a.kind == "sell"]
         if sales:
             await asyncio.to_thread(self._start_shadows, league.id, sales)
+        while self._pushes:
+            user_id, title, message, tag = self._pushes.pop()
+            await self.automation.push.send(user_id, title, message, "/automatik", tag=tag)
         return actions
 
     async def _saved_lineup(self, league: League, client: KickbaseClient) -> list[str]:
@@ -135,6 +162,15 @@ class TraderService:
             received = await asyncio.to_thread(self._received, user_id, league.id, action.player_id) or action.price
             await asyncio.to_thread(self._log_sale, league, user_id, action, received)
             message = f"{action.name} verkauft ({action.reason}) für {received / 1e6:.2f} Mio. €"
+        elif action.kind == "withdraw":
+            ### The bid's log entry is closed by _settle once the market shows no own bid anymore
+            market = await client.market(league.id)
+            listing = next((p for p in market.players if p.id == action.player_id), None)
+            offer_id = listing.own_offer_id(user_id) if listing else None
+            if offer_id is None:
+                return
+            await client.withdraw_offer(league.id, action.player_id, offer_id)
+            message = f"Gebot für {action.name} zurückgezogen ({action.reason})"
         else:
             await client.place_offer(league.id, action.player_id, action.price)
             await asyncio.to_thread(self._log_bid, league, user_id, action, "open")
@@ -381,19 +417,29 @@ class TraderService:
         names = {p.id: p.last_name for p in squad.players} | {p.id: p.last_name for p in market.players}
         actions: list[Action] = []
 
-        ### A negative budget shortly before the deadline costs the whole matchday
+        ### A negative budget at the deadline costs the whole matchday. Repaid from the last market value
+        ### update before it on: the sales fetch the same then as an hour before kick-off, and a server
+        ### that is down for a while still has many rounds left to do it
         upcoming = context.upcoming
-        if budget < 0 and upcoming is not None and timedelta(0) < upcoming.deadline - now <= RESCUE_BEFORE:
+        repay_from = t.repay_from(upcoming.deadline) if upcoming is not None else None
+        if budget < 0 and repay_from is not None and repay_from <= now < upcoming.deadline:
             plan = coach.rescue_sales(
                 budget,
                 [coach.SellCandidate(c.player_id, c.position, c.expected, int(c.value * ratio)) for c in own],
                 protected=[c.player_id for c in own if c.locked and c.fit],
             )
+            if plan.budget_after < 0:
+                self._warn_debt(league, user_id, budget, upcoming.deadline)
             by_id = {c.player_id: c for c in own}
-            return [
+            rescue = [
                 Action("sell", "rescue", pid, names.get(pid, pid), int(by_id[pid].value * ratio), by_id[pid].value, reason="Budget im Minus vor der Deadline")
                 for pid in plan.sales
-            ], []
+            ]
+            self._log_debug(league.id, user_id, {
+                "live": row.trader_live, "budget": budget, "rescue": True, "budget_after": plan.budget_after,
+                "deadline": upcoming.deadline.isoformat(), "repay_from": repay_from.isoformat(), "actions": [a.__dict__ for a in rescue],
+            })
+            return rescue, []
 
         ### A profit purchase whose forecast turned is sold in the evening, before the update at 22:00
         if sales_left > 0 and self.settings.automation.sell_advice_hour <= local.hour < 22:
@@ -407,15 +453,53 @@ class TraderService:
                     sales_left -= 1
                     break
 
-        ### Targets
+        ### Open bids count as players to come, so a position is not bought twice. The trader's own
+        ### bids that are not needed anymore (a rival won the slot's other auction, a player was won)
+        ### are withdrawn, the most useful kept first; the user's own bids are never touched
         open_bids = {pid: bid for pid, p in listed.items() if (bid := p.own_bid(user_id)) is not None}
-        free = budget - opts.reserve - sum(open_bids.values()) + sum(a.price for a in actions)
+        trader_bids = {h.player_id: h for h in history if h.kind == "bid" and h.status == "open" and h.player_id in open_bids}
+        pending = {
+            pid: replace(candidate(pid, p.position, p.status, p.team_id, p.average_points, p.market_value), locked=True)
+            for pid, p in listed.items() if pid in open_bids
+        }
+        planned = [*own, *(c for pid, c in pending.items() if pid not in trader_bids)]
+        ranked = sorted(
+            (pending[pid] for pid in trader_bids),
+            key=lambda c: (trader_bids[c.player_id].purpose != "lineup", trader_bids[c.player_id].purpose != "cover", -c.expected),
+        )
+        for c in ranked:
+            purpose = trader_bids[c.player_id].purpose
+            needed = (
+                t.lineup_upgrade(planned, c, opts) is not None if purpose == "lineup"
+                else c.position in t.missing_cover(planned) if purpose == "cover"
+                else True
+            )
+            if needed:
+                planned.append(c)
+                continue
+            actions.append(Action("withdraw", purpose, c.player_id, names.get(c.player_id, c.player_id), open_bids.pop(c.player_id), c.value, reason="kein Bedarf mehr"))
+        planned = _with_best(planned)
+
+        ### Targets
+        free = budget - opts.reserve - sum(open_bids.values()) + sum(a.price for a in actions if a.kind == "sell")
         slots = max_squad - len(own) - len(open_bids)
+        ### Credit up to the max bid, repaid before the deadline. Auctions ending inside the repay window
+        ### are paid from the balance only
+        repayable = sum(int(c.value * ratio) for c in own if not c.in_best)
+        loan = t.credit(budget, sum(p.market_value or 0 for p in squad.players), repayable)
+
+        def money_for(c: t.Candidate, cash: int) -> int:
+            ends_close = (
+                upcoming is not None and repay_from is not None and c.expires_at is not None
+                and repay_from <= c.expires_at <= upcoming.deadline
+            )
+            return cash if ends_close else cash + loan
+
         market_candidates: list[t.Candidate] = []
         for pid, p in listed.items():
             offer = offers.get(pid)
             seller = p.seller.id if p.seller else None
-            if offer is None or seller == user_id or pid in open_bids or pid in sold_recently or offer.own_club_full:
+            if offer is None or seller == user_id or pid in pending or pid in sold_recently or offer.own_club_full:
                 continue
             c = candidate(pid, p.position, p.status, p.team_id, p.average_points, p.market_value)
             market_candidates.append(
@@ -423,17 +507,41 @@ class TraderService:
             )
         free_agents = {pid for pid, p in listed.items() if p.seller is None}
 
+        ### Why each market player was or was not bought, for the debug log
+        why: dict[str, str] = {}
+        for pid, p in listed.items():
+            if pid in pending:
+                why[pid] = "eigenes Gebot offen"
+            elif p.seller is not None and p.seller.id == user_id:
+                why[pid] = "eigener Spieler"
+            elif pid in sold_recently:
+                why[pid] = "vor kurzem verkauft"
+            elif pid in offers and offers[pid].own_club_full:
+                why[pid] = "Vereinslimit"
+            elif pid not in offers:
+                why[pid] = "keine Marktdaten"
+
         options: list[tuple[float, str, t.Candidate, t.Upgrade | None]] = []
+        ### Order: fill the eleven, then improve it, then trade for profit, then the substitutes
         for c in market_candidates:
-            upgrade = t.lineup_upgrade(own, c, opts)
+            upgrade = t.lineup_upgrade(planned, c, opts)
             if upgrade is not None:
-                options.append((1e9 + upgrade.gain, "lineup", c, upgrade))
+                options.append(((2e9 if upgrade.fills else 1e9) + upgrade.gain, "lineup", c, upgrade))
             elif row.trader_profit and not paused and c.fit and c.forecast > 0:
                 options.append((float(t.profit_margin(c, c.bid_low or c.value)), "profit", c, None))
-        cover = t.cover_target(own, [c for c in market_candidates if not any(o[2] is c for o in options if o[1] == "lineup")], opts)
-        if cover is not None:
-            options.append((1e8, "cover", cover, None))
+            else:
+                why[c.player_id] = (
+                    "verletzt/fraglich" if not c.fit
+                    else "kein Startelf-Upgrade, Gewinnhandel aus" if not row.trader_profit
+                    else "kein Startelf-Upgrade, Gewinnhandel pausiert (Stop-Loss)" if paused
+                    else "kein Startelf-Upgrade, keine steigende Prognose"
+                )
+        cover_pool = [c for c in market_candidates if not any(o[2] is c for o in options if o[1] == "lineup")]
+        for c in cover_pool:
+            if c is t.cover_target(planned, [c], opts):
+                options.append((-1e9 - max(c.bid_low, c.price, c.value), "cover", c, None))
         options.sort(key=lambda o: -o[0])
+        money_seen: dict[str, int] = {}
 
         shadows: list[ShadowTrade] = []
         sold_now = any(a.kind == "sell" for a in actions)
@@ -454,23 +562,46 @@ class TraderService:
                         _shadow_buy(c, rule_bid if qualified else paper, raw_gain.get(c.player_id, 0),
                                     "profit" if qualified else "near", c.player_id in free_agents)
                     )
+            label = {"lineup": "Startelf", "profit": "Gewinnhandel", "cover": "Ersatz"}[purpose]
             if bids_left <= 0:
+                why[c.player_id] = f"{label}: Tageslimit Gebote erreicht"
                 continue
-            bid = _price(c, purpose, upgrade, extra, free, opts, state) if slots > 0 else None
+            ### Needs change with every bid of this round
+            gaps = t.best_of(planned).empty_slots
+            if purpose == "lineup":
+                upgrade = t.lineup_upgrade(planned, c, opts)
+                if upgrade is None:
+                    why[c.player_id] = "Startelf: Platz schon durch ein Gebot dieser Runde besetzt"
+                    continue
+            elif gaps > 0 or (purpose == "cover" and c.position not in t.missing_cover(planned)):
+                why[c.player_id] = f"{label}: erst die Startelf füllen" if gaps > 0 else "Ersatz: Position schon abgedeckt"
+                continue # The eleven comes first, profit and substitutes wait for it
+            ### Keep enough to fill the other empty slots cheaply
+            keep = max(t.best_of([*planned, c]).empty_slots, 0) * opts.cover_max_price
+            money_seen[c.player_id] = money_for(c, free) - keep
+            bid = _price(c, purpose, upgrade, extra, money_for(c, free) - keep, opts, state) if slots > 0 else None
             sale = None
             if bid is None:
+                why[c.player_id] = f"{label}: " + (
+                    "kein Kaderplatz frei" if slots <= 0
+                    else "Marge unter der Mindestmarge oder Budget zu knapp" if purpose == "profit"
+                    else "Budget oder Preis je Punkt passt nicht"
+                )
                 ### Room or money is only made right before the auction ends, one sale per round
                 if purpose == "cover" or sold_now or sales_left <= 0 or c.expires_at is None:
                     continue
                 if c.expires_at - now > timedelta(minutes=opts.sell_window):
+                    why[c.player_id] += ", Verkauf erst im Verkaufsfenster"
                     continue
                 sale = t.pick_sale(_with_best([*own, replace(c, locked=True)]), c, min_play, state.swap_edge, upgrade.replaced if upgrade else None)
                 if sale is None:
+                    why[c.player_id] += ", kein Spieler zum Verkaufen"
                     continue
                 proceeds = int(sale.value * ratio)
                 ### A player is given up for this one: bid high enough to have a good chance
-                bid = _price(c, purpose, upgrade, max(extra, t.ROOM_EXTRA), free + proceeds, opts, state)
+                bid = _price(c, purpose, upgrade, max(extra, t.ROOM_EXTRA), money_for(c, free + proceeds) - keep, opts, state)
                 if bid is None:
+                    why[c.player_id] += ", auch mit Verkauf nicht"
                     continue
                 reason = (
                     "verletzt/fällt aus" if not sale.fit
@@ -479,6 +610,7 @@ class TraderService:
                 )
                 actions.append(Action("sell", "room", sale.player_id, names.get(sale.player_id, sale.player_id), proceeds, sale.value, reason=reason))
                 own = [o for o in own if o.player_id != sale.player_id]
+                planned = _with_best([o for o in planned if o.player_id != sale.player_id])
                 free += proceeds
                 slots += 1
                 sales_left -= 1
@@ -493,13 +625,34 @@ class TraderService:
                 Action("bid", purpose, c.player_id, names.get(c.player_id, c.player_id), bid, c.value,
                        upgrade.gain if upgrade else 0, reason, raw_gain.get(c.player_id, 0))
             )
+            why[c.player_id] = f"{label}: Gebot {bid:,} € ({reason})"
             bid_on.add(c.player_id)
-            own = _with_best([*own, c])
+            planned = _with_best([*planned, replace(c, locked=True)])
             free -= bid
             slots -= 1
             bids_left -= 1
         ### Paper trades only for what was not bought for real
         shadows = [s for s in shadows if s.player_id not in bid_on]
+
+        def player(c: t.Candidate) -> dict:
+            return {
+                "id": c.player_id, "name": names.get(c.player_id), "pos": c.position, "expected": round(c.expected, 1),
+                "average": c.average, "form": c.form, "play": c.play, "fit": c.fit, "today": c.today, "forecast": c.forecast,
+                "gain": c.gain, "value": c.value, "price": c.price, "bid_low": c.bid_low, "bid_high": c.bid_high,
+                "expires_at": c.expires_at.isoformat() if c.expires_at else None, "in_best": c.in_best, "locked": c.locked,
+            }
+
+        self._log_debug(league.id, user_id, {
+            "live": row.trader_live, "profit_trading": row.trader_profit, "budget": budget, "cash_free": free, "credit": loan,
+            "reserve": opts.reserve, "open_bids": open_bids, "slots": slots, "bids_left": bids_left, "sales_left": sales_left,
+            "paused": paused, "keep_starters": keep_starters, "sell_ratio": ratio,
+            "deadline": upcoming.deadline.isoformat() if upcoming else None,
+            "repay_from": repay_from.isoformat() if repay_from else None,
+            "squad": [player(c) for c in own], "pending": [player(c) for c in pending.values()],
+            "market": [{**player(c), "money": money_seen.get(c.player_id), "decision": why.get(c.player_id, "nicht geprüft")} for c in market_candidates],
+            "skipped": {pid: why[pid] for pid in listed if pid in why and pid not in {c.player_id for c in market_candidates}},
+            "actions": [a.__dict__ for a in actions],
+        })
         return actions, shadows
 
     ### ==============================================================================================
@@ -584,12 +737,86 @@ class TraderService:
                 self._save_state(session, state)
             session.commit()
 
+    def _log_debug(self, league_id: str, user_id: str, data: dict) -> None:
+        """Stored only when the decisions changed since the last round, so quiet hours cost nothing."""
+        digest = hashlib.sha256(
+            json.dumps([data.get("actions"), [(m["id"], m["decision"]) for m in data.get("market", [])]], default=str).encode()
+        ).hexdigest()
+        if self._last_debug.get((league_id, user_id)) == digest:
+            return
+        self._last_debug[(league_id, user_id)] = digest
+        with Session(self.engine) as session:
+            session.exec(delete(TraderDebug).where(TraderDebug.at < utcnow() - DEBUG_KEEP))
+            session.add(TraderDebug(user_id=user_id, league_id=league_id, data=json.loads(json.dumps(data, default=str))))
+            session.commit()
+
+    def export(self, user_id: str, league_id: str, days: int) -> dict:
+        """Everything to judge and tune the trader from outside: settings, what it learned, its trades,
+        paper trades and the decisions of every changed round."""
+        since = utcnow() - timedelta(days=days)
+        with Session(self.engine) as session:
+            row = session.get(UserAutomation, (user_id, league_id))
+            learned = t.Learned.load(load_state(session, STATE_KEY))
+            trades = session.exec(
+                select(TradeLog).where(TradeLog.user_id == user_id, TradeLog.league_id == league_id, TradeLog.at >= since).order_by(TradeLog.at)
+            ).all()
+            shadows = session.exec(select(ShadowTrade).where(ShadowTrade.league_id == league_id, ShadowTrade.at >= since).order_by(ShadowTrade.at)).all()
+            events = session.exec(
+                select(AutomationEvent)
+                .where(AutomationEvent.user_id == user_id, AutomationEvent.league_id == league_id, AutomationEvent.at >= since)
+                .order_by(AutomationEvent.at)
+            ).all()
+            rounds = session.exec(
+                select(TraderDebug)
+                .where(TraderDebug.user_id == user_id, TraderDebug.league_id == league_id, TraderDebug.at >= since)
+                .order_by(TraderDebug.at)
+            ).all()
+            dump = lambda rows: [r.model_dump(mode="json") for r in rows]  # noqa: E731
+            return {
+                "about": EXPORT_ABOUT,
+                "exported_at": utcnow().isoformat(),
+                "league_id": league_id,
+                "switches": {"trader": row.trader, "live": row.trader_live, "profit": row.trader_profit} if row else None,
+                "options": t.Options.load(row.trader_options if row else None).__dict__,
+                "option_limits": t.OPTION_LIMITS,
+                "learned": learned.dump(),
+                "learned_limits": t.LEARNED_LIMITS,
+                "constants": t.constants(),
+                "trades": dump(trades),
+                "shadows": dump(shadows),
+                "events": dump(events),
+                "rounds": dump(rounds),
+            }
+
+    def import_tuning(self, user_id: str, league_id: str, options: dict | None, learned: dict | None) -> None:
+        """Options for this league, merged into the current ones; learned values for all leagues. Both
+        are clamped to their limits."""
+        with Session(self.engine) as session:
+            if options is not None:
+                row = session.get(UserAutomation, (user_id, league_id)) or UserAutomation(user_id=user_id, league_id=league_id)
+                row.trader_options = t.Options.load({**t.Options.load(row.trader_options).__dict__, **options}).__dict__
+                session.add(row)
+            if learned is not None:
+                current = t.Learned.load(load_state(session, STATE_KEY)).dump()
+                self._save_state(session, t.Learned.load({**current, **learned}))
+            session.commit()
+
+    def _warn_debt(self, league: League, user_id: str, budget: int, deadline: datetime) -> None:
+        """Once per matchday: the bench cannot cover the debt, the user has to decide what goes."""
+        key = f"trader-debt:{league.id}:{user_id}:{deadline.isoformat()}"
+        if self.automation._has_key(key):
+            return
+        message = f"Minus von {-budget / 1e6:.2f} Mio. € lässt sich nicht ganz ausgleichen – bitte vor dem Anpfiff selbst verkaufen"
+        self.automation.record(user_id, league.id, "trader", message, ok=False, key=key)
+        self._pushes.append((user_id, "Autotrader: Minus", message, f"trader-debt-{league.id}"))
+
     def _log_planned(self, league: League, user_id: str, action: Action, now: datetime) -> None:
         """Dry run: logged and pushed once per player, kind and day."""
         key = f"trader:{league.id}:{user_id}:{action.kind}:{action.player_id}:{now.astimezone(analytics.MARKET_VALUE_TIMEZONE).date()}"
         if self.automation._has_key(key):
             return
-        self._log_bid(league, user_id, action, "planned")
+        if action.kind != "withdraw":
+            self._log_bid(league, user_id, action, "planned")
         message = f"Probelauf: würde {action.name} {_verb(action)} – {action.reason}"
         self.automation.record(user_id, league.id, "trader", message, key=key, details={"player_id": action.player_id, "price": action.price})
 
@@ -727,4 +954,6 @@ def _shadow_sale(action: Action) -> ShadowTrade:
 
 
 def _verb(action: Action) -> str:
+    if action.kind == "withdraw":
+        return "Gebot zurückziehen"
     return f"für {action.price / 1e6:.2f} Mio. € bieten" if action.kind == "bid" else "verkaufen"

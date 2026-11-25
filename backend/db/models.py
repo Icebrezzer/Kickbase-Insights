@@ -417,6 +417,16 @@ class TradeLog(SQLModel, table=True):
     details: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
 
 
+class TraderDebug(SQLModel, table=True):
+    """One autotrader round's inputs and decisions, stored when they changed. Kept for a few weeks for
+    the export."""
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True)
+    league_id: str = Field(index=True)
+    at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime, index=True)
+    data: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+
+
 class ShadowTrade(SQLModel, table=True):
     """A trade on paper: a purchase the trader passed on (or could not make), followed as if it had
     bid, or a real sale, followed to see what the player did afterwards. Teaches the trader."""

@@ -654,6 +654,18 @@ class AutomationSettingsIn(Schema):
     trader_options: TraderOptionsIn = Field(default_factory=lambda: TraderOptionsIn())
 
 
+class TraderImportIn(BaseModel):
+    """Plain snake_case keys, as in the export. Values are clamped to their limits."""
+    options: dict | None = None
+    learned: dict | None = None
+
+
+class TraderImportOut(BaseModel):
+    options: dict
+    learned: dict
+    ignored: list[str] = [] # Keys that do not exist
+
+
 class AutomationSettingsOut(AutomationSettingsIn):
     session_expires_at: datetime | None = None # Automation works until then, without the env account
     uses_service_account: bool = False

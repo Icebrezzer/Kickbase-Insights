@@ -26,7 +26,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, fields, replace
 from datetime import datetime, timedelta
 
-from core import coach
+from core import analytics, coach
 
 ### Profit buys are judged on the forecast of the next this many market value updates
 PROFIT_HOLD = 2
@@ -212,6 +212,7 @@ class Upgrade:
     gain: float # Expected points the best eleven gains
     replaced: str | None # The player of the same position he pushes out of it
     replaced_value: int = 0
+    fills: bool = False # He takes an empty slot of the eleven
 
 
 def lineup_upgrade(squad: Sequence[Candidate], target: Candidate, opts: Options) -> Upgrade | None:
@@ -224,8 +225,10 @@ def lineup_upgrade(squad: Sequence[Candidate], target: Candidate, opts: Options)
     after = best_of([*squad, target])
     if target.player_id not in after.player_ids:
         return None
-    gain = (after.expected - after.empty_slots * coach.EMPTY_SLOT) - (before.expected - before.empty_slots * coach.EMPTY_SLOT)
-    if gain < max(opts.min_gain, 0.1):
+    fills = after.empty_slots < before.empty_slots
+    ### The real points, not the empty slot penalty: price per point stays meaningful for a gap too
+    gain = after.expected - before.expected
+    if not fills and gain < max(opts.min_gain, 0.1):
         return None
     by_id = {p.player_id: p for p in squad}
     out = [by_id[pid] for pid in before.player_ids if pid not in after.player_ids and pid in by_id]
@@ -240,7 +243,7 @@ def lineup_upgrade(squad: Sequence[Candidate], target: Candidate, opts: Options)
             return None
         if target.form is not None and replaced.form is not None and target.form <= replaced.form:
             return None
-    return Upgrade(round(gain, 1), replaced.player_id if replaced else None, replaced.value if replaced else 0)
+    return Upgrade(round(gain, 1), replaced.player_id if replaced else None, replaced.value if replaced else 0, fills)
 
 
 def cost_per_point(upgrade: Upgrade, bid: int) -> float:
@@ -269,6 +272,20 @@ def cover_target(squad: Sequence[Candidate], market: Iterable[Candidate], opts: 
         and max(c.bid_low, c.price, c.value) <= opts.cover_max_price
     ]
     return min(options, key=lambda c: (max(c.bid_low, c.price, c.value), -c.expected), default=None)
+
+
+def credit(budget: int, team_value: int, repayable: int) -> int:
+    """The money the trader may spend beyond the balance: up to the max bid of the 33 % rule, but
+    never more debt than selling the players outside the best eleven pays back before the deadline."""
+    room = analytics.max_bid(budget, team_value) - max(budget, 0)
+    return max(0, min(room, repayable - max(0, -budget)))
+
+
+def repay_from(deadline: datetime) -> datetime:
+    """When debt is paid back before a matchday: right after the last market value update before
+    the deadline, as sales fetch the same from then on. At least an hour before the deadline."""
+    update = analytics.last_market_value_update(deadline) + timedelta(minutes=15)
+    return min(update, deadline - timedelta(hours=1))
 
 
 def profit_margin(target: Candidate, bid: int) -> int:
@@ -338,19 +355,43 @@ class Learned:
 
     @classmethod
     def load(cls, data: dict) -> Learned:
-        extra = tuple(float(x) for x in data.get("extra", ()))
-        if len(extra) != len(coach.PRICE_CLASSES):
-            extra = cls.extra
+        """Junk is dropped and every value clamped: it is also what an import sends."""
+        extra: tuple[float, ...] = cls.extra
+        with contextlib.suppress(TypeError, ValueError):
+            given = tuple(min(1.0, max(0.0, float(x))) for x in data.get("extra", ()))
+            if len(given) == len(coach.PRICE_CLASSES):
+                extra = given
         known = {f.name for f in fields(cls)} - {"extra"}
         values = {}
         for f in fields(cls):
             if f.name in known and f.name in data:
                 with contextlib.suppress(TypeError, ValueError):
-                    values[f.name] = type(getattr(cls, f.name))(data[f.name])
+                    value = type(getattr(cls, f.name))(data[f.name])
+                    low, high = LEARNED_LIMITS.get(f.name, (0, math.inf))
+                    values[f.name] = type(value)(min(max(value, low), high))
         return cls(extra=extra, **values)
 
     def dump(self) -> dict:
         return {f.name: list(self.extra) if f.name == "extra" else getattr(self, f.name) for f in fields(self)}
+
+
+### The ranges the learning keeps itself in, the same for an import. Counters only need to be >= 0
+LEARNED_LIMITS: dict[str, tuple[float, float]] = {
+    "extra": (0.0, 1.0),
+    "min_margin": (50_000, 1_500_000),
+    "gain_ratio": (-1.0, 2.0),
+    "swap_edge": (50_000, 1_000_000),
+}
+
+
+def constants() -> dict[str, object]:
+    """The fixed rules, exported so an outside review knows them. Changing one needs a new build."""
+    return {
+        "PROFIT_HOLD_UPDATES": PROFIT_HOLD, "REGRET_DAYS": REGRET_DAYS, "REBUY_BLOCK_DAYS": REBUY_BLOCK.days,
+        "MIN_HOLD_HOURS": MIN_HOLD.total_seconds() / 3600, "KICKOFF_GRACE_MINUTES": KICKOFF_GRACE.total_seconds() / 60,
+        "ROOM_EXTRA": ROOM_EXTRA, "MIN_SAMPLES": MIN_SAMPLES, "SHADOW_WEIGHT": SHADOW_WEIGHT,
+        "EMPTY_SLOT_PENALTY": coach.EMPTY_SLOT, "PRICE_CLASSES": list(coach.PRICE_CLASSES), "BID_STEP": coach.BID_STEP,
+    }
 
 
 def after_auction(state: Learned, value: int, won: bool, own: int, winner: int | None, weight: float = 1.0) -> Learned:
