@@ -42,6 +42,7 @@ from api.schemas import (
 from auth.accounts import Accounts
 from core import analytics, coach
 from core.config import Settings
+from db import Lease, try_lease
 from db.models import (
     AutomationEvent,
     AutoScout,
@@ -163,6 +164,8 @@ class AutomationService:
         self._locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._task: asyncio.Task | None = None
         self.trader = TraderService(self)
+        self._lease: Lease | None = None
+        self._lease_warned = False
 
     ### ==============================================================================================
     ### Lifecycle
@@ -176,13 +179,31 @@ class AutomationService:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
+        if self._lease is not None:
+            self._lease.release()
+            self._lease = None
+
+    def _leader(self) -> bool:
+        """Only one process per database runs the automation and the trader (a second container or a
+        second worker would trade twice). The others serve the web interface only and take over as
+        soon as the leader is gone; the lease frees itself when that process dies."""
+        if self._lease is None:
+            self._lease = try_lease(self.engine, "automation-leader")
+            if self._lease is None and not self._lease_warned:
+                log.warning("Another process on this database runs the automation; this one only serves the API")
+                self._lease_warned = True
+            elif self._lease is not None and self._lease_warned:
+                log.info("Taking over the automation")
+                self._lease_warned = False
+        return self._lease is not None
 
     async def _loop(self) -> None:
         with contextlib.suppress(Exception):
             await self.refresh_model()
         while True:
             try:
-                await self.tick(utcnow())
+                if await asyncio.to_thread(self._leader):
+                    await self.tick(utcnow())
             except Exception:
                 log.exception("Automation round failed")
             await asyncio.sleep(self.settings.automation.interval_minutes * 60)

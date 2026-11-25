@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 import zlib
@@ -161,6 +162,55 @@ def _add_missing_columns(engine: Engine) -> None:
 def session_scope(engine: Engine) -> Iterator[Session]:
     with Session(engine) as session:
         yield session
+
+
+class Lease:
+    """A lock one process holds for as long as it lives, shared by every process on this database,
+    taken without waiting. Released by `release()` or when the process dies (the OS closes the file,
+    PostgreSQL ends the session), so another process can take over."""
+
+    def __init__(self, handle=None, connection=None):
+        self._handle, self._connection = handle, connection
+
+    def release(self) -> None:
+        if self._handle is not None:
+            with contextlib.suppress(OSError):
+                if fcntl is not None:
+                    fcntl.flock(self._handle, fcntl.LOCK_UN)
+                else:
+                    self._handle.seek(0)
+                    msvcrt.locking(self._handle.fileno(), msvcrt.LK_UNLCK, 1)
+            self._handle.close()
+            self._handle = None
+        if self._connection is not None:
+            self._connection.close()
+            self._connection = None
+
+
+def try_lease(engine: Engine, name: str) -> Lease | None:
+    """The lease `name` if no other process holds it, else None (never waits)."""
+    if engine.dialect.name == "postgresql":
+        connection = engine.connect()
+        held = connection.execute(text("SELECT pg_try_advisory_lock(:key)"), {"key": zlib.crc32(name.encode())}).scalar()
+        connection.commit()
+        if held:
+            return Lease(connection=connection)
+        connection.close()
+        return None
+    path = engine.url.database
+    if engine.dialect.name != "sqlite" or not path or path == ":memory:":
+        return Lease()
+    handle = open(f"{path}.{name}.lock", "a+b")  # noqa: SIM115 - held for the lease's lifetime
+    try:
+        if fcntl is not None:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        else:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        handle.close()
+        return None
+    return Lease(handle=handle)
 
 
 @contextmanager

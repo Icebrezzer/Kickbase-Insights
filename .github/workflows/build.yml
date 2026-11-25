@@ -48,6 +48,8 @@ jobs:
         run: python tests/check_wealth.py
       - name: Store lock between processes
         run: python tests/check_locks.py
+      - name: One automation leader per database (two processes)
+        run: python tests/check_leader.py
       - name: Smoke test against the demo Kickbase
         run: python tests/smoke_manager_tools.py
 
