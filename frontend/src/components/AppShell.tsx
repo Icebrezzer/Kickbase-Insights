@@ -323,13 +323,15 @@ function UserRow() {
       <span className="min-w-0 flex-1 truncate text-sm font-medium">{me.user.name}</span>
       <button
         type="button"
-        onClick={() => logout.mutate(undefined, { onSettled: () => navigate("/login", { replace: true }) })}
+        onClick={() => logout.mutate(undefined, { onSuccess: () => navigate("/login", { replace: true }) })}
+        disabled={logout.isPending}
         title="Abmelden"
         aria-label="Abmelden"
         className="grid size-8 place-items-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg"
       >
         <LogOut className="size-4" />
       </button>
+      {logout.error && <span role="alert" className="text-xs text-down">Abmelden fehlgeschlagen. Bitte erneut versuchen.</span>}
     </div>
   )
 }

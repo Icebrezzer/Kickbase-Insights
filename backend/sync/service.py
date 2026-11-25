@@ -758,7 +758,8 @@ class SyncService:
             ### Season, the last known values stay if Kickbase leaves them out
             season = session.get(LeagueSeason, league_id) or LeagueSeason(league_id=league_id)
             season.started_at = r.overview.started_at or season.started_at
-            season.start_money = r.overview.start_budget or season.start_money
+            if r.overview.start_budget is not None:
+                season.start_money = r.overview.start_budget
             ### After a failed list the next sync reads all of them again
             complete = len(r.manager_transfers) == len(r.overview.managers)
             season.transfers_complete_since = season.started_at if complete else None

@@ -18,7 +18,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from api.coach_routes import router as coach_router
 from api.live import LiveService
-from api.routes import AppState, router
+from api.routes import AppState, refresh_after_action, router
 from auth.accounts import Accounts
 from auth.security import TokenCipher
 from core.config import Settings, get_settings
@@ -131,6 +131,7 @@ def create_app(
             push=push,
         )
         app.state.kbi = state
+        automation.trader.after_trade = lambda league_id, user_id, client: refresh_after_action(state, league_id, user_id, client)
 
         if start_scheduler:
             scheduler.start()

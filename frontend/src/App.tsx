@@ -70,14 +70,13 @@ function AuthGate({ children }: { children: ReactNode }) {
   const me = useMe()
   const location = useLocation()
 
-  if (me.data) return <LeagueProvider key={me.data.user.id} userId={me.data.user.id} leagues={me.data.leagues}>{children}</LeagueProvider>
-  if (me.isPending) return <FullScreen />
-
   const error = me.error
   if (me.data === null || (error instanceof ApiError && error.status === 401)) {
     const next = location.pathname + location.search
     return <Navigate to={next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`} replace />
   }
+  if (me.data) return <LeagueProvider key={me.data.user.id} userId={me.data.user.id} leagues={me.data.leagues}>{children}</LeagueProvider>
+  if (me.isPending) return <FullScreen />
   if (error instanceof ApiError && error.status === 503) {
     return <FullScreen message="Der erste Abgleich mit Kickbase läuft noch. Gleich geht's los." />
   }

@@ -7,7 +7,7 @@ see: their real budget and their own bids.
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from statistics import median
@@ -169,7 +169,7 @@ class Insights:
         Login bonuses are not visible."""
         if self._estimates is None:
             events = analytics.transfer_events(self._transfer_records())
-            start_money = self.season.start_money or analytics.DEFAULT_START_MONEY
+            start_money = self.season.start_money if self.season.start_money is not None else analytics.DEFAULT_START_MONEY
             prizes = self.achievement_totals()
             raw = {
                 m.id: analytics.estimate_balance(m.id, events, start_money) + prizes.get(m.id, 0)
@@ -361,11 +361,11 @@ class Insights:
         histories = self._histories(list(involved))
         result = []
         held = set(squad)
-        pending = list(events)
+        pending = deque(events)
         for day in range(today, first - 1, -1):
             ### Undo everything that happened after this day's market value update
             while pending and analytics.market_value_day(pending[0].date) >= day:
-                event = pending.pop(0)
+                event = pending.popleft()
                 if event.kind == "buy":
                     held.discard(event.player_id)
                 else:
@@ -859,7 +859,7 @@ class Insights:
         clubs = self._club_counts()
         records = self._transfer_records()
         events = analytics.transfer_events(records)
-        start_money = self.season.start_money or analytics.DEFAULT_START_MONEY
+        start_money = self.season.start_money if self.season.start_money is not None else analytics.DEFAULT_START_MONEY
         lost = self.lost_auctions()
         now = datetime.now(UTC)
         context = load_context(self.session, self.league.competition_id, [], now)
@@ -1197,7 +1197,7 @@ class Insights:
         events = analytics.transfer_events(self._transfer_records())
         turnovers = self._turnovers()
         squad_sizes = Counter(e.manager_id for e in self._squad().values())
-        start_money = self.season.start_money or analytics.DEFAULT_START_MONEY
+        start_money = self.season.start_money if self.season.start_money is not None else analytics.DEFAULT_START_MONEY
         ### The real budget is private, it is only ever shown to its owner
         own_budget = None
         if self.viewer_id:

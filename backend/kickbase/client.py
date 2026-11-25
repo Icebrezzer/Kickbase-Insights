@@ -113,7 +113,10 @@ class KickbaseHttp:
         if response.status_code >= 400:
             raise KickbaseError(f"Login failed with HTTP {response.status_code}", response.status_code)
 
-        login = models.LoginResponse.model_validate(response.json())
+        try:
+            login = models.LoginResponse.model_validate(response.json())
+        except (ValueError, ValidationError) as e:
+            raise KickbaseError("Login response contained invalid data.") from e
         if not login.token:
             raise KickbaseAuthError("Login response did not contain a token.")
         ### Without an expiry, assume a conservative lifetime

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from collections.abc import Awaitable, Callable, Coroutine, Iterator
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -75,12 +76,20 @@ class AppState:
     push: Any = None # sync.push.PushService
     ### Computed responses, valid until the league is synced again
     cache: dict[tuple, Any] = field(default_factory=dict)
+    cache_lock: Any = field(default_factory=threading.Lock)
+    cache_generation: int = 0
     tasks: set[asyncio.Task] = field(default_factory=set)
 
     def spawn(self, coro: Coroutine) -> None:
         task = asyncio.create_task(coro)
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
+
+    def invalidate_private(self, league_id: str, user_id: str) -> None:
+        with self.cache_lock:
+            self.cache_generation += 1
+            for key in [key for key in self.cache if key[-1] == user_id and key[-3] == league_id]:
+                del self.cache[key]
 
 
 def get_state(request: Request) -> AppState:
@@ -149,11 +158,18 @@ def cached(
     Responses with private data pass the viewer, so every user gets their own copy.
     """
     full_key = (*key, league.id, league.synced_at, viewer.user_id if viewer else None)
-    if full_key not in state.cache:
-        if len(state.cache) > 512:
+    with state.cache_lock:
+        if full_key in state.cache:
+            return state.cache[full_key]
+        generation = state.cache_generation
+    result = build()
+    with state.cache_lock:
+        if generation != state.cache_generation:
+            return result # An action invalidated this snapshot while it was being built.
+        if len(state.cache) >= 512:
             state.cache.clear()
-        state.cache[full_key] = build()
-    return state.cache[full_key]
+        state.cache[full_key] = result
+    return result
 
 
 def analysis_limits(settings: Settings, membership: UserLeague | None) -> tuple[int, int]:
@@ -325,7 +341,7 @@ def status(
         league=LeagueOut.model_validate(league_row) if league_row else None,
         own_manager_id=viewer.user_id if viewer else None,
         start_date=season.started_at if season else None,
-        start_money=(season.start_money if season else None) or analytics.DEFAULT_START_MONEY,
+        start_money=season.start_money if season and season.start_money is not None else analytics.DEFAULT_START_MONEY,
         sync=SyncStatus(
             running=state.sync.running(league_row.id) if league_row else False,
             next_run=state.scheduler.next_run if viewer else None,
@@ -490,8 +506,19 @@ async def ask_kickbase[T](
 
 def forget_private(state: AppState, league_id: str, viewer: Viewer) -> None:
     """Drops the cached answers with the viewer's private data, e.g. after they placed a bid."""
-    for key in [key for key in state.cache if key[-1] == viewer.user_id and key[-3] == league_id]:
-        del state.cache[key]
+    state.invalidate_private(league_id, viewer.user_id)
+
+
+async def refresh_after_action(state: AppState, league_id: str, user_id: str, client: KickbaseClient) -> None:
+    """A failed follow-up read must not turn a confirmed write into an apparent failed transaction."""
+    try:
+        await state.sync.refresh_personal(league_id, client)
+    except KickbaseError as e:
+        log.warning("Action confirmed, personal refresh of %s failed: %s", league_id, e)
+        if isinstance(e, KickbaseAuthError):
+            await asyncio.to_thread(state.accounts.forget_client, client)
+    finally:
+        state.invalidate_private(league_id, user_id)
 
 
 @router.get("/lineups", response_model=LineupsOut)
@@ -542,10 +569,11 @@ async def place_bid(
     async def call(client: KickbaseClient) -> None:
         await client.place_offer(league_id, player_id, body.price)
         ### The market and the budget show the new offer right away, not only after the next sync
-        await state.sync.refresh_personal(league_id, client)
+        await refresh_after_action(state, league_id, viewer.user_id, client)
 
-    await ask_kickbase(state, viewer, call)
-    forget_private(state, league_id, viewer)
+    async with state.automation._lock(viewer.user_id, league_id):
+        await ask_kickbase(state, viewer, call)
+        forget_private(state, league_id, viewer)
     return BidOut(own_bid=body.price)
 
 
@@ -574,10 +602,11 @@ async def withdraw_bid(
         if still is not None and still.own_bid(user.id) is not None:
             log.warning("Withdrawal of %s not taken, Kickbase's item: %s", player_id, await _raw_market_item(client, league_id, player_id))
             raise HTTPException(502, "Kickbase hat das Zurückziehen bestätigt, das Gebot steht aber noch.")
-        await state.sync.refresh_personal(league_id, client)
+        await refresh_after_action(state, league_id, viewer.user_id, client)
 
-    await ask_kickbase(state, viewer, call)
-    forget_private(state, league_id, viewer)
+    async with state.automation._lock(viewer.user_id, league_id):
+        await ask_kickbase(state, viewer, call)
+        forget_private(state, league_id, viewer)
     return BidOut(own_bid=None)
 
 

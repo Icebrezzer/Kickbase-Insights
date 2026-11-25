@@ -27,4 +27,4 @@ async def discord(webhook_url: str | None, title: str, message: str, color: int 
             response.raise_for_status()
     except httpx.HTTPError as e:
         ### A broken webhook must never take a sync down with it
-        log.warning("Discord notification failed: %s", e)
+        log.warning("Discord notification failed (%s)", type(e).__name__) # Webhook URLs contain a secret.

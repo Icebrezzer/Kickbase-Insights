@@ -127,6 +127,7 @@ class TraderService:
         self._latest: dict[tuple[str, str], tuple[datetime, dict]] = {} # Latest round per league and user
         ### Learning is read, changed and written back: one at a time, so no round's update is lost
         self._learn = threading.Lock()
+        self.after_trade = None # Wired by api.app to refresh private API data.
 
     @contextmanager
     def _learning(self) -> Iterator[None]:
@@ -166,9 +167,17 @@ class TraderService:
                 break
             if not await self._revalidate(league, current, client, action):
                 break
+            current = await asyncio.to_thread(self.automation.get_settings, row.user_id, league.id)
+            if not (self.settings.automation.trader and current.trader and current.trader_live):
+                break
             outcome = await self._execute(league, row.user_id, client, action)
             if outcome == "done":
                 executed.append(action)
+            if outcome in ("done", "unknown") and self.after_trade is not None:
+                try:
+                    await self.after_trade(league.id, row.user_id, client)
+                except Exception:
+                    log.exception("Private data refresh after trade failed")
             ### Anything unconfirmed, and every sale, ends the round: the next one re-plans with what
             ### Kickbase confirmed (balance, squad), so no step builds on an assumed result
             if outcome != "done" or action.kind == "sell":
@@ -191,8 +200,12 @@ class TraderService:
             return False
         saved = await self._saved_lineup(league, client)
         fresh, _ = await asyncio.to_thread(self._plan, league, row, squad, budget.budget, market, utcnow(), saved)
-        return any((a.kind, a.purpose, a.player_id, a.price, a.for_player) ==
-                   (action.kind, action.purpose, action.player_id, action.price, action.for_player) for a in fresh)
+        if not fresh:
+            return False
+        first = fresh[0] # Later actions may depend on withdrawals or sales not executed yet.
+        return (first.kind, first.purpose, first.player_id, first.price, first.for_player) == (
+            action.kind, action.purpose, action.player_id, action.price, action.for_player
+        )
 
     async def _push(self, user_id: str, title: str, message: str, tag: str) -> None:
         """A failed push is no failed trade: it never changes the outcome or repeats an action."""
@@ -218,11 +231,12 @@ class TraderService:
         """Repeated failed calls within the last hour: live trading pauses (dry run) until they age out."""
         with Session(self.engine) as session:
             failures = session.exec(
-                select(AutomationEvent.id).where(
+                select(AutomationEvent.details).where(
                     AutomationEvent.user_id == user_id, AutomationEvent.league_id == league_id, AutomationEvent.kind == "trader",
                     AutomationEvent.ok == False, AutomationEvent.at >= now - timedelta(hours=1),  # noqa: E712
                 )
             ).all()
+        failures = [d for d in failures if d.get("api_error") or d.get("status") in ("failed", "unknown")]
         if len(failures) < ERROR_PAUSE:
             return None
         reason = f"{len(failures)} fehlgeschlagene Kickbase-Aufrufe in der letzten Stunde – Live-Handel pausiert"
@@ -247,7 +261,7 @@ class TraderService:
         except KickbaseAuthError:
             raise
         except KickbaseError as e:
-            self.automation.record(user_id, league.id, "trader", f"{action.name}: Prüfung vor dem {_verb(action)} fehlgeschlagen – {e}", ok=False)
+            self.automation.record(user_id, league.id, "trader", f"{action.name}: Prüfung vor dem {_verb(action)} fehlgeschlagen – {e}", ok=False, details={"api_error": True})
             return "failed"
         entry_id = await asyncio.to_thread(self._log_intent, league, user_id, action)
         try:
@@ -271,8 +285,6 @@ class TraderService:
             after = None
             try:
                 after = (await client.own_budget(league.id)).budget
-            except KickbaseAuthError:
-                raise
             except KickbaseError as e:
                 log.info("Balance after a sale not read: %s", e)
             received = after - before if after is not None and before is not None else None
@@ -317,7 +329,7 @@ class TraderService:
         except KickbaseAuthError:
             raise
         except KickbaseError as e:
-            self.automation.record(user_id, league.id, "trader", f"{action.name}: Gebot zurückziehen fehlgeschlagen – {e}", ok=False)
+            self.automation.record(user_id, league.id, "trader", f"{action.name}: Gebot zurückziehen fehlgeschlagen – {e}", ok=False, details={"api_error": True})
             return "failed"
         message = f"Gebot für {action.name} zurückgezogen ({action.reason})"
         self.automation.record(user_id, league.id, "trader", message, details={"player_id": action.player_id, "purpose": action.purpose})
@@ -662,6 +674,7 @@ class TraderService:
                          **{pid: c.team_id for pid, c in listings.items()}},
                 max_squad=max_squad, max_club=max_club, bids_left=bids0, sales_left=sales0, blocked=unsettled | sold_recently,
                 ratio=ratio, min_margin=state.min_margin, min_roi=opts.min_roi / 100, rescue_override=opts.rescue_override,
+                unconfirmed=bool(unsettled),
             )
             codes = risk.validate(planned_actions, ctx)
             approved = [a for a, code in zip(planned_actions, codes, strict=True) if code is None]

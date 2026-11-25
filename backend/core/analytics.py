@@ -46,12 +46,14 @@ def market_value_deltas(points: Sequence[Sequence[int]]) -> dict[str, int | None
     `points` is the history as `[day, value]` pairs, oldest first, one entry per day. A delta the
     history is too short for is None: a player who just joined the competition has only a few entries.
     """
-    values = [value for _, value in points]
+    values = dict(points)
+    latest = max(values, default=0)
 
     def delta(newer: int, older: int) -> int | None:
-        if len(values) < abs(older):
+        new_value, old_value = values.get(latest + newer + 1), values.get(latest + older + 1)
+        if new_value is None or old_value is None:
             return None
-        return values[newer] - values[older]
+        return new_value - old_value
 
     return {
         "today": delta(-1, -2),

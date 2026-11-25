@@ -3,7 +3,6 @@
 import sys
 from datetime import timedelta
 from pathlib import Path
-from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -11,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
-from api.routes import get_session, get_state, get_viewer, router
+from api.routes import AppState, get_session, get_state, get_viewer, router
 from auth.accounts import Viewer
 from core.config import Settings
 from db import _add_missing_columns, create_db_engine, init_db
@@ -61,7 +60,9 @@ def main():
             yield session
 
     app.dependency_overrides[get_session] = sessions
-    app.dependency_overrides[get_state] = lambda: SimpleNamespace(settings=Settings(), cache={})
+    app.dependency_overrides[get_state] = lambda: AppState(
+        settings=Settings(), engine=engine, accounts=None, sync=None, live=None, scheduler=None,
+    )
     app.dependency_overrides[get_viewer] = lambda: Viewer("1", "One", None, ("10", "20"), "session")
     with TestClient(app) as client:
         response = client.put("/api/leagues/preference?league=10", json={"inactive": True})

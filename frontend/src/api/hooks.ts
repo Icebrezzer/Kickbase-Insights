@@ -81,7 +81,7 @@ export function useLogout() {
   const client = useQueryClient()
   return useMutation({
     mutationFn: () => api<void>("/auth/logout", { method: "POST" }),
-    onSettled: () => {
+    onSuccess: () => {
       client.clear()
       client.setQueryData(["me"], null)
     },

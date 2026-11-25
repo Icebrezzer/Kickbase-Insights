@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -60,6 +61,8 @@ class LoginRateLimiter:
     def __init__(self, max_per_email: int):
         self.max_per_email = max_per_email
         self._failures: dict[str, deque[datetime]] = defaultdict(deque)
+        self._pending: Counter[str] = Counter()
+        self._next_prune = utcnow()
 
     def _recent(self, key: str) -> deque[datetime]:
         entries = self._failures[key]
@@ -69,10 +72,31 @@ class LoginRateLimiter:
         return entries
 
     def blocked(self, email: str, ip: str) -> bool:
+        now = utcnow()
+        if now >= self._next_prune:
+            cutoff = now - self.WINDOW
+            self._failures = defaultdict(deque, {
+                key: entries for key, entries in self._failures.items() if entries and entries[-1] >= cutoff
+            })
+            self._next_prune = now + timedelta(minutes=1)
         return (
-            len(self._recent(f"mail:{email}")) >= self.max_per_email
-            or len(self._recent(f"ip:{ip}")) >= self.max_per_email * 4
+            len(self._recent(f"ip:{ip}")) + self._pending[f"ip:{ip}"] >= self.max_per_email * 4
+            or len(self._recent(f"mail:{email}")) + self._pending[f"mail:{email}"] >= self.max_per_email
         )
+
+    @contextmanager
+    def attempt(self, email: str, ip: str):
+        if self.blocked(email, ip):
+            raise LoginError("Zu viele Anmeldeversuche. Bitte versuche es später erneut.", 429)
+        keys = (f"mail:{email}", f"ip:{ip}")
+        self._pending.update(keys)
+        try:
+            yield
+        finally:
+            for key in keys:
+                self._pending[key] -= 1
+                if not self._pending[key]:
+                    del self._pending[key]
 
     def record_failure(self, email: str, ip: str) -> None:
         now = utcnow()
@@ -131,7 +155,8 @@ class Accounts:
             )
 
         try:
-            login = await self.http.login(email, password)
+            with self.limiter.attempt(key, ip):
+                login = await self.http.login(email, password)
         except KickbaseAuthError as e:
             self.limiter.record_failure(key, ip)
             raise LoginError("E-Mail-Adresse oder Passwort ist falsch.", 401) from e

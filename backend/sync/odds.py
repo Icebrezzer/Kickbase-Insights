@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import re
 import unicodedata
 from datetime import datetime, timedelta
@@ -43,6 +44,10 @@ def _similar(a: str, b: str) -> float:
     if not ta or not tb:
         return 0.0
     return len(ta & tb) / min(len(ta), len(tb))
+
+
+def _items(value: object) -> list[dict]:
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
 class OddsService:
@@ -107,7 +112,9 @@ class OddsService:
                 response.raise_for_status()
                 events = response.json()
         except (httpx.HTTPError, ValueError) as e:
-            log.warning("The Odds API failed: %s", e)
+            log.warning("The Odds API failed (%s)", type(e).__name__) # Exception URLs contain the API key.
+            return {}
+        if not isinstance(events, list):
             return {}
         with Session(self.engine) as session:
             names = {t.id: t.name for t in session.exec(select(Team))}
@@ -116,26 +123,39 @@ class OddsService:
             home_name, away_name = names.get(fixture.team1_id or "", ""), names.get(fixture.team2_id or "", "")
             best, score = None, 0.0
             for event in events:
+                if not isinstance(event, dict):
+                    continue
                 try:
                     start = datetime.fromisoformat(str(event["commence_time"]).replace("Z", "+00:00"))
                 except (KeyError, ValueError):
                     continue
-                if fixture.kickoff and abs(start - fixture.kickoff) > timedelta(hours=3):
+                if start.tzinfo is None or fixture.kickoff is None or abs(start - fixture.kickoff) > timedelta(hours=3):
                     continue
-                points = _similar(home_name, event.get("home_team", "")) + _similar(away_name, event.get("away_team", ""))
+                home, away = event.get("home_team"), event.get("away_team")
+                if not isinstance(home, str) or not isinstance(away, str):
+                    continue
+                home_score, away_score = _similar(home_name, home), _similar(away_name, away)
+                if min(home_score, away_score) < 0.5:
+                    continue
+                points = home_score + away_score
                 if points > score:
                     best, score = event, points
             if best is None or score < 0.5:
                 continue
             prices: dict[str, list[float]] = {"home": [], "draw": [], "away": []}
-            for bookmaker in best.get("bookmakers", []):
-                for market in bookmaker.get("markets", []):
+            for bookmaker in _items(best.get("bookmakers")):
+                for market in _items(bookmaker.get("markets")):
                     if market.get("key") != "h2h":
                         continue
-                    for outcome in market.get("outcomes", []):
+                    for outcome in _items(market.get("outcomes")):
                         name = outcome.get("name")
-                        side = "home" if name == best.get("home_team") else "away" if name == best.get("away_team") else "draw"
-                        prices[side].append(float(outcome.get("price", 0)))
+                        side = "home" if name == best.get("home_team") else "away" if name == best.get("away_team") else "draw" if name == "Draw" else None
+                        try:
+                            price = float(outcome.get("price", 0))
+                        except (ValueError, TypeError):
+                            continue
+                        if side is not None and math.isfinite(price) and price > 1:
+                            prices[side].append(price)
             if all(prices.values()):
                 odds = tuple(round(sum(v) / len(v), 2) for v in (prices["home"], prices["draw"], prices["away"]))
                 result[fixture.id] = (odds, "the-odds-api", {"event": best.get("id")})

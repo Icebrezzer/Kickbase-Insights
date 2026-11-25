@@ -39,6 +39,7 @@ NEW_GAP = "NEW_GAP" # The eleven would get an empty slot
 MANUAL_BID = "MANUAL_BID" # Never touched
 NOT_OPEN = "NOT_OPEN"
 ACTION_INVALID = "ACTION_INVALID"
+UNCONFIRMED_ACTION = "UNCONFIRMED_ACTION"
 
 
 class Planned(Protocol):
@@ -71,6 +72,7 @@ class Context:
     min_margin: int = 0
     min_roi: float = 0.0
     rescue_override: bool = False
+    unconfirmed: bool = False
 
 
 def credit_for(purpose: str, expires_at: datetime | None, ctx_phase: str, deadline: datetime | None, credit: int, mode: int) -> int:
@@ -98,6 +100,8 @@ def validate(actions: Sequence[Planned], ctx: Context) -> list[str | None]:
 
     for action in actions:
         reason = None if ctx.switches_on else KILL_SWITCH
+        if reason is None and ctx.unconfirmed and (action.kind == "bid" or action.purpose == "room"):
+            reason = UNCONFIRMED_ACTION
         if reason is None and action.kind == "bid":
             reason = _bid(action, ctx, phase, squad, open_bids, new_bids, clubs, bids_left)
             if reason is None:

@@ -235,9 +235,11 @@ class AutomationService:
 
     def _enabled(self) -> list[UserAutomation]:
         with Session(self.engine) as session:
-            return list(
-                session.exec(
-                    select(UserAutomation).where(
+            return [
+                row for row, name in session.exec(
+                    select(UserAutomation, League.name).join(UserLeague, (UserLeague.user_id == UserAutomation.user_id) &
+                                                (UserLeague.league_id == UserAutomation.league_id))
+                    .join(League, League.id == UserAutomation.league_id).where(
                         UserAutomation.auto_scout
                         | UserAutomation.auto_lineup
                         | UserAutomation.deadline_alerts
@@ -246,7 +248,8 @@ class AutomationService:
                         | UserAutomation.trader
                     )
                 )
-            )
+                if self.settings.auth.allows(row.league_id, name)
+            ]
 
     def record(
         self,
@@ -881,7 +884,11 @@ class AutomationService:
             raise KickbaseError("Der Spieler ist nicht in deinem Kader.", 404)
         before = (await client.own_budget(league.id)).budget
         response = await client.sell_to_kickbase(league.id, player_id)
-        after = (await client.own_budget(league.id)).budget
+        try:
+            after = (await client.own_budget(league.id)).budget
+        except KickbaseError as e:
+            log.warning("Sale confirmed, balance could not be read: %s", e)
+            after = None
         received = after - before if after is not None and before is not None else None
         await asyncio.to_thread(self._store_budget, user_id, league.id, after)
         self.record(

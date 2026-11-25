@@ -23,7 +23,7 @@ export default function Login() {
   const next = params.get("next")
   const target = next && next.startsWith("/") && !next.startsWith("//") ? next : "/"
 
-  if (me.data) return <Navigate to={target} replace />
+  if (me.data && !(me.error instanceof ApiError && me.error.status === 401)) return <Navigate to={target} replace />
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()

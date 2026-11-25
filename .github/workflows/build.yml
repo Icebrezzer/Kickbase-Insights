@@ -26,9 +26,8 @@ jobs:
           python-version: "3.13"
       - name: Install
         run: pip install . ruff
-      - name: Lint the new manager tools
-        continue-on-error: true
-        run: ruff check --extend-ignore E501 core/coach.py core/trader.py core/risk.py core/backtest.py sync/automation.py sync/trader.py sync/push.py api/coach_routes.py tests
+      - name: Lint the backend
+        run: ruff check --extend-ignore E501 .
       - name: Unit checks of the manager formulas
         run: python tests/check_coach.py
       - name: Autotrader decisions
@@ -109,6 +108,7 @@ jobs:
         run: |
           npm install --no-audit --no-fund
           npx playwright install --with-deps chromium webkit
+          BASE=http://127.0.0.1:8000 node regressions.mjs
           OUT=${{ github.workspace }}/ui-audit EXTRA_ROUTES="${{ vars.UI_AUDIT_EXTRA_ROUTES }}" node audit.mjs
       - name: App log
         if: always()

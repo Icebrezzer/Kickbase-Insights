@@ -20,6 +20,7 @@ from api.routes import (
     cached,
     forget_private,
     insights,
+    refresh_after_action,
     shows_balances,
 )
 from api.schemas import (
@@ -71,9 +72,10 @@ async def coach(state: StateDep, league: LeagueDep, viewer: ViewerDep) -> CoachO
 async def apply_lineup(state: StateDep, league: LeagueDep, viewer: ViewerDep) -> LineupApplyOut:
     """Saves the best eleven at Kickbase."""
     automation = _automation(state)
-    result = await ask_kickbase(
-        state, viewer, lambda client: automation.apply_lineup(league, viewer.user_id, client)
-    )
+    async with automation._lock(viewer.user_id, league.id):
+        result = await ask_kickbase(
+            state, viewer, lambda client: automation.apply_lineup(league, viewer.user_id, client)
+        )
     state.live._lineups.pop(league.id, None)
     return result
 
@@ -87,13 +89,14 @@ async def sell(
 
     async def call(client: KickbaseClient) -> SellOut:
         result = await automation.sell(league, viewer.user_id, client, player_id)
-        await state.sync.refresh_personal(league_id, client)
+        await refresh_after_action(state, league_id, viewer.user_id, client)
         ### The squads of the league changed, a sync brings the stored data up to date
         state.spawn(state.sync.run(league_id, client, "manual", viewer.name))
         return result
 
-    result = await ask_kickbase(state, viewer, call)
-    forget_private(state, league_id, viewer)
+    async with automation._lock(viewer.user_id, league_id):
+        result = await ask_kickbase(state, viewer, call)
+        forget_private(state, league_id, viewer)
     return result
 
 
