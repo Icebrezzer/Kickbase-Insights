@@ -1,6 +1,6 @@
 # Autotrader – komplette Logik
 
-Stand: 25.11.2026, Branch `codex/autotrader-2`, Meilensteine 1 (Critical Safety Patch), 2 (Trading Intelligence), 3 (Learning Engine 2.0) und 4 (Backtesting und Strategieprofile).
+Stand: 25.11.2026, Branch `codex/autotrader-2`, Meilensteine 1 (Critical Safety Patch), 2 (Trading Intelligence), 3 (Learning Engine 2.0), 4 (Backtesting und Strategieprofile) und 5 (Dashboard, Statistik, Benachrichtigungen).
 
 Code:
 - `backend/core/trader.py`: reine Entscheidungen (Bewertung, Preis, Netto-Gewinn, Kredit, Phasen, Lernen).
@@ -439,6 +439,51 @@ Booleans akzeptieren nur `true/false`, `1/0` und die gleichnamigen Texte. `"fals
   - `risk_blocked` mit Code, freigegebene Aktionen.
 
 ---
+
+## 10c. Dashboard, Statistik, Benachrichtigungen
+
+**Dashboard** (`GET /api/automation/trader/dashboard`; auf der Automatik-Seite die Karte „Autotrader jetzt“). Die Daten stammen aus der letzten Runde; diese wird im Speicher gehalten und nach einem Neustart aus dem Debug-Protokoll gelesen.
+- **Status:** Live oder Probelauf, Phase, Stand, Spieltag.
+- **Geld:** Kontostand, offene Gebote, frei verfügbar, Kreditrahmen je nach `credit_mode`, schlimmster Fall (alle offenen Gebote gewonnen).
+- **Startelf-Lücken:** bestätigt und mit allen offenen Geboten.
+- **Gewinnpositionen:** Netto jetzt und Urteil (halten oder Ausstiegsgrund).
+- **Aktive Schutzregeln.**
+- **Diese Runde:** geplante Aktionen und von der Risikoprüfung blockierte Aktionen mit Klartext-Grund.
+- **Marktspieler:** bis zu 15 mit Entscheidung, Netto beim Mindestgebot, Zuschlagschance, erwarteten Punkten (auch über die nächsten 3 Spiele) und Datenmenge.
+- **Laufzeit der Runde.**
+
+**Statistik** (seit Beginn):
+- Realisierter Netto-Gewinn. Verkäufe mit unbekanntem Gewinn werden getrennt gezählt und **nie** als 0 € gebucht; das gilt auch für die Wochentabelle (`unknown`).
+- Gewinn je Verkaufszweck, Datenvollständigkeit.
+- Auktionen gewonnen/verloren, Zuschlagsquote, Ø Aufschlag.
+- Ø Haltedauer, Rendite je gebundenem Euro und Tag.
+- Diese Woche blockierte riskante Aktionen (je Spieler und Grund einmal gezählt).
+- Gefährdete Spieltage (Minus-Warnungen) und gerettete Spieltage (Tage mit Rettungsverkäufen).
+
+**Benachrichtigungen** (Push, Schlüssel gegen Wiederholung):
+
+| Anlass | Häufigkeit |
+|---|---|
+| Gebot, Verkauf, Gebot zurückgezogen | je Aktion |
+| Status unklar (wird abgeglichen) | je Aktion |
+| Minus nicht ausgleichbar | einmal je Spieltag |
+| Startelf unvollständig, ab 24 Std. vor dem Spieltag | einmal je Spieltag |
+| Wochen-Stop-Loss aktiv | einmal je Woche |
+| Prognose unzuverlässig (Gewinnhandel pausiert) | einmal je Tag |
+| Live-Handel automatisch pausiert (API-Fehler) | einmal je Stunde |
+| Sitzung läuft ab | wie bisher (Automatik) |
+
+Ein fehlgeschlagener Push ändert nie ein Handelsergebnis und löst keine Aktion erneut aus.
+
+**Bedienung:**
+- Einstellungen sind gruppiert (Startelf, Gewinnhandel, Sicherheit), Profile werden mit Vorschau übernommen.
+- Riskante Schalter brauchen eine Bestätigung: Live handeln, Notfallregel, Kredit für Gewinnhandel.
+- Alles ist auf 375 px Breite ohne seitliches Scrollen geprüft.
+
+**Performance:**
+- Eine Runde dauert in der Demo (18 Marktspieler, 15 Kaderspieler) rund 0,1–0,15 s.
+- Das Debug-Protokoll speichert nur geänderte Runden (21 Tage), Schattentransfers bleiben 120 Tage.
+- Der Backtest läuft nur auf Anfrage und getrennt von den Runden, in der Demo in 0,2 s.
 
 ## 10a. Strategieprofile
 
