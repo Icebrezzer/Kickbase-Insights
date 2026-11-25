@@ -657,6 +657,14 @@ class Insights:
             )
         return result
 
+    def winning_shares(self) -> list[tuple[int, float]]:
+        """`(market value, markup share)` of every purchase from Kickbase another manager won in this
+        league, recent ones (45 days) when there are enough: what it took to win an auction here."""
+        rival = [p for p in self._purchases() if p.transfer.buyer != self.viewer_id]
+        cut = datetime.now(UTC) - timedelta(days=RECENT_DAYS)
+        fresh = [p for p in rival if p.transfer.date >= cut]
+        return [(p.market_value, p.overpay_share) for p in (fresh if len(fresh) >= MIN_RECENT_LEAGUE else rival)]
+
     def market(self, balances: bool = False) -> list[MarketPlayerOut]:
         """`balances` uses the estimated budgets of the others: who cannot pay is no rival, and the
         expected bids are capped by what each can afford."""

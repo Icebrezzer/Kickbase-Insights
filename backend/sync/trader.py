@@ -27,6 +27,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import threading
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
@@ -80,7 +81,10 @@ EXPORT_ABOUT = """Kickbase Insights autotrader export. Money in euro, times in U
 options: per league settings, limits in option_limits (min_play and min_avg_edge in percent, sell_window and
 starter_lock in minutes, lineup_share in percent of the money per bid, profit_share in percent of team value plus
 balance for all profit positions together, min_roi in percent net, credit_mode 0 none / 1 eleven / 2 also profit).
-Net profit = (value + gain) x conservative sell ratio - bid. learned: shared by all leagues;
+Net profit = (value + gain) x conservative sell ratio - bid. learned: the global base model; learned_league:
+this league's own bid heights and auction counts; learned_effective: what this league trades with (blend).
+Bids use P(win) from the league's won auctions (rounds[].league_auctions, market[].p_win_at_low) when there
+are at least 8, maximizing P(win) x (worth - bid); else the learned extra. Fields of learned:
 extra = how far up the bid range (0 = low, 1 = high) per price class, min_margin = euro a profit buy must
 gain after the bid premium, gain_ratio = actual/forecast market value gain, swap_edge = euro per day a swap
 target must rise more than the player sold. constants: fixed rules, a change needs a new build.
@@ -116,6 +120,9 @@ class TraderService:
         self.settings = automation.settings
         self._pushes: list[tuple[str, str, str, str]] = [] # Filled while planning in a thread, sent after
         self._last_debug: dict[tuple[str, str], str] = {}
+        ### Learning is read, changed and written back: one at a time, so no round's update is lost.
+        ### shortcut: a process lock, one backend container; several instances would need a DB lock
+        self._learn = threading.Lock()
 
     ### ==============================================================================================
     ### Round
@@ -311,32 +318,33 @@ class TraderService:
             if not rows:
                 session.commit()
                 return
-            state = t.Learned.load(load_state(session, STATE_KEY))
-            for entry in rows:
-                if entry.player_id in listed:
-                    if listed[entry.player_id].own_bid(user_id) is None:
-                        entry.status = "expired" # Withdrawn by hand
-                        entry.resolved_at = now
-                        session.add(entry)
-                    continue
-                if entry.player_id in owned:
-                    entry.status = "won"
-                    entry.paid = owned[entry.player_id].purchase_price or entry.price
-                    state = t.after_auction(state, entry.market_value, True, entry.price, None)
-                else:
-                    sale = self._transfer_after(session, league.id, entry.player_id, entry.at)
-                    if sale is not None and sale.buyer_id != user_id:
-                        entry.status = "lost"
-                        entry.details = {**entry.details, "winner_id": sale.buyer_id, "winner_price": sale.price}
-                        state = t.after_auction(state, entry.market_value, False, entry.price, sale.price)
-                    elif now - entry.at > timedelta(days=1):
-                        entry.status = "expired" # Gone without a transfer the sync saw
+            with self._learn:
+                base, local = self._load_states(session, league.id)
+                for entry in rows:
+                    if entry.player_id in listed:
+                        if listed[entry.player_id].own_bid(user_id) is None:
+                            entry.status = "expired" # Withdrawn by hand
+                            entry.resolved_at = now
+                            session.add(entry)
+                        continue
+                    if entry.player_id in owned:
+                        entry.status = "won"
+                        entry.paid = owned[entry.player_id].purchase_price or entry.price
+                        base, local = _auction(base, local, entry.market_value, True, entry.price, None)
                     else:
-                        continue # The sync has not stored the transfer yet
-                entry.resolved_at = now
-                session.add(entry)
-            self._save_state(session, state)
-            session.commit()
+                        sale = self._transfer_after(session, league.id, entry.player_id, entry.at)
+                        if sale is not None and sale.buyer_id != user_id:
+                            entry.status = "lost"
+                            entry.details = {**entry.details, "winner_id": sale.buyer_id, "winner_price": sale.price}
+                            base, local = _auction(base, local, entry.market_value, False, entry.price, sale.price)
+                        elif now - entry.at > timedelta(days=1):
+                            entry.status = "expired" # Gone without a transfer the sync saw: nothing learned
+                        else:
+                            continue # The sync has not stored the transfer yet
+                    entry.resolved_at = now
+                    session.add(entry)
+                self._save_states(session, league.id, base, local)
+                session.commit()
 
     @staticmethod
     def _transfer_after(session: Session, league_id: str, player_id: str, since: datetime) -> Transfer | None:
@@ -346,11 +354,25 @@ class TraderService:
             .order_by(Transfer.date)
         ).first()
 
-    def _save_state(self, session: Session, state: t.Learned) -> None:
-        row = session.get(ModelState, STATE_KEY) or ModelState(key=STATE_KEY)
+    def _save_state(self, session: Session, state: t.Learned, key: str = STATE_KEY) -> None:
+        row = session.get(ModelState, key) or ModelState(key=key)
         row.data = state.dump()
         row.updated_at = utcnow()
         session.add(row)
+
+    @staticmethod
+    def _load_states(session: Session, league_id: str) -> tuple[t.Learned, t.Learned]:
+        """The global base model and the league's own one (bid heights and auction counts)."""
+        return t.Learned.load(load_state(session, STATE_KEY)), t.Learned.load(load_state(session, f"{STATE_KEY}:{league_id}"))
+
+    def _save_states(self, session: Session, league_id: str, base: t.Learned, local: t.Learned) -> None:
+        self._save_state(session, base)
+        self._save_state(session, local, f"{STATE_KEY}:{league_id}")
+
+    def learned_for(self, league_id: str) -> t.Learned:
+        """What one league trades with: global base, its own bid heights mixed in (`t.blend`)."""
+        with Session(self.engine) as session:
+            return t.blend(*self._load_states(session, league_id))
 
     ### ==============================================================================================
     ### Shadow trades
@@ -394,55 +416,58 @@ class TraderService:
                     )
                 ).all()
             )
-            state = t.Learned.load(load_state(session, STATE_KEY))
-            ratio = min(learned_sell_ratio(session) or SAFE_SELL_RATIO, SAFE_SELL_RATIO)
-            for s in rows:
-                points = histories.get(s.player_id) or []
-                last_day = points[-1][0] if points else None
-                if s.kind == "sell":
-                    due = analytics.market_value_day(s.at) + t.REGRET_DAYS
-                    if last_day is None or last_day < due:
-                        continue
-                    s.value_after = analytics.value_on_day(points, due) or points[-1][1]
-                    s.result = s.value_after - s.market_value
-                    state = t.after_regret(state, s.result)
-                    s.status = "done"
-                elif s.status == "watching":
-                    if s.player_id in listed:
-                        continue
-                    sale = self._transfer_after(session, league.id, s.player_id, s.at)
-                    if sale is not None:
-                        won = sale.price <= s.bid
-                        state = t.after_auction(state, s.market_value, won, s.bid, sale.price, t.SHADOW_WEIGHT)
-                        s.winner_price = sale.price
-                        if won:
-                            s.status, s.paid, s.won_day = "holding", s.bid, analytics.market_value_day(sale.date)
+            with self._learn: # Read, learn and write without another round in between
+                base, local = self._load_states(session, league.id)
+                ratio = min(learned_sell_ratio(session) or SAFE_SELL_RATIO, SAFE_SELL_RATIO)
+                for s in rows:
+                    points = histories.get(s.player_id) or []
+                    last_day = points[-1][0] if points else None
+                    if s.kind == "sell":
+                        due = analytics.market_value_day(s.at) + t.REGRET_DAYS
+                        if last_day is None or last_day < due:
+                            continue
+                        s.value_after = analytics.value_on_day(points, due) or points[-1][1]
+                        ### What holding would have brought more, net of the sale ratio
+                        s.result = int((s.value_after - s.market_value) * ratio)
+                        if s.purpose != "rescue": # Forced sales say nothing about the swap edge
+                            base = t.after_regret(base, s.result)
+                        s.status = "done"
+                    elif s.status == "watching":
+                        if s.player_id in listed:
+                            continue
+                        sale = self._transfer_after(session, league.id, s.player_id, s.at)
+                        if sale is not None and sale.price != s.bid:
+                            won = sale.price < s.bid
+                            base, local = _auction(base, local, s.market_value, won, s.bid, sale.price, t.SHADOW_WEIGHT)
+                            s.winner_price = sale.price
+                            if won:
+                                s.status, s.paid, s.won_day = "holding", s.bid, analytics.market_value_day(sale.date)
+                            else:
+                                s.status = "lost"
+                        elif sale is not None:
+                            ### A tie: who gets it is unknown, so it teaches nothing
+                            s.status, s.winner_price = "lost", sale.price
+                        elif now - s.at > timedelta(days=2):
+                            ### Gone without a transfer (no buyer, withdrawn, relisted): not a won auction
+                            s.status = "expired"
                         else:
-                            s.status = "lost"
-                    elif s.free_agent and now - s.at > timedelta(days=1):
-                        ### Kickbase's listing went without a buyer: the bid, at least the value, would have won
-                        state = t.after_auction(state, s.market_value, True, s.bid, None, t.SHADOW_WEIGHT)
-                        s.status, s.paid, s.won_day = "holding", s.bid, analytics.market_value_day(s.at)
-                    elif now - s.at > timedelta(days=2):
-                        s.status = "expired"
-                    else:
-                        continue
-                else: # holding
-                    due = (s.won_day or 0) + t.PROFIT_HOLD
-                    if last_day is None or last_day < due:
-                        continue
-                    s.value_after = analytics.value_on_day(points, due) or points[-1][1]
-                    s.result = int(s.value_after * ratio) - (s.paid or s.bid)
-                    state = t.after_forecast(state, s.forecast_gain, s.value_after - s.market_value, t.SHADOW_WEIGHT)
-                    if s.purpose == "profit":
-                        state = t.after_sale(state, s.result, t.SHADOW_WEIGHT)
-                    s.status = "done"
-                s.resolved_at = now if s.status in ("done", "lost", "expired") else None
-                session.add(s)
-            ### Shadow trades switched off: open ones are still closed for the statistics, nothing is learned
-            if learn:
-                self._save_state(session, state)
-            session.commit()
+                            continue
+                    else: # holding
+                        due = (s.won_day or 0) + t.PROFIT_HOLD
+                        if last_day is None or last_day < due:
+                            continue
+                        s.value_after = analytics.value_on_day(points, due) or points[-1][1]
+                        s.result = int(s.value_after * ratio) - (s.paid or s.bid)
+                        base = t.after_forecast(base, s.forecast_gain, s.value_after - s.market_value, t.SHADOW_WEIGHT)
+                        if s.purpose == "profit":
+                            base = t.after_sale(base, s.result, t.SHADOW_WEIGHT)
+                        s.status = "done"
+                    s.resolved_at = now if s.status in ("done", "lost", "expired") else None
+                    session.add(s)
+                ### Shadow trades switched off: open ones are still closed for the statistics, nothing is learned
+                if learn:
+                    self._save_states(session, league.id, base, local)
+                session.commit()
 
     ### ==============================================================================================
     ### Planning
@@ -482,7 +507,8 @@ class TraderService:
                 for o in Insights(session, league, user_id, self.automation.model, max_squad, max_club).market()
                 if o.id in listed
             }
-            state = t.Learned.load(load_state(session, STATE_KEY))
+            state = t.blend(*self._load_states(session, league.id))
+            shares = Insights(session, league, user_id, self.automation.model, max_squad, max_club).winning_shares()
             ### Conservative: a learned ratio only ever lowers the safe one, an unknown one counts as safe
             ratio = min(learned_sell_ratio(session) or SAFE_SELL_RATIO, SAFE_SELL_RATIO)
             history = self._trades(session, user_id, league.id)
@@ -734,7 +760,7 @@ class TraderService:
             upgrade = t.lineup_upgrade(planned, c, opts)
             if upgrade is not None:
                 options.append((t.priority("lineup", upgrade.fills, stage, upgrade.gain), "lineup", c, upgrade))
-            elif row.trader_profit and not paused and c.fit and c.forecast > 0 and c.expires_at is not None and stage != "final":
+            elif row.trader_profit and not paused and not state.forecast_pause and c.fit and c.forecast > 0 and c.expires_at is not None and stage != "final":
                 ### Ranked by net return per euro and update at the lowest bid, not by the absolute gain
                 low = t.bid_for(c, 0.0, None)
                 options.append((t.priority("profit", False, stage, t.profit_rank(c, low, ratio) if low else -1.0), "profit", c, None))
@@ -743,6 +769,7 @@ class TraderService:
                     "verletzt/fraglich" if not c.fit
                     else "kein Startelf-Upgrade, Gewinnhandel aus" if not row.trader_profit
                     else "kein Startelf-Upgrade, Gewinnhandel pausiert (Stop-Loss)" if paused
+                    else "kein Startelf-Upgrade, Gewinnhandel pausiert (Prognose zuletzt unzuverlässig)" if state.forecast_pause
                     else "kein Startelf-Upgrade, letzte Stunde vor dem Spieltag" if stage == "final"
                     else "kein Startelf-Upgrade, Auktionsende unbekannt" if c.expires_at is None and c.forecast > 0
                     else "kein Startelf-Upgrade, keine steigende Prognose"
@@ -752,6 +779,14 @@ class TraderService:
             if c is t.cover_target(planned, [c], opts):
                 options.append((t.priority("cover", False, stage, -max(c.bid_low, c.price, c.value)), "cover", c, None))
         options.sort(key=lambda o: o[0], reverse=True)
+        ### Paper trades: the best profit candidate of each price class first, then the next best, so
+        ### the learning does not only see the most promising (expensive) players
+        ranked_profit = [o[2] for o in options if o[1] == "profit"]
+        by_class: dict[int, list[t.Candidate]] = {}
+        for c in ranked_profit:
+            by_class.setdefault(coach.price_class(c.value), []).append(c)
+        spread = [c for rank in range(len(ranked_profit)) for group in by_class.values() if rank < len(group) for c in [group[rank]]]
+        shadow_ids = {c.player_id for c in spread[:SHADOWS_PER_ROUND]}
         money_seen: dict[str, int] = {}
 
         shadows: list[ShadowTrade] = []
@@ -762,7 +797,7 @@ class TraderService:
                 continue
             profit = purpose == "profit"
             extra = state.extra[coach.price_class(c.value)]
-            if profit and len(shadows) < SHADOWS_PER_ROUND:
+            if profit and c.player_id in shadow_ids:
                 ### On paper at the realistic bid. "near": the rules would have passed on it. Only
                 ### "profit" ones move the minimum margin, the rejected ones would bias it upwards
                 paper = t.bid_for(c, extra, None)
@@ -793,7 +828,7 @@ class TraderService:
             if purpose == "profit":
                 keep += len(t.missing_cover(planned)) * opts.cover_max_price
             money_seen[c.player_id] = money_for(c, free, purpose) - keep
-            bid = _price(c, purpose, upgrade, extra, money_seen[c.player_id], opts, state, ratio, profit_room) if slots > 0 else None
+            bid = _price(c, purpose, upgrade, extra, money_seen[c.player_id], opts, state, ratio, profit_room, shares) if slots > 0 else None
             sale = None
             if bid is None:
                 why[c.player_id] = f"{label}: " + (
@@ -814,7 +849,7 @@ class TraderService:
                     continue
                 proceeds = int(sale.value * ratio)
                 ### A player is given up for this one: bid high enough to have a good chance
-                bid = _price(c, purpose, upgrade, max(extra, t.ROOM_EXTRA), money_for(c, free + proceeds, purpose) - keep, opts, state, ratio, profit_room)
+                bid = _price(c, purpose, upgrade, max(extra, t.ROOM_EXTRA), money_for(c, free + proceeds, purpose) - keep, opts, state, ratio, profit_room, shares, use_ev=False)
                 if bid is None:
                     why[c.player_id] += ", auch mit Verkauf nicht"
                     continue
@@ -861,6 +896,7 @@ class TraderService:
                 "expires_at": c.expires_at.isoformat() if c.expires_at else None, "in_best": c.in_best, "locked": c.locked,
                 "net_at_low": t.expected_profit(c, low, ratio) if (low := t.bid_for(c, 0.0, None)) else None,
                 "ahead": c.ahead, "samples": c.samples, "quality": t.quality(c),
+                "p_win_at_low": t.win_probability(low, c.value, t.winning_markups(shares, c.value)) if low else None,
             }
 
         return finish(actions, shadows, {
@@ -869,6 +905,8 @@ class TraderService:
             "liquidation": t.liquidation_value(own0, ratio, opts.daily_sales), "profit_room": profit_room,
             "reserve": opts.reserve, "open_bids": all_open, "slots": slots, "bids_left": bids_left, "sales_left": sales_left,
             "paused": paused, "week_profit": week_profit, "unrealized": unrealized,
+            "forecast_paused": bool(state.forecast_pause), "league_auctions": len(shares),
+            "learned": {"extra": list(state.extra), "min_margin": state.min_margin, "gain_scale": state.gain_scale, "swap_edge": state.swap_edge},
             "priorities": "nah am Spieltag: Lücke > Ersatz > Verbesserung > Gewinn" if stage != "normal" else "normal: Lücke > Verbesserung > Gewinn > Ersatz",
             "positions": {pid: {"cost": cost, "net_now": int(c.value * ratio) - cost, "verdict": exits.get(pid)} for pid, (c, cost) in positions.items()},
             "keep_starters": keep_starters, "lineup_known": bool(saved), "sell_ratio": ratio,
@@ -962,7 +1000,8 @@ class TraderService:
                 entry.details = {**entry.details, "received_known": received is not None, "cost": cost}
                 session.add(entry)
             if bought is not None and bought.purpose == "profit" and profit is not None:
-                self._save_state(session, t.after_sale(t.Learned.load(load_state(session, STATE_KEY)), profit))
+                with self._learn:
+                    self._save_state(session, t.after_sale(t.Learned.load(load_state(session, STATE_KEY)), profit))
             session.commit()
         ### The sell ratio is learned from these events (sync.learning), only with booked proceeds
         if received is not None:
@@ -988,7 +1027,7 @@ class TraderService:
         since = utcnow() - timedelta(days=days)
         with Session(self.engine) as session:
             row = session.get(UserAutomation, (user_id, league_id))
-            learned = t.Learned.load(load_state(session, STATE_KEY))
+            learned, league_learned = self._load_states(session, league_id)
             trades = session.exec(
                 select(TradeLog).where(TradeLog.user_id == user_id, TradeLog.league_id == league_id, TradeLog.at >= since).order_by(TradeLog.at)
             ).all()
@@ -1012,6 +1051,8 @@ class TraderService:
                 "options": t.Options.load(row.trader_options if row else None).__dict__,
                 "option_limits": t.OPTION_LIMITS,
                 "learned": learned.dump(),
+                "learned_league": league_learned.dump(),
+                "learned_effective": t.blend(learned, league_learned).dump(),
                 "learned_limits": t.LEARNED_LIMITS,
                 "constants": t.constants(),
                 "trades": dump(trades),
@@ -1041,9 +1082,22 @@ class TraderService:
                 row.trader_options = t.Options.load({**t.Options.load(row.trader_options).__dict__, **options}).__dict__
                 session.add(row)
             if learned is not None:
-                current = t.Learned.load(load_state(session, STATE_KEY)).dump()
-                self._save_state(session, t.Learned.load({**current, **learned}))
+                with self._learn:
+                    current = t.Learned.load(load_state(session, STATE_KEY)).dump()
+                    self._save_state(session, t.Learned.load({**current, **learned}))
+                    session.commit()
             session.commit()
+
+    def reset_learning(self, user_id: str, league_id: str, scope: str) -> dict:
+        """Back to the starting values: `global` (the base model, all leagues) or `league` (this
+        league's bid heights). The values before go to the log, an import restores them."""
+        key = STATE_KEY if scope == "global" else f"{STATE_KEY}:{league_id}"
+        with self._learn, Session(self.engine) as session:
+            before = t.Learned.load(load_state(session, key)).dump()
+            self._save_state(session, t.Learned(), key)
+            session.commit()
+        self.automation.record(user_id, league_id, "trader-import", f"Gelerntes zurückgesetzt ({scope})", details={"before": before, "scope": scope})
+        return before
 
     def _warn_debt(self, league: League, user_id: str, budget: int, deadline: datetime) -> None:
         """Once per matchday: the bench cannot cover the debt, the user has to decide what goes."""
@@ -1083,7 +1137,7 @@ class TraderService:
             names = dict(
                 session.exec(select(Player.id, Player.last_name).where(Player.id.in_([s.player_id for s in shadows[:30]]))).all()
             )
-            state = t.Learned.load(load_state(session, STATE_KEY))
+            state = t.blend(*self._load_states(session, league_id))
         trades = [t.Trade(r.at, r.kind, r.status, r.price, r.paid, r.profit, r.points_gain) for r in rows]
         trades += [t.Trade(s.resolved_at or s.at, "shadow", s.status, s.bid, s.paid, s.result) for s in shadows if s.kind == "buy"]
         weeks = t.weekly(trades)
@@ -1149,6 +1203,8 @@ class TraderService:
                 "gain_samples": state.gain_samples,
                 "swap_edge": state.swap_edge,
                 "regret_samples": state.regret_samples,
+                "direction_rate": state.direction_rate,
+                "forecast_paused": bool(state.forecast_pause),
             },
             "paused": bool(current and opts.stop_loss > 0 and current["profit"] <= -opts.stop_loss),
             "pause_reason": self._pause_reason(user_id, league_id),
@@ -1169,18 +1225,27 @@ class TraderService:
 
 def _price(
     c: t.Candidate, purpose: str, upgrade: t.Upgrade | None, extra: float, money: int, opts: t.Options, state: t.Learned,
-    ratio: float, profit_room: int,
+    ratio: float, profit_room: int, shares: list[tuple[int, float]] | None = None, use_ev: bool = True,
 ) -> int | None:
-    """The bid for `c`: the learned height, but never above the smallest limit (money, cover price,
-    the net profit cap, the price per point), and None when even the minimum bid breaks one."""
+    """The bid for `c`, never above the smallest limit (money, cover price, the net profit cap, the
+    price per point), None when even the minimum bid breaks one.
+
+    With enough won auctions in the league: the bid with the highest expected value P(win) x (worth
+    - bid), where worth is the net sale proceeds (profit), the fair price of the points gained
+    (eleven) or the cover price (substitute). Otherwise the learned height between low and high."""
     caps = [money if purpose == "profit" else int(money * opts.lineup_share / 100)]
+    worth = opts.cover_max_price
     if purpose == "cover":
         caps.append(opts.cover_max_price)
     if purpose == "profit":
         caps += [profit_room, t.max_profit_bid(c, ratio, state.min_margin, opts.min_roi / 100)]
+        worth = t.expected_proceeds(c, ratio)
     if upgrade is not None:
-        caps.append(int(upgrade.replaced_value * ratio + opts.max_cost_per_point * max(upgrade.gain, 0.1)))
-    bid = t.bid_for(c, extra, min(caps))
+        worth = int(upgrade.replaced_value * ratio + opts.max_cost_per_point * max(upgrade.gain, 0.1))
+        caps.append(worth)
+    ### A bid a player was sold for wants a high chance, not the best value: there the height decides
+    chosen = t.best_bid(c, worth, min(caps), t.winning_markups(shares or [], c.value)) if use_ev else None
+    bid = chosen[0] if chosen else t.bid_for(c, extra, min(caps))
     if bid is None:
         return None
     if purpose == "profit" and not t.is_profit_buy(c, bid, state.min_margin, ratio, opts.min_roi / 100):
@@ -1188,6 +1253,12 @@ def _price(
     if upgrade is not None and not t.worth_it(upgrade, bid, opts, ratio):
         return None
     return bid
+
+
+def _auction(base: t.Learned, local: t.Learned, value: int, won: bool, own: int, winner: int | None,
+             weight: float = 1.0) -> tuple[t.Learned, t.Learned]:
+    """An auction teaches the global base and the league it happened in."""
+    return (t.after_auction(base, value, won, own, winner, weight), t.after_auction(local, value, won, own, winner, weight))
 
 
 def _purpose_rank(purpose: str) -> int:

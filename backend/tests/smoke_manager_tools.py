@@ -362,7 +362,8 @@ def main() -> None:
         with Session(state.engine) as s:
             shadows = {r.kind: r for r in s.exec(select(ShadowTrade).where(ShadowTrade.player_id.in_(quiet))).all()}
         check(shadows["sell"].status == "done" and shadows["sell"].result is not None, f"paper sale settled ({shadows['sell'].result})")
-        check(shadows["buy"].status == "done" and shadows["buy"].result is not None, f"paper purchase settled ({shadows['buy'].result})")
+        check(shadows["buy"].status == "expired" and shadows["buy"].result is None,
+              f"a listing gone without a transfer is no won paper auction ({shadows['buy'].status})")
 
         trader = client.get("/api/automation/trader")
         check(trader.status_code == 200, f"trader view ({trader.status_code} {trader.text[:300]})")
@@ -374,8 +375,9 @@ def main() -> None:
         check(not any(w["profit"] for w in tj["weeks"]) or all(r.profit is not None for r in rows if r.kind == "sell" and r.status == "sold"),
               "unknown profits are not booked")
         check(tj["weeks"] and tj["weeks"][0]["sales"] >= 1 and tj["weeks"][0]["received"] > 0, f"week stats {tj['weeks'][:1]}")
-        check(tj["learned"]["regretSamples"] >= 1 and tj["learned"]["shadowWon"] >= 1, f"shadows taught the trader {tj['learned']}")
-        check(tj["shadowSummary"]["done"] >= 1 and len(tj["shadows"]) >= 2, f"shadow summary {tj['shadowSummary']}")
+        check(tj["learned"]["regretSamples"] >= 1, f"shadows taught the trader {tj['learned']}")
+        check(len(tj["shadows"]) >= 2, f"shadow summary {tj['shadowSummary']}")
+        check("forecastPaused" in tj["learned"] and "directionRate" in tj["learned"], "forecast quality in the view")
         opts = client.put("/api/automation/settings", json={**current, "traderOptions": {"minGain": 5, "maxCostPerPoint": 200000}})
         check(opts.status_code == 200 and opts.json()["traderOptions"]["minGain"] == 5, "trader options are stored")
         bad = client.put("/api/automation/settings", json={**current, "traderOptions": {"dailyBids": 1000}})
@@ -394,6 +396,33 @@ def main() -> None:
         check(imported.status_code == 200, f"import ({imported.status_code} {imported.text[:200]})")
         check(ij["options"]["min_gain"] == 4.5 and ij["options"]["daily_bids"] == 30 and ij["ignored"] == ["options.nope"], f"options merged and clamped {ij}")
         check(ij["learned"]["swap_edge"] == 50_000 and ij["learned"]["extra"] == [0.2, 0.5, 1.0], f"learned values clamped {ij['learned']}")
+
+        ### League learning: the export shows the base, the league's own and the blend; a reset needs
+        ### an admin and logs the old values
+        ex2 = client.get("/api/automation/trader/export?days=1").json()
+        check({"learned", "learned_league", "learned_effective"} <= set(ex2) and ex2["learned"]["version"] == 2, "base, league and blend exported")
+        reset = client.post("/api/automation/trader/reset?scope=league")
+        check(reset.status_code == 200 and "before" in reset.json(), f"league learning reset ({reset.status_code})")
+        state.settings.automation.trader_admins = []
+        check(client.post("/api/automation/trader/reset?scope=global").status_code == 403, "reset only by admins")
+        check(client.post("/api/automation/trader/reset?scope=all").status_code == 422, "unknown scope refused")
+
+        ### Concurrent learning updates: none is lost (two fields written by two threads at once)
+        import threading
+
+        trader_service = state.automation.trader
+
+        def writer(field: str, value: int) -> None:
+            for _ in range(15):
+                trader_service.import_tuning("1001", "4242", None, {field: value})
+
+        threads = [threading.Thread(target=writer, args=("min_margin", 222_000)), threading.Thread(target=writer, args=("swap_edge", 333_000))]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join()
+        final = client.get("/api/automation/trader/export?days=1").json()["learned"]
+        check(final["min_margin"] == 222_000 and final["swap_edge"] == 333_000, f"both concurrent updates kept {final['min_margin']} {final['swap_edge']}")
         client.put("/api/automation/settings", json={**current, "trader": False})
 
         events = client.get("/api/automation/events")

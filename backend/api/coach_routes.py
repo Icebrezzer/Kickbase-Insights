@@ -240,6 +240,19 @@ async def trader_import(state: StateDep, league_id: LeagueIdDep, viewer: ViewerD
     return TraderImportOut(options=export["options"], learned=export["learned"], ignored=ignored)
 
 
+@router.post("/automation/trader/reset")
+async def trader_reset(
+    state: StateDep, league_id: LeagueIdDep, viewer: ViewerDep, scope: Annotated[str, Query(pattern="^(global|league)$")]
+) -> dict:
+    """Resets the learned values to the starting ones: the global base or this league's bid heights.
+    Both are shared (by all leagues, by all members of the league), so only admins may. The old
+    values are in the log and can be imported back."""
+    automation = _automation(state)
+    if not state.settings.automation.may_tune_learning(viewer.user_id, viewer.name):
+        raise HTTPException(403, "Gelernte Werte dürfen nur von KBI_AUTOMATION__TRADER_ADMINS zurückgesetzt werden.")
+    return {"before": await asyncio.to_thread(automation.trader.reset_learning, viewer.user_id, league_id, scope)}
+
+
 @router.post("/automation/scout", response_model=ScoutRunOut)
 async def run_scouting(state: StateDep, league: LeagueDep, viewer: ViewerDep) -> ScoutRunOut:
     """Compares the scouting list with the forecasts now, e.g. when the market page opens."""

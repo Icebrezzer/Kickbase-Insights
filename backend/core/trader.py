@@ -506,8 +506,61 @@ def bid_for(target: Candidate, extra: float, cap: int | None) -> int | None:
 
 
 ### ===============================================================================
-### Learning, shared by all leagues
+### Bids by expected value: P(win) from the league's auctions times what winning is worth
 ### ===============================================================================
+
+### Fewer won auctions than this in the league (and price class): no model, the learned extra decides
+MIN_AUCTIONS = 8
+### Bids tried between the minimum and the cap
+BID_GRID = 40
+
+
+def winning_markups(shares: Sequence[tuple[int, float]], value: int) -> list[float]:
+    """The markups that won comparable auctions: the player's price class when it has enough, else
+    the whole league."""
+    same = [s for v, s in shares if coach.price_class(v) == coach.price_class(value)]
+    return same if len(same) >= MIN_AUCTIONS else [s for _, s in shares]
+
+
+def win_probability(bid: int, value: int, markups: Sequence[float]) -> float | None:
+    """Share of the league's won auctions a bid would have beaten: the winner paid less on top of the
+    market value. A tie counts as lost (unknown who gets it). None without enough auctions.
+    Auctions nobody bid on never show up, so this errs on the low side."""
+    if len(markups) < MIN_AUCTIONS or value <= 0:
+        return None
+    share = (bid - value) / value
+    return sum(1 for m in markups if m < share - 1e-9) / len(markups) # Float noise must not turn a tie into a win
+
+
+def best_bid(target: Candidate, worth: int, cap: int, markups: Sequence[float]) -> tuple[int, float, int] | None:
+    """The bid with the highest expected value `P(win) x (worth - bid)` between the minimum bid and
+    `cap`, as (bid, P(win), expected value). `worth` is what winning is worth: the net sale proceeds
+    of a profit buy, the points gained times the price per point for the eleven. None when no bid has
+    a positive expected value or the league has too few auctions."""
+    low = max(target.price, target.value)
+    high = min(cap, worth)
+    if low <= 0 or high < low or len(markups) < MIN_AUCTIONS:
+        return None
+    step = max(coach.BID_STEP, (high - low) // BID_GRID // coach.BID_STEP * coach.BID_STEP)
+    best: tuple[int, float, int] | None = None
+    bid = math.ceil(low / coach.BID_STEP) * coach.BID_STEP
+    while bid <= high:
+        p = win_probability(bid, target.value, markups) or 0.0
+        ev = int(p * (worth - bid))
+        if ev > 0 and (best is None or ev > best[2]):
+            best = (bid, p, ev)
+        bid += step
+    return best
+
+
+### ===============================================================================
+### Learning: a global base model, the bidding per league on top
+### ===============================================================================
+
+### Version of the stored learning state; older states are read as they are (missing keys: defaults)
+MODEL_VERSION = 2
+### Auctions of a league after which its own bid heights count as much as the global ones
+LEAGUE_PRIOR = 10
 
 START_EXTRA = 0.3
 START_MARGIN = 150_000
@@ -532,6 +585,10 @@ class Learned:
     regret_samples: int = 0
     shadow_won: int = 0
     shadow_lost: int = 0
+    ### Forecasts whose direction came true (a gain was forecast, a gain came), of gain_samples
+    direction_hits: int = 0
+    ### 1 while the forecast is systematically wrong: no profit buys, paper trades keep learning
+    forecast_pause: int = 0
 
     @property
     def gain_scale(self) -> float:
@@ -560,7 +617,22 @@ class Learned:
         return cls(extra=extra, **values)
 
     def dump(self) -> dict:
-        return {f.name: list(self.extra) if f.name == "extra" else getattr(self, f.name) for f in fields(self)}
+        return {"version": MODEL_VERSION} | {f.name: list(self.extra) if f.name == "extra" else getattr(self, f.name) for f in fields(self)}
+
+    @property
+    def direction_rate(self) -> float | None:
+        """How often the forecast got the direction right, once there are enough forecasts."""
+        return self.direction_hits / self.gain_samples if self.gain_samples >= MIN_SAMPLES else None
+
+
+def blend(base: Learned, league: Learned) -> Learned:
+    """The model one league trades with: the global base for the forecast, the margin and the swap
+    edge; the bid heights mixed with the league's own, more of them the more auctions it had. A new
+    league starts with the global experience."""
+    n = league.won + league.lost + SHADOW_WEIGHT * (league.shadow_won + league.shadow_lost)
+    w = n / (n + LEAGUE_PRIOR)
+    extra = tuple(round(w * mine + (1 - w) * theirs, 3) for mine, theirs in zip(league.extra, base.extra, strict=True))
+    return replace(base, extra=extra, won=league.won, lost=league.lost, shadow_won=league.shadow_won, shadow_lost=league.shadow_lost)
 
 
 ### The ranges the learning keeps itself in, the same for an import. Counters only need to be >= 0
@@ -569,6 +641,7 @@ LEARNED_LIMITS: dict[str, tuple[float, float]] = {
     "min_margin": (50_000, 1_500_000),
     "gain_ratio": (-1.0, 2.0),
     "swap_edge": (50_000, 1_000_000),
+    "forecast_pause": (0, 1),
 }
 
 
@@ -579,6 +652,8 @@ def constants() -> dict[str, object]:
         "MIN_HOLD_HOURS": MIN_HOLD.total_seconds() / 3600, "KICKOFF_GRACE_MINUTES": KICKOFF_GRACE.total_seconds() / 60,
         "ROOM_EXTRA": ROOM_EXTRA, "MIN_SAMPLES": MIN_SAMPLES, "SHADOW_WEIGHT": SHADOW_WEIGHT,
         "EMPTY_SLOT_PENALTY": coach.EMPTY_SLOT, "PRICE_CLASSES": list(coach.PRICE_CLASSES), "BID_STEP": coach.BID_STEP,
+        "MIN_AUCTIONS": MIN_AUCTIONS, "LEAGUE_PRIOR": LEAGUE_PRIOR, "PAUSE_BELOW": PAUSE_BELOW, "RESUME_ABOVE": RESUME_ABOVE,
+        "MODEL_VERSION": MODEL_VERSION,
     }
 
 
@@ -598,23 +673,39 @@ def after_auction(state: Learned, value: int, won: bool, own: int, winner: int |
 
 
 def after_sale(state: Learned, profit: int, weight: float = 1.0) -> Learned:
-    """A losing profit trade makes the trader pickier, a winning one a little less so."""
-    factor = 1 + (0.15 if profit < 0 else -0.03) * weight
+    """A net loss makes the trader pickier, the more the bigger it was (5 to 20 %); a net gain
+    a little less so (1 to 3 %): a small gain does not make up for a big loss."""
+    size = min(abs(profit) / max(state.min_margin, 1), 3.0)
+    factor = 1 + 0.05 * weight * (1 + size) if profit < 0 else 1 - 0.01 * weight * (1 + min(size, 2.0))
     return replace(state, min_margin=int(min(1_500_000, max(50_000, state.min_margin * factor))))
+
+
+### Forecasts that bring less than this share of what they promised pause the profit trading; it
+### resumes above the second value (hysteresis, so it does not flip every update)
+PAUSE_BELOW, RESUME_ABOVE = 0.3, 0.45
 
 
 def after_forecast(state: Learned, forecast_gain: int, actual_gain: int, weight: float = 1.0) -> Learned:
     """Smooths how much of a forecast gain really came, over the same horizon it was made for
-    (PROFIT_HOLD updates). Tiny forecasts say nothing and are skipped; paper trades weigh `weight`."""
+    (PROFIT_HOLD updates), counts whether the direction was right, and pauses the profit trading
+    while the forecast is systematically wrong. Tiny forecasts say nothing and are skipped; paper
+    trades weigh `weight`."""
     if forecast_gain < 50_000:
         return state
     ratio = min(2.0, max(-1.0, actual_gain / forecast_gain))
     alpha = 0.1 * min(max(weight, 0.0), 1.0)
-    return replace(state, gain_ratio=round((1 - alpha) * state.gain_ratio + alpha * ratio, 4), gain_samples=state.gain_samples + 1)
+    gain_ratio = round((1 - alpha) * state.gain_ratio + alpha * ratio, 4)
+    samples = state.gain_samples + 1
+    pause = state.forecast_pause
+    if samples >= MIN_SAMPLES:
+        pause = 1 if gain_ratio < PAUSE_BELOW else 0 if gain_ratio > RESUME_ABOVE else pause
+    return replace(state, gain_ratio=gain_ratio, gain_samples=samples, forecast_pause=pause,
+                   direction_hits=state.direction_hits + (1 if actual_gain > 0 else 0))
 
 
 def after_regret(state: Learned, change_after_sale: int) -> Learned:
-    """A sold player who rose clearly afterwards: swaps need a bigger edge. Otherwise a little smaller."""
+    """A sold player who rose clearly afterwards (net of the sale ratio, against simply holding him):
+    swaps need a bigger edge. Otherwise a little smaller. Rescue sales are not judged by this."""
     factor = 1.1 if change_after_sale > 100_000 else 0.97
     edge = int(min(1_000_000, max(50_000, state.swap_edge * factor)))
     return replace(state, swap_edge=edge, regret_samples=state.regret_samples + 1)

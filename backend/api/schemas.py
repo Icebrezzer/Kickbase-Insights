@@ -743,6 +743,8 @@ class TraderLearnedOut(Schema):
     gain_samples: int = 0
     swap_edge: int = 100_000 # How much more per day a swap target has to rise
     regret_samples: int = 0
+    direction_rate: float | None = None # Share of forecasts whose direction came true
+    forecast_paused: bool = False # Profit buys paused: the forecast is systematically wrong
 
 
 class TraderOut(Schema):
