@@ -268,6 +268,56 @@ class DataTests(unittest.TestCase):
             engine.dispose()
 
 
+class ReconcileTests(unittest.TestCase):
+    """Unclear calls are closed only on positive evidence, never just because time passed."""
+
+    def _settle(self, entries, market_players, squad_players, transfers=()):
+        engine = create_db_engine("sqlite://")
+        init_db(engine)
+        with Session(engine) as session:
+            session.add_all(entries)
+            session.add_all(transfers)
+            session.commit()
+        trader = TraderService(SimpleNamespace(engine=engine, settings=None))
+        trader._settle(League(id="l", name="L"), "u", kb.ManagerSquad(players=squad_players), kb.Market(players=market_players), utcnow())
+        with Session(engine) as session:
+            from sqlmodel import select
+            result = {r.player_id: r.status for r in session.exec(select(TradeLog)).all()}
+        engine.dispose()
+        return result
+
+    def _entry(self, pid, kind="bid", minutes=20, status="unknown"):
+        return TradeLog(user_id="u", league_id="l", player_id=pid, kind=kind, purpose="lineup", status=status,
+                        price=1_000_000, market_value=1_000_000, at=utcnow() - timedelta(minutes=minutes))
+
+    def test_gone_listing_without_transfer_stays_unclear(self):
+        status = self._settle([self._entry("gone")], [], [])
+        self.assertEqual(status["gone"], "unknown", "the bid may have been placed: no early 'failed'")
+
+    def test_listing_without_own_bid_fails(self):
+        listing = kb.MarketPlayer(id="still", market_value=1_000_000)
+        self.assertEqual(self._settle([self._entry("still")], [listing], [])["still"], "failed")
+
+    def test_recent_unclear_bid_waits(self):
+        listing = kb.MarketPlayer(id="fresh", market_value=1_000_000)
+        self.assertEqual(self._settle([self._entry("fresh", minutes=2)], [listing], [])["fresh"], "unknown")
+
+    def test_gone_listing_with_a_transfer_is_settled_from_it(self):
+        from db.models import Transfer
+
+        transfer = Transfer(id="t1", league_id="l", player_id="won", date=utcnow() - timedelta(minutes=5), price=1_100_000,
+                            buyer_id="other", seller_id=None)
+        self.assertEqual(self._settle([self._entry("won")], [], [], [transfer])["won"], "lost")
+
+    def test_unclear_bid_gives_up_after_two_days(self):
+        self.assertEqual(self._settle([self._entry("old", minutes=3 * 24 * 60)], [], [])["old"], "expired")
+
+    def test_unclear_sale_of_a_player_still_owned_fails_only_after_the_wait(self):
+        owned = kb.SquadPlayer(id="kept", market_value=1_000_000)
+        self.assertEqual(self._settle([self._entry("kept", kind="sell", minutes=2)], [], [owned])["kept"], "unknown")
+        self.assertEqual(self._settle([self._entry("kept", kind="sell", minutes=20)], [], [owned])["kept"], "failed")
+
+
 class ExecutionTests(unittest.IsolatedAsyncioTestCase):
     async def test_confirmed_sale_survives_failed_balance_read(self):
         trader = TraderService(SimpleNamespace(engine=None, settings=None, record=Mock()))

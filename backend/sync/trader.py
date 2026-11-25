@@ -77,6 +77,8 @@ EXIT_ORDER = ("SPORT", "STOP", "TRAIL", "TURN", "TAKE", "TIME")
 DEBUG_KEEP = timedelta(days=21)
 ### An unconfirmed call that Kickbase does not show after this long failed
 RECONCILE_AFTER = timedelta(minutes=10)
+### An unclear bid whose listing is gone and whose transfer never shows up is closed after this long
+UNSETTLED_GIVE_UP = timedelta(days=2)
 ### This many failed Kickbase calls within an hour pause the live trading (dry run) for that hour
 ERROR_PAUSE = 3
 
@@ -348,9 +350,19 @@ class TraderService:
             for entry in session.exec(
                 select(TradeLog).where(TradeLog.user_id == user_id, TradeLog.league_id == league.id, TradeLog.status.in_(t.UNSETTLED))
             ).all():
+                ### "failed" only on positive evidence: a bid whose listing is still there without it, a
+                ### sale whose player is still in the squad. A listing that is gone may have been won or
+                ### lost with this bid: it stays unclear (and blocks new buys) until the transfer is synced
                 bid_there = entry.player_id in listed and listed[entry.player_id].own_bid(user_id) is not None
                 if entry.kind == "bid" and (bid_there or entry.player_id in owned):
                     entry.status = "open" # Settled below like every open bid
+                elif entry.kind == "bid" and entry.player_id not in listed:
+                    if self._transfer_after(session, league.id, entry.player_id, entry.at) is not None:
+                        entry.status = "open" # Won or lost: settled below from the transfer
+                    elif now - entry.at > UNSETTLED_GIVE_UP:
+                        entry.status, entry.resolved_at = "expired", now
+                    else:
+                        continue
                 elif entry.kind == "sell" and entry.player_id not in owned:
                     entry.status, entry.resolved_at = "sold", now # Proceeds unknown: price is the estimate
                     entry.details = {**entry.details, "received_known": False}
