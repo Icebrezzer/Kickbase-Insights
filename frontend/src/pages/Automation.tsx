@@ -14,6 +14,7 @@ import {
   useSaveAutomation,
   useBacktest,
   useTrader,
+  useTraderDashboard,
   useTraderImport,
   useTraderProfiles,
   withLeague,
@@ -33,6 +34,7 @@ export default function Automation() {
       <div className="space-y-4">
         <PushCard />
         <QueryState query={settings}>{(data) => <SettingsCard initial={data} />}</QueryState>
+        <TraderDashboardCard />
         <TraderCard />
         <ForecastCard />
         <LearningCard />
@@ -220,7 +222,17 @@ function SettingsCard({ initial }: { initial: AutomationSettings }) {
                   <span className="mb-1 block text-xs font-medium text-muted">Kreditrahmen nutzen</span>
                   <select
                     value={opts.creditMode}
-                    onChange={(event) => setOption({ creditMode: Number(event.target.value) })}
+                    onChange={(event) => {
+                      const creditMode = Number(event.target.value)
+                      if (
+                        creditMode === 2 &&
+                        !window.confirm(
+                          "Kredit auch für Gewinnhandel? Der Trader darf dann ins Minus gehen, um auf steigende Marktwerte zu spekulieren. Er zahlt es vor dem Spieltag zurück, notfalls mit Verlust. Riskanter als die Standard-Einstellung.",
+                        )
+                      )
+                        return
+                      setOption({ creditMode })
+                    }}
                     className="h-10 w-full rounded-xl border border-line bg-surface px-3"
                   >
                     <option value={0}>Nie</option>
@@ -541,6 +553,194 @@ function TraderTuning() {
       </div>
     </details>
   )
+}
+
+const PHASE_LABELS: Record<string, string> = {
+  normal: "Normaler Handel",
+  prepare: "Vorbereitung (24 Std. vor dem Spieltag)",
+  repay: "Rückzahlung vor dem Spieltag",
+  final: "Letzte Stunde vor dem Spieltag",
+}
+const RISK_LABELS: Record<string, string> = {
+  KILL_SWITCH: "Autotrader ausgeschaltet",
+  BID_INVALID: "ungültiges Gebot",
+  AUCTION_EXPIRED: "Auktion abgelaufen",
+  AUCTION_UNKNOWN: "Auktionsende unbekannt",
+  NOT_LISTED: "nicht mehr auf dem Markt",
+  OVER_BUDGET: "Budget reicht nicht, wenn alle Gebote gewinnen",
+  SQUAD_FULL: "Kader wäre voll",
+  CLUB_FULL: "Vereinslimit",
+  DAILY_BIDS: "Tageslimit Gebote",
+  DAILY_SALES: "Tageslimit Verkäufe",
+  BLOCKED: "gesperrt (Rückkauf oder unklarer Aufruf)",
+  PROFIT_NEGATIVE: "netto kein Gewinn",
+  PHASE: "zu nah am Spieltag",
+  NOT_OWNED: "nicht im Kader",
+  LOCKED: "gesperrt",
+  STARTER: "Stammspieler",
+  BREAKS_COVER: "letzter Ersatz der Position",
+  NEW_GAP: "würde eine Lücke reißen",
+  MANUAL_BID: "eigenes Gebot, bleibt",
+  NOT_OPEN: "kein offenes Gebot",
+}
+const VERDICT_LABELS: Record<string, string> = {
+  SPORT: "verkaufen: fällt aus",
+  STOP: "verkaufen: Verlustgrenze",
+  TRAIL: "verkaufen: Trailing-Stop",
+  TURN: "verkaufen: Prognose dreht",
+  TAKE: "verkaufen: Gewinn mitnehmen",
+  TIME: "verkaufen: zu lange gehalten",
+  halten: "halten",
+}
+
+/** The trader now: money and risk, the eleven, its positions and protections, and why it bought or
+ *  passed on the market players of its latest round */
+function TraderDashboardCard() {
+  const query = useTraderDashboard()
+  const d = query.data
+  if (!d?.at) return null
+  const signed = (v: number | null | undefined) => (v == null ? "–" : compactMoney(v))
+  const tone = (v: number | null | undefined) => (v == null || v === 0 ? "" : v > 0 ? "text-up" : "text-down")
+  return (
+    <Card>
+      <CardHeader
+        title="Autotrader jetzt"
+        description={`${PHASE_LABELS[d.phase ?? "normal"] ?? d.phase} · Stand ${dateTime(d.at)}${d.deadline ? ` · Spieltag ${dateTime(d.deadline)}` : ""}`}
+        action={<Badge className={d.live ? "text-up" : ""}>{d.live ? "Live" : "Probelauf"}</Badge>}
+      />
+      <div className="space-y-4 p-4 sm:p-5">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <Stat label="Kontostand" value={signed(d.budget)} hint={`offene Gebote ${signed(d.open_bids)}`} />
+          <Stat
+            label="Frei verfügbar"
+            value={<span className={tone(d.cash_free)}>{signed(d.cash_free)}</span>}
+            hint={
+              d.credit_mode === 0
+                ? "Kredit ausgeschaltet"
+                : `+ Kredit bis ${signed(d.credit)} (${d.credit_mode === 2 ? "auch Gewinnhandel" : "nur Startelf und Ersatz"})`
+            }
+          />
+          <Stat
+            label="Schlimmster Fall"
+            value={<span className={tone(d.worst_case)}>{signed(d.worst_case)}</span>}
+            hint="Kontostand, wenn alle offenen Gebote gewinnen"
+          />
+          <Stat
+            label="Startelf-Lücken"
+            value={`${d.gaps_confirmed ?? "–"}`}
+            hint={`mit allen offenen Geboten: ${d.gaps_projected ?? "–"}`}
+          />
+          <Stat label="Offene Positionen" value={<span className={tone(d.unrealized)}>{signed(d.unrealized)}</span>} hint="netto, wenn jetzt verkauft" />
+          <Stat
+            label="Gewinn realisiert"
+            value={<span className={tone(d.stats.realized)}>{signed(d.stats.realized)}</span>}
+            hint={d.stats.unknown_profits ? `${d.stats.unknown_profits} Verkäufe mit unbekanntem Gewinn nicht enthalten` : `${d.stats.sales} Verkäufe`}
+          />
+          <Stat
+            label="Auktionen"
+            value={d.stats.win_rate == null ? "–" : share(d.stats.win_rate)}
+            hint={`${d.stats.auctions_won} gewonnen, ${d.stats.auctions_lost} verloren · Ø Aufschlag ${d.stats.avg_markup == null ? "–" : share(d.stats.avg_markup)}`}
+          />
+          <Stat
+            label="Abgewehrt"
+            value={`${d.stats.blocked_this_week}`}
+            hint={`riskante Aktionen diese Woche · Spieltage gefährdet ${d.stats.matchdays_at_risk}, gerettet ${d.stats.matchdays_rescued}`}
+          />
+        </div>
+
+        {d.protections && d.protections.length > 0 && (
+          <div>
+            <p className="mb-1 text-xs font-medium text-muted">Aktive Schutzregeln</p>
+            <ul className="flex flex-wrap gap-1.5">
+              {d.protections.map((p) => (
+                <li key={p}>
+                  <Badge>{p}</Badge>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {d.positions && d.positions.length > 0 && (
+          <div>
+            <p className="mb-1 text-xs font-medium text-muted">Gewinnpositionen</p>
+            <ul className="divide-y divide-line text-sm">
+              {d.positions.map((p) => (
+                <li key={p.player_id} className="flex items-center justify-between gap-3 py-1.5">
+                  <span className="min-w-0 truncate">{p.name ?? p.player_id}</span>
+                  <span className="shrink-0 text-right tabular-nums">
+                    <span className={tone(p.net_now)}>{signed(p.net_now)}</span>
+                    <span className="block text-xs text-muted">{VERDICT_LABELS[(p.verdict ?? "").split(",")[0]] ?? p.verdict}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {d.actions && d.actions.length > 0 && (
+          <div>
+            <p className="mb-1 text-xs font-medium text-muted">Geplant in dieser Runde</p>
+            <ul className="space-y-1 text-sm">
+              {d.actions.map((a) => (
+                <li key={`${a.kind}-${a.name}`}>
+                  {_verbLabel(a.kind)} {a.name} {a.kind === "bid" ? compactMoney(a.price) : ""} <span className="text-muted">– {a.reason}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {d.blocked && d.blocked.length > 0 && (
+          <div>
+            <p className="mb-1 text-xs font-medium text-muted">Von der Risikoprüfung blockiert</p>
+            <ul className="space-y-1 text-sm">
+              {d.blocked.map((b) => (
+                <li key={`${b.kind}-${b.player_id}`}>
+                  {_verbLabel(b.kind)} {b.name}: <span className="text-down">{RISK_LABELS[b.code] ?? b.code}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {d.candidates && d.candidates.length > 0 && (
+          <details className="rounded-xl border border-line px-3 py-2">
+            <summary className="cursor-pointer text-sm font-medium">Warum gekauft oder nicht – die Marktspieler der letzten Runde</summary>
+            <ul className="divide-y divide-line py-2 text-sm">
+              {d.candidates.map((c) => (
+                <li key={c.id} className="py-2">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="min-w-0 truncate font-medium">{c.name ?? c.id}</span>
+                    <span className="shrink-0 tabular-nums">{compactMoney(c.value)}</span>
+                  </div>
+                  <p className="text-xs">{c.decision}</p>
+                  <p className="text-xs text-muted">
+                    Netto beim Mindestgebot{" "}
+                    <span className={tone(c.net_at_low)}>{signed(c.net_at_low)}</span>
+                    {c.p_win_at_low != null && ` · Zuschlag dort ${share(c.p_win_at_low)}`}
+                    {` · erw. ${decimal(c.expected)} Pkt.`}
+                    {c.ahead != null && ` (nächste 3: Ø ${decimal(c.ahead)})`}
+                    {c.samples != null && ` · Daten ${c.samples}/5 Spiele`}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+
+        <p className="text-xs text-muted">
+          Rendite je gebundenem Euro und Tag {d.stats.return_per_euro_day == null ? "–" : share(d.stats.return_per_euro_day)} · Ø Haltedauer{" "}
+          {d.stats.avg_hold_days ?? "–"} Tage · Datenvollständigkeit {d.stats.data_completeness == null ? "–" : share(d.stats.data_completeness)}
+          {d.runtime_ms != null && ` · Runde ${d.runtime_ms} ms`}
+        </p>
+      </div>
+    </Card>
+  )
+}
+
+function _verbLabel(kind: string) {
+  return kind === "bid" ? "Gebot" : kind === "sell" ? "Verkauf" : "Gebot zurückziehen"
 }
 
 function TraderCard() {

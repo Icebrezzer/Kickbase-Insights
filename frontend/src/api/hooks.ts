@@ -342,6 +342,67 @@ export function useSaveAutomation() {
 export const useTraderProfiles = () =>
   useLeagueQuery<Record<string, TraderOptions>>(["trader-profiles"], "/automation/trader/profiles", { staleTime: Infinity })
 
+export type TraderCandidate = {
+  id: string
+  name: string | null
+  pos: number
+  value: number
+  price: number
+  bid_low: number
+  net_at_low: number | null
+  p_win_at_low: number | null
+  expected: number
+  ahead: number | null
+  samples: number | null
+  quality: number | null
+  forecast: number
+  gain: number
+  money: number | null
+  decision: string
+}
+export type TraderDashboard = {
+  at: string | null
+  live?: boolean
+  phase?: string
+  deadline?: string | null
+  budget?: number
+  open_bids?: number
+  cash_free?: number
+  credit?: number
+  credit_mode?: number
+  liquidation?: number
+  worst_case?: number
+  profit_room?: number
+  gaps_confirmed?: number
+  gaps_projected?: number
+  unrealized?: number
+  week_profit?: number
+  positions?: { player_id: string; name: string | null; cost: number; net_now: number; verdict: string | null }[]
+  protections?: string[]
+  candidates?: TraderCandidate[]
+  blocked?: { kind: string; purpose: string; player_id: string; name: string; price: number; code: string }[]
+  actions?: { kind: string; purpose: string; name: string; price: number; reason: string }[]
+  runtime_ms?: number | null
+  stats: {
+    realized: number
+    sales: number
+    unknown_profits: number
+    data_completeness: number | null
+    by_purpose: Record<string, { sales: number; profit: number; unknown: number }>
+    auctions_won: number
+    auctions_lost: number
+    win_rate: number | null
+    avg_markup: number | null
+    avg_hold_days: number | null
+    return_per_euro_day: number | null
+    blocked_this_week: number
+    matchdays_at_risk: number
+    matchdays_rescued: number
+  }
+}
+export const useTraderDashboard = () =>
+  useLeagueQuery<TraderDashboard>(["trader-dashboard"], "/automation/trader/dashboard", { refetchInterval: 60_000 })
+
 export type BacktestResult = {
   strategy: string
   net_profit: number
