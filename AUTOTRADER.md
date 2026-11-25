@@ -1,6 +1,6 @@
 # Autotrader – komplette Logik
 
-Stand: 25.11.2026, Branch `codex/autotrader-2`, Meilensteine 1 (Critical Safety Patch), 2 (Trading Intelligence), 3 (Learning Engine 2.0), 4 (Backtesting und Strategieprofile) und 5 (Dashboard, Statistik, Benachrichtigungen).
+Stand: 25.11.2026, Branch `codex/autotrader-2`, Meilensteine 1–6. Prüfbericht, Release-Notes, Update- und Rollback-Anleitung: [AUTOTRADER_RELEASE.md](AUTOTRADER_RELEASE.md).
 
 Code:
 - `backend/core/trader.py`: reine Entscheidungen (Bewertung, Preis, Netto-Gewinn, Kredit, Phasen, Lernen).
@@ -96,6 +96,11 @@ Ein Spieler mit unklarem Aufruf ist für neue Aktionen gesperrt (`BLOCKED`). Nic
 Erledigte Schatten werden nach 120 Tagen gelöscht.
 
 **Auswahl:** bis zu 5 je Runde, zuerst der beste Kandidat **jeder Preisklasse**, dann die nächstbesten. So lernt der Trader nicht nur aus teuren Spitzenkandidaten. Abgelehnte Kandidaten werden als `near` mitbeobachtet.
+
+**Nutzertrennung:**
+- Jeder Schattentransfer gehört dem Nutzer, dessen Trader ihn angelegt hat (`user_id`). Nur dieser sieht ihn in Ansicht und Export.
+- Pro Auktion gibt es ligaweit höchstens einen offenen Schatten. Dieselbe Auktion wird also nie doppelt gelernt.
+- Schatten aus der Zeit vor dieser Version haben keinen Besitzer. Sie werden noch ausgewertet, aber niemandem angezeigt.
 
 **Papier-Kauf:**
 - Ist ein Transfer bekannt: gewonnen, wenn der Gewinnerpreis **kleiner** als das Papiergebot war. Gelernt wird mit halbem Gewicht, im globalen Modell und in der Liga.
@@ -372,7 +377,7 @@ planned (Probelauf) │ pending ─► open (Gebot) / sold (Verkauf)
 | `swap_edge` | 100.000 | 50.000–1 Mio. | Halten hätte netto > 100.000 mehr gebracht → ×1,1, sonst ×0,97 (ohne Rettungsverkäufe) |
 
 **Sicherheit des Lernens:**
-- **Parallele Runden:** Lesen, Lernen und Schreiben laufen unter einer Sperre. Kein Update geht verloren; der Smoke-Test prüft das mit zwei Threads. Das gilt je Prozess, also für einen Container.
+- **Parallele Runden:** Lesen, Lernen und Schreiben laufen unter einer Sperre, sowohl im Prozess (Thread-Sperre) als auch über Prozesse hinweg auf derselben Datenbank (`db.exclusive`: Dateisperre bei SQLite, Advisory-Lock bei PostgreSQL). Kein Update geht verloren; der Smoke-Test prüft das mit zwei Threads.
 - **Versionierung:** Gespeicherte Zustände tragen `version: 2`. Ältere Zustände laden mit Standardwerten für neue Felder.
 - **Laden und Import:** NaN, Infinity und falsche Typen werden verworfen, alle Werte begrenzt.
 - **Zurücksetzen:** `POST /api/automation/trader/reset?scope=global|league` (nur Admins). Die alten Werte stehen im Ereignis `trader-import` und lassen sich zurückimportieren.
@@ -576,4 +581,4 @@ Gegen die echte Kickbase-API lässt sich das ohne Live-Zugang nicht prüfen. Die
   - Faktor 1,5 bei wenig Daten,
   - Trailing-Stop 5 %, Positions-Stop 10 %, Zeitlimit 7 Tage.
 - Die Vorschau über 3 Spiele nimmt den heutigen Status als dauerhaft an und kennt keine Rotation.
-- Mehrere Backend-Instanzen: Die Rundensperre gilt je Prozess. Empfohlen ist ein Container.
+- Mehrere Backend-Instanzen: Das Lernen ist prozessübergreifend gesperrt, die Rundensperre je Nutzer und Liga aber nur je Prozess. Zwei Container auf derselben Datenbank könnten dieselbe Runde gleichzeitig planen. Daher: ein Container (Standard der docker-compose.yml).
