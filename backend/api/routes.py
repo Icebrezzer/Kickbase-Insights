@@ -559,7 +559,11 @@ async def withdraw_bid(
         user = await client.ensure_login()
         market = await client.market(league_id)
         entry = next((player for player in market.players if player.id == player_id), None)
-        offer_id = entry.own_offer_id(user.id) if entry else None
+        ### Kickbase shows no own bid (any more): the stored one was stale, nothing to withdraw
+        if entry is None or entry.own_bid(user.id) is None:
+            await state.sync.refresh_personal(league_id, client)
+            return
+        offer_id = entry.own_offer_id(user.id)
         if offer_id is None:
             log.warning("No offer id to withdraw %s, Kickbase's item: %s", player_id, await _raw_market_item(client, league_id, player_id))
             raise HTTPException(404, "Für diesen Spieler findet die App bei Kickbase kein eigenes Gebot mit Angebots-ID.")
