@@ -514,7 +514,10 @@ export type TraderOptions = {
   stopLoss: number
   sellWindow: number
   starterLock: number
+  minRoi: number
+  creditMode: number
   shadow: boolean
+  rescueOverride: boolean
 }
 
 export type Shadow = {
@@ -581,6 +584,7 @@ export type Trader = {
     regretSamples: number
   }
   paused: boolean
+  pauseReason: string | null
   enabledOnServer: boolean
 }
 

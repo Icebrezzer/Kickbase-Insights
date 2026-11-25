@@ -178,6 +178,21 @@ function SettingsCard({ initial }: { initial: AutomationSettings }) {
             label="Schattentransfers"
             hint="Verfolgt ausgelassene Käufe und echte Verkäufe auf dem Papier weiter: Hätte das Gebot gereicht, was brachte der Spieler, was tat der Marktwert nach dem Verkauf? Daraus lernt er Gebotshöhe, Prognose-Vertrauen und Tausch-Schwelle."
           />
+          <Switch
+            checked={opts.rescueOverride}
+            onChange={(rescueOverride) => {
+              if (
+                rescueOverride &&
+                !window.confirm(
+                  "Notfallregel einschalten? Reicht der Verkauf von Bankspielern nicht, um das Minus vor dem Anpfiff auszugleichen, darf der Autotrader dann auch gesperrte Stammspieler und frische Käufe sofort verkaufen. Das kostet Punkte, verhindert aber 0 Punkte am Spieltag.",
+                )
+              )
+                return
+              setOption({ rescueOverride })
+            }}
+            label="Notfallregel: Stammspieler für Minus-Rettung verkaufen"
+            hint="Aus: Rettungsverkäufe lassen gesperrte Spieler stehen, reicht das nicht, kommt eine Push-Warnung."
+          />
           <details className="py-3">
             <summary className="cursor-pointer text-sm font-medium">Feineinstellungen</summary>
             <div className="mt-3 space-y-4">
@@ -189,11 +204,25 @@ function SettingsCard({ initial }: { initial: AutomationSettings }) {
                 <OptionField label="Anteil des freien Budgets je Startelf-Gebot (%)" value={opts.lineupShare} min={10} max={100} onCommit={(lineupShare) => setOption({ lineupShare })} />
               </OptionGroup>
               <OptionGroup title="Gewinnhandel">
-                <OptionField label="Anteil des freien Budgets je Gewinn-Gebot (%)" value={opts.profitShare} min={10} max={100} onCommit={(profitShare) => setOption({ profitShare })} />
+                <OptionField label="Höchstens gebunden in Gewinnhandel (% von Teamwert + Kontostand)" hint="Alle Gewinnkäufe und offenen Gewinn-Gebote zusammen" value={opts.profitShare} min={10} max={100} onCommit={(profitShare) => setOption({ profitShare })} />
+                <OptionField label="Mindestrendite netto (%)" hint="Nach Sofortverkauf (konservativ 90 % des Marktwerts), bezogen auf das Gebot" value={opts.minRoi} min={0} max={100} decimals onCommit={(minRoi) => setOption({ minRoi })} />
                 <OptionField label="Wochen-Stop-Loss (€, 0 = aus)" value={opts.stopLoss} min={0} max={100_000_000} money onCommit={(stopLoss) => setOption({ stopLoss })} />
               </OptionGroup>
               <OptionGroup title="Sicherheit">
                 <OptionField label="Budget-Reserve, nie ausgegeben (€)" value={opts.reserve} min={0} max={500_000_000} money onCommit={(reserve) => setOption({ reserve })} />
+                <label className="text-sm">
+                  <span className="mb-1 block text-xs font-medium text-muted">Kreditrahmen nutzen</span>
+                  <select
+                    value={opts.creditMode}
+                    onChange={(event) => setOption({ creditMode: Number(event.target.value) })}
+                    className="h-10 w-full rounded-xl border border-line bg-surface px-3"
+                  >
+                    <option value={0}>Nie</option>
+                    <option value={1}>Für Startelf und Ersatz</option>
+                    <option value={2}>Auch für Gewinnhandel</option>
+                  </select>
+                  <span className="mt-0.5 block text-xs text-muted">Nur so weit, wie verkaufbare Bankspieler ihn bis zum Spieltag zurückzahlen</span>
+                </label>
                 <OptionField label="Höchstpreis für einen Ersatzspieler (€)" value={opts.coverMaxPrice} min={0} max={50_000_000} money onCommit={(coverMaxPrice) => setOption({ coverMaxPrice })} />
                 <OptionField label="Gebote pro Tag" value={opts.dailyBids} min={0} max={30} onCommit={(dailyBids) => setOption({ dailyBids })} />
                 <OptionField label="Verkäufe pro Tag" value={opts.dailySales} min={0} max={30} onCommit={(dailySales) => setOption({ dailySales })} />
@@ -277,6 +306,9 @@ const STATUS_LABELS: Record<string, string> = {
   lost: "verloren",
   expired: "abgelaufen",
   sold: "verkauft",
+  pending: "wird gesendet",
+  unknown: "unklar, wird abgeglichen",
+  failed: "fehlgeschlagen",
   watching: "Auktion läuft",
   holding: "gehalten",
   done: "ausgewertet",
@@ -360,7 +392,13 @@ function TraderCard() {
       <CardHeader
         title="Autotrader"
         description="Wochenbilanz, letzte Gebote und Verkäufe. Gelernt wird aus allen Ligen gemeinsam."
-        action={query.data?.paused ? <Badge className="text-down">Gewinnhandel pausiert</Badge> : null}
+        action={
+          query.data?.pauseReason ? (
+            <Badge className="text-down" title={query.data.pauseReason}>Live-Handel pausiert</Badge>
+          ) : query.data?.paused ? (
+            <Badge className="text-down">Gewinnhandel pausiert</Badge>
+          ) : null
+        }
       />
       <QueryState query={query}>
         {(tr) => {
@@ -368,6 +406,7 @@ function TraderCard() {
           const auctions = tr.learned.won + tr.learned.lost
           return (
             <div className="space-y-4 p-4 sm:p-5">
+              {tr.pauseReason && <p role="status" className="text-sm text-down">{tr.pauseReason}</p>}
               <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
                 <Stat label="Gewinn diese Woche" value={week ? compactMoney(week.profit) : "–"} hint={week ? `${week.sales} Verkäufe, ${compactMoney(week.received)} erlöst` : "noch kein Handel"} />
                 <Stat label="Gebote diese Woche" value={week ? `${week.won} / ${week.bids}` : "–"} hint={week ? `gewonnen · ${week.planned} im Probelauf` : undefined} />
