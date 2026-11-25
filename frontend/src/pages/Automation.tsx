@@ -12,8 +12,10 @@ import {
   useLearning,
   usePushKey,
   useSaveAutomation,
+  useBacktest,
   useTrader,
   useTraderImport,
+  useTraderProfiles,
   withLeague,
 } from "@/api/hooks"
 import { useLeagueId } from "@/lib/league"
@@ -196,6 +198,7 @@ function SettingsCard({ initial }: { initial: AutomationSettings }) {
           <details className="py-3">
             <summary className="cursor-pointer text-sm font-medium">Feineinstellungen</summary>
             <div className="mt-3 space-y-4">
+              <ProfilePicker current={opts} onApply={(next) => setOption(next)} />
               <OptionGroup title="Startelf">
                 <OptionField label="Mindest-Plus erwartete Punkte der Elf" value={opts.minGain} min={0} max={100} decimals onCommit={(minGain) => setOption({ minGain })} />
                 <OptionField label="Höchster Mehrpreis je zusätzlichem Punkt (€)" hint="Gebot minus Marktwert des verdrängten Spielers, geteilt durch das Punkte-Plus" value={opts.maxCostPerPoint} min={0} max={50_000_000} money onCommit={(maxCostPerPoint) => setOption({ maxCostPerPoint })} />
@@ -316,6 +319,157 @@ const STATUS_LABELS: Record<string, string> = {
   watching: "Auktion läuft",
   holding: "gehalten",
   done: "ausgewertet",
+}
+
+const PROFILE_LABELS: Record<string, string> = {
+  conservative: "Konservativ",
+  balanced: "Ausgewogen (Standard)",
+  aggressive: "Offensiv",
+}
+const OPTION_LABELS: Record<string, string> = {
+  minGain: "Mindest-Plus Punkte",
+  maxCostPerPoint: "€ je Punkt",
+  minAvgEdge: "Schnitt besser %",
+  minPlay: "Einsatzquote %",
+  lineupShare: "Budget je Startelf-Gebot %",
+  profitShare: "Gewinnhandel gesamt %",
+  reserve: "Reserve €",
+  coverMaxPrice: "Ersatz höchstens €",
+  dailyBids: "Gebote/Tag",
+  dailySales: "Verkäufe/Tag",
+  stopLoss: "Wochen-Stop-Loss €",
+  sellWindow: "Verkaufsfenster Min.",
+  starterLock: "Stammspieler-Sperre Min.",
+  minRoi: "Mindestrendite %",
+  creditMode: "Kredit (0/1/2)",
+  trailingStop: "Trailing-Stop %",
+  positionStop: "Positions-Stop %",
+  maxHoldDays: "Halten Tage",
+  shadow: "Schattentransfers",
+  rescueOverride: "Notfallregel",
+}
+
+/** A strategy profile as a starting point: shows what would change, applies only after a confirmation.
+ *  The switches (shadow trades, emergency rule) stay as they are. */
+function ProfilePicker({ current, onApply }: { current: TraderOptions; onApply: (next: TraderOptions) => void }) {
+  const profiles = useTraderProfiles()
+  const [name, setName] = useState("")
+  const chosen = name && profiles.data ? profiles.data[name] : null
+  const changes = chosen
+    ? (Object.keys(chosen) as (keyof TraderOptions)[]).filter(
+        (key) => key !== "shadow" && key !== "rescueOverride" && chosen[key] !== current[key],
+      )
+    : []
+  const show = (value: unknown) => (typeof value === "number" ? value.toLocaleString("de-DE") : String(value))
+  return (
+    <div className="rounded-xl border border-line p-3 text-sm">
+      <label className="block">
+        <span className="mb-1 block text-xs font-medium text-muted">Strategieprofil als Ausgangspunkt</span>
+        <select value={name} onChange={(event) => setName(event.target.value)} className="h-10 w-full rounded-xl border border-line bg-surface px-3">
+          <option value="">Profil wählen …</option>
+          {Object.keys(profiles.data ?? {}).map((key) => (
+            <option key={key} value={key}>
+              {PROFILE_LABELS[key] ?? key}
+            </option>
+          ))}
+        </select>
+      </label>
+      {chosen && (
+        <div className="mt-2 space-y-2">
+          {changes.length === 0 ? (
+            <p className="text-muted">Deine Einstellungen entsprechen schon diesem Profil.</p>
+          ) : (
+            <>
+              <ul className="space-y-0.5 text-xs">
+                {changes.map((key) => (
+                  <li key={key}>
+                    {OPTION_LABELS[key] ?? key}: <span className="text-muted line-through">{show(current[key])}</span> → {show(chosen[key])}
+                  </li>
+                ))}
+              </ul>
+              <Button
+                size="sm"
+                onClick={() => {
+                  onApply({ ...chosen, shadow: current.shadow, rescueOverride: current.rescueOverride })
+                  setName("")
+                }}
+              >
+                {changes.length} Werte übernehmen
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const STRATEGY_LABELS: Record<string, string> = {
+  none: "Kein Handel",
+  reference: "Alte Regel (vor dem Sicherheits-Patch)",
+  conservative: "Konservativ",
+  balanced: "Ausgewogen",
+  aggressive: "Offensiv",
+}
+
+/** The profit trading strategies replayed on this league's real auctions, on request */
+function BacktestPanel() {
+  const run = useBacktest()
+  const data = run.data
+  return (
+    <details className="rounded-xl border border-line px-3 py-2">
+      <summary className="cursor-pointer text-sm font-medium">Strategien im Rückblick vergleichen (Backtest)</summary>
+      <div className="space-y-3 py-3 text-sm">
+        <p className="text-muted">
+          Spielt den Gewinnhandel auf den echten Kickbase-Auktionen dieser Liga nach: gekauft nur, wenn das Gebot über dem echten
+          Gewinnerpreis lag, mit dem Wissen von damals. Startelf und Spieltage sind nicht enthalten. Kein Versprechen für die Zukunft.
+        </p>
+        <Button size="sm" onClick={() => run.mutate()} disabled={run.isPending}>
+          {run.isPending ? "rechnet …" : data ? "Erneut berechnen" : "Backtest starten"}
+        </Button>
+        {run.error && <p className="text-down">{run.error.message}</p>}
+        {data && (
+          <>
+            <p className="text-xs text-muted">
+              {data.data.auctions} Auktionen, {data.windows.length} Testzeiträume, je{" "}
+              {compactMoney(data.data.start_capital_per_window ?? 0)} Startkapital
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm tabular-nums">
+                <thead className="text-left text-xs text-muted">
+                  <tr>
+                    <th className="py-1 pr-3 font-medium">Strategie</th>
+                    <th className="py-1 pr-3 font-medium">Ergebnis</th>
+                    <th className="hidden py-1 pr-3 font-medium sm:table-cell">Max. Rückgang</th>
+                    <th className="py-1 pr-3 font-medium">Käufe</th>
+                    <th className="hidden py-1 font-medium sm:table-cell">Verlusttrades</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {data.results.map((r) => (
+                    <tr key={r.strategy}>
+                      <td className="py-1.5 pr-3">{STRATEGY_LABELS[r.strategy] ?? r.strategy}</td>
+                      <td className={cn("py-1.5 pr-3", r.net_profit > 0 ? "text-up" : r.net_profit < 0 ? "text-down" : "")}>
+                        {compactMoney(r.net_profit)}
+                      </td>
+                      <td className="hidden py-1.5 pr-3 sm:table-cell">{compactMoney(r.max_drawdown)}</td>
+                      <td className="py-1.5 pr-3">
+                        {r.won} / {r.bids}
+                      </td>
+                      <td className="hidden py-1.5 sm:table-cell">{r.losing_trades}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {data.results.every((r) => r.bids === 0) && (
+              <p className="text-xs text-muted">Keine Strategie hätte geboten: Keine Auktion erfüllte die Mindestmarge.</p>
+            )}
+          </>
+        )}
+      </div>
+    </details>
+  )
 }
 
 /** Debug export for an AI review, and the import of the values it suggests, without a new build */
@@ -439,6 +593,7 @@ function TraderCard() {
                 />
                 <Stat label="Auktionen auf dem Papier" value={`${tr.learned.shadowWon} / ${tr.learned.shadowWon + tr.learned.shadowLost}`} hint="hätte das Gebot gereicht" />
               </div>
+              <BacktestPanel />
               <TraderTuning />
 
               {tr.weeks.length > 0 && (

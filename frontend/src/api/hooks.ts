@@ -17,6 +17,7 @@ import type {
   ScoutRun,
   SellResult,
   Trader,
+  TraderOptions,
   Battle,
   FairValues,
   Fixtures,
@@ -336,6 +337,35 @@ export function useSaveAutomation() {
       }),
     onSuccess: (data) => client.setQueryData(["automation-settings", leagueId], data),
   })
+}
+
+export const useTraderProfiles = () =>
+  useLeagueQuery<Record<string, TraderOptions>>(["trader-profiles"], "/automation/trader/profiles", { staleTime: Infinity })
+
+export type BacktestResult = {
+  strategy: string
+  net_profit: number
+  return_pct: number | null
+  max_drawdown: number
+  bids: number
+  won: number
+  lost: number
+  trades: number
+  losing_trades: number
+  avg_hold_days: number | null
+  exits: Record<string, number>
+}
+export type Backtest = {
+  windows: { from_day: number; to_day: number; model_rows: number }[]
+  results: BacktestResult[]
+  data: { auctions: number; players: number; start_capital_per_window?: number }
+  note: string
+}
+
+/** Replays the profit trading strategies on the league's real auctions; on demand, it takes a moment */
+export function useBacktest() {
+  const leagueId = useLeagueId()
+  return useMutation({ mutationFn: () => api<Backtest>(withLeague("/automation/trader/backtest", leagueId)) })
 }
 
 /** Imports tuned trader options (this league) and learned values (all leagues) from an export review */
