@@ -29,6 +29,8 @@ import json
 import logging
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
@@ -38,6 +40,7 @@ from sqlmodel import Session, delete, select
 from api.context import load_context
 from core import analytics, coach, risk
 from core import trader as t
+from db import exclusive
 from db.models import (
     AutomationEvent,
     League,
@@ -122,9 +125,15 @@ class TraderService:
         self._pushes: list[tuple[str, str, str, str]] = [] # Filled while planning in a thread, sent after
         self._last_debug: dict[tuple[str, str], str] = {}
         self._latest: dict[tuple[str, str], tuple[datetime, dict]] = {} # Latest round per league and user
-        ### Learning is read, changed and written back: one at a time, so no round's update is lost.
-        ### shortcut: a process lock, one backend container; several instances would need a DB lock
+        ### Learning is read, changed and written back: one at a time, so no round's update is lost
         self._learn = threading.Lock()
+
+    @contextmanager
+    def _learning(self) -> Iterator[None]:
+        """Threads of this process and every other process on the same database (flock for SQLite,
+        an advisory lock for PostgreSQL, see db.exclusive) learn one at a time."""
+        with self._learn, exclusive(self.engine, "trader-learning"):
+            yield
 
     ### ==============================================================================================
     ### Round
@@ -144,7 +153,7 @@ class TraderService:
         await asyncio.to_thread(self._settle_shadows, league, market, now, opts.shadow)
         actions, shadows = await asyncio.to_thread(self._plan, league, row, squad, budget.budget, market, now, saved)
         if opts.shadow:
-            await asyncio.to_thread(self._start_shadows, league.id, shadows)
+            await asyncio.to_thread(self._start_shadows, league.id, shadows, row.user_id)
         pause = await asyncio.to_thread(self._error_pause, league.id, row.user_id, now) if row.trader_live else None
         executed: list[Action] = []
         for action in actions:
@@ -165,7 +174,7 @@ class TraderService:
         ### Paper sales only follow sales Kickbase confirmed
         sales = [_shadow_sale(a) for a in executed if a.kind == "sell"]
         if sales and opts.shadow:
-            await asyncio.to_thread(self._start_shadows, league.id, sales)
+            await asyncio.to_thread(self._start_shadows, league.id, sales, row.user_id)
         while self._pushes:
             user_id, title, message, tag = self._pushes.pop()
             await self._push(user_id, title, message, tag)
@@ -320,7 +329,7 @@ class TraderService:
             if not rows:
                 session.commit()
                 return
-            with self._learn:
+            with self._learning():
                 base, local = self._load_states(session, league.id)
                 for entry in rows:
                     if entry.player_id in listed:
@@ -380,8 +389,9 @@ class TraderService:
     ### Shadow trades
     ### ==============================================================================================
 
-    def _start_shadows(self, league_id: str, shadows: list[ShadowTrade]) -> None:
-        """One open paper trade per player and kind, so the same listing is not counted twice."""
+    def _start_shadows(self, league_id: str, shadows: list[ShadowTrade], user_id: str = "") -> None:
+        """One open paper trade per player and kind in the league (whoever's trader started it), so the
+        same auction is never learned twice. Only the user whose trader started it sees it."""
         if not shadows:
             return
         with Session(self.engine) as session:
@@ -394,7 +404,7 @@ class TraderService:
             )
             for shadow in shadows:
                 if (shadow.player_id, shadow.kind) not in open_keys:
-                    shadow.league_id = league_id
+                    shadow.league_id, shadow.user_id = league_id, user_id
                     session.add(shadow)
                     open_keys.add((shadow.player_id, shadow.kind))
             session.commit()
@@ -418,7 +428,7 @@ class TraderService:
                     )
                 ).all()
             )
-            with self._learn: # Read, learn and write without another round in between
+            with self._learning(): # Read, learn and write without another round in between
                 base, local = self._load_states(session, league.id)
                 ratio = min(learned_sell_ratio(session) or SAFE_SELL_RATIO, SAFE_SELL_RATIO)
                 for s in rows:
@@ -1009,7 +1019,7 @@ class TraderService:
                 entry.details = {**entry.details, "received_known": received is not None, "cost": cost}
                 session.add(entry)
             if bought is not None and bought.purpose == "profit" and profit is not None:
-                with self._learn:
+                with self._learning():
                     self._save_state(session, t.after_sale(t.Learned.load(load_state(session, STATE_KEY)), profit))
             session.commit()
         ### The sell ratio is learned from these events (sync.learning), only with booked proceeds
@@ -1042,7 +1052,7 @@ class TraderService:
             trades = session.exec(
                 select(TradeLog).where(TradeLog.user_id == user_id, TradeLog.league_id == league_id, TradeLog.at >= since).order_by(TradeLog.at)
             ).all()
-            shadows = session.exec(select(ShadowTrade).where(ShadowTrade.league_id == league_id, ShadowTrade.at >= since).order_by(ShadowTrade.at)).all()
+            shadows = session.exec(select(ShadowTrade).where(ShadowTrade.league_id == league_id, ShadowTrade.user_id == user_id, ShadowTrade.at >= since).order_by(ShadowTrade.at)).all()
             events = session.exec(
                 select(AutomationEvent)
                 .where(AutomationEvent.user_id == user_id, AutomationEvent.league_id == league_id, AutomationEvent.at >= since)
@@ -1093,7 +1103,7 @@ class TraderService:
                 row.trader_options = t.Options.load({**t.Options.load(row.trader_options).__dict__, **options}).__dict__
                 session.add(row)
             if learned is not None:
-                with self._learn:
+                with self._learning():
                     current = t.Learned.load(load_state(session, STATE_KEY)).dump()
                     self._save_state(session, t.Learned.load({**current, **learned}))
                     session.commit()
@@ -1237,7 +1247,7 @@ class TraderService:
         """Back to the starting values: `global` (the base model, all leagues) or `league` (this
         league's bid heights). The values before go to the log, an import restores them."""
         key = STATE_KEY if scope == "global" else f"{STATE_KEY}:{league_id}"
-        with self._learn, Session(self.engine) as session:
+        with self._learning(), Session(self.engine) as session:
             before = t.Learned.load(load_state(session, key)).dump()
             self._save_state(session, t.Learned(), key)
             session.commit()
@@ -1301,7 +1311,7 @@ class TraderService:
                 )
             )
             shadows = list(
-                session.exec(select(ShadowTrade).where(ShadowTrade.league_id == league_id).order_by(ShadowTrade.at.desc()))
+                session.exec(select(ShadowTrade).where(ShadowTrade.league_id == league_id, ShadowTrade.user_id == user_id).order_by(ShadowTrade.at.desc()))
             )
             names = dict(
                 session.exec(select(Player.id, Player.last_name).where(Player.id.in_([s.player_id for s in shadows[:30]]))).all()

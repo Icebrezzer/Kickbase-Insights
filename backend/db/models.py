@@ -432,6 +432,8 @@ class ShadowTrade(SQLModel, table=True):
     bid, or a real sale, followed to see what the player did afterwards. Teaches the trader."""
     id: int | None = Field(default=None, primary_key=True)
     league_id: str = Field(index=True)
+    ### Whose trader started it: only that user sees it. "" for paper trades from before this column
+    user_id: str = Field(default="", index=True)
     player_id: str = Field(index=True)
     at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime, index=True)
     kind: str # buy or sell

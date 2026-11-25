@@ -262,6 +262,15 @@ def main() -> None:
             settled = s.exec(select(TradeLog).where(TradeLog.player_id == target.id, TradeLog.kind == "bid")).one()
         check(settled.status == "open", f"Kickbase shows the bid: settled as open ({settled.status})")
 
+        ### A rate limit (HTTP 429) is a refusal: failed, not unknown, nothing sent twice
+        async def rate_limited(league_id, player_id, price):
+            raise KbError("too many requests", 429)
+
+        kb_client.place_offer = rate_limited
+        limited = Action("bid", "lineup", target.id, target.last_name, target.market_value, target.market_value, reason="test")
+        check(client.portal.call(state.automation.trader._execute, league, "1001", kb_client, limited) == "failed", "HTTP 429 counts as failed")
+        kb_client.place_offer = real_offer
+
         refused_bid = Action("bid", "lineup", "999999", "Niemand", 1_000_000, 1_000_000, reason="test")
         check(client.portal.call(state.automation.trader._execute, league, "1001", kb_client, refused_bid) == "failed", "a refused call is failed")
 
@@ -352,8 +361,8 @@ def main() -> None:
                 if pid not in listed_now and pid not in traded and len(points) > 30
             ][:2]
             old = utcnow() - timedelta(days=6)
-            s.add(ShadowTrade(league_id="4242", player_id=quiet[0], kind="sell", purpose="room", market_value=1_000_000, at=old))
-            s.add(ShadowTrade(league_id="4242", player_id=quiet[1], kind="buy", purpose="profit", bid=1_000_000,
+            s.add(ShadowTrade(league_id="4242", user_id="1001", player_id=quiet[0], kind="sell", purpose="room", market_value=1_000_000, at=old))
+            s.add(ShadowTrade(league_id="4242", user_id="1001", player_id=quiet[1], kind="buy", purpose="profit", bid=1_000_000,
                               market_value=1_000_000, forecast_gain=200_000, free_agent=True, at=old))
             s.commit()
         empty_market = client.portal.call(kb_client.market, "4242")
@@ -418,6 +427,15 @@ def main() -> None:
             gap_events = s.exec(select(AutomationEvent).where(AutomationEvent.key.like("trader-gaps:%"))).all()
         check(len(gap_events) == 1 and len(state.automation.trader._pushes) == notes_before + 1, "gap warning once, only close to the matchday")
         state.automation.trader._pushes.clear()
+
+        ### Paper trades of another member's trader stay his: not in this user's view or export
+        with Session(state.engine) as s:
+            s.add(ShadowTrade(league_id="4242", user_id="9999", player_id="secret", kind="buy", purpose="profit", bid=1, market_value=1))
+            s.commit()
+        mine = client.get("/api/automation/trader/export?days=1").json()
+        trader_view = client.get("/api/automation/trader").json()
+        check(all(sh["player_id"] != "secret" for sh in mine["shadows"]) and all(sh["playerId"] != "secret" for sh in trader_view["shadows"]),
+              "another user's paper trades are not shown")
 
         ### Strategy profiles and the backtest on the league's real auctions
         profiles = client.get("/api/automation/trader/profiles").json()
