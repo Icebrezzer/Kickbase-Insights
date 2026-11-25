@@ -182,12 +182,12 @@ class AutomationSettings(BaseModel):
     sell_advice_hour: int = 20
     ### Server-wide kill switch of the autotrader. Off stops every bid and sale it would make
     trader: bool = True
-    ### Kickbase user names or IDs who may import learned trader values, which all leagues share. Empty: everyone
+    ### Kickbase user names or IDs who may import learned trader values, which all leagues share. Empty: nobody
     trader_admins: Annotated[list[str], NoDecode, BeforeValidator(_comma_separated)] = []
 
     def may_tune_learning(self, user_id: str, user_name: str) -> bool:
         wanted = {entry.casefold() for entry in self.trader_admins}
-        return not wanted or user_id.casefold() in wanted or user_name.casefold() in wanted
+        return user_id.casefold() in wanted or user_name.casefold() in wanted
 
 
 class Settings(BaseSettings):

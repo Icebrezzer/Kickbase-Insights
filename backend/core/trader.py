@@ -62,28 +62,57 @@ class Options:
     stop_loss: int = 3_000_000 # Realized weekly loss that pauses the profit trading
     sell_window: int = 20 # Minutes before an auction ends when a player is sold to make room
     starter_lock: int = 60 # Minutes before the first kick-off from which starters are kept
+    min_roi: float = 2.0 # Net return a profit buy must make at least, in percent of the bid
+    credit_mode: int = 1 # 0: never on credit, 1: only for the eleven and substitutes, 2: also profit trades
     shadow: bool = True # Learn from paper trades too
+    rescue_override: bool = False # Rescue sales may also sell locked players (starters, fresh buys)
 
     @classmethod
     def load(cls, data: dict | None) -> Options:
-        """Unknown keys are dropped, every value is clamped: the stored JSON is not trusted."""
-        data = data or {}
+        """Unknown keys are dropped, every value is clamped, junk keeps the default: the stored JSON
+        is not trusted. Booleans accept true/false, 1/0 and their strings only ("false" is False)."""
+        data = data if isinstance(data, dict) else {}
         values = {}
         for f in fields(cls):
             if f.name not in data or data[f.name] is None:
                 continue
             raw = data[f.name]
-            if f.name == "shadow":
-                values[f.name] = bool(raw)
+            if f.name in BOOL_OPTIONS:
+                flag = parse_bool(raw)
+                if flag is not None:
+                    values[f.name] = flag
                 continue
-            try:
-                number = float(raw)
-            except (TypeError, ValueError):
+            number = parse_number(raw)
+            if number is None:
                 continue
             low, high = OPTION_LIMITS[f.name]
             number = min(max(number, low), high)
-            values[f.name] = number if f.name == "min_gain" else int(number)
+            values[f.name] = number if f.name in ("min_gain", "min_roi") else int(number)
         return cls(**values)
+
+
+BOOL_OPTIONS = ("shadow", "rescue_override")
+
+
+def parse_bool(raw: object) -> bool | None:
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)) and raw in (0, 1):
+        return bool(raw)
+    if isinstance(raw, str) and raw.strip().lower() in ("true", "false", "1", "0"):
+        return raw.strip().lower() in ("true", "1")
+    return None
+
+
+def parse_number(raw: object) -> float | None:
+    """A finite number, or None. Booleans are no numbers here, NaN and infinity are refused."""
+    if isinstance(raw, bool):
+        return None
+    try:
+        number = float(raw) # type: ignore[arg-type]
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
 
 
 OPTION_LIMITS: dict[str, tuple[float, float]] = {
@@ -100,6 +129,8 @@ OPTION_LIMITS: dict[str, tuple[float, float]] = {
     "stop_loss": (0, 100_000_000),
     "sell_window": (5, 180),
     "starter_lock": (0, 24 * 60),
+    "min_roi": (0.0, 100.0),
+    "credit_mode": (0, 2),
 }
 
 
@@ -164,25 +195,26 @@ def sell_order(squad: Iterable[Candidate], min_play: float) -> list[Candidate]:
     return sorted(squad, key=lambda p: (p.fit, p.regular(min_play), p.in_best, p.today + p.forecast, p.expected))
 
 
-def pick_sale(
-    squad: Sequence[Candidate], target: Candidate, min_play: float, swap_edge: int, replaced: str | None = None
-) -> Candidate | None:
-    """The one player to sell for `target`.
+def pick_sale(squad: Sequence[Candidate], target: Candidate, min_play: float, swap_edge: int) -> Candidate | None:
+    """The one player to sell for `target`, an auction that may still be lost.
 
-    For a lineup purchase the player he pushes out goes first. Otherwise only a player who is unfit,
-    no regular, or clearly rises less than the target (`swap_edge` per day, learned) is given up,
-    never one of the best eleven while he is fit.
+    `squad` is the confirmed squad only: the target is no cover and no starter yet. So the sale must
+    leave the team as good as it is without him: never a fit player of the best eleven (also not the
+    one the target would push out), never the last fit cover of a position, never a new gap in the
+    eleven. Only a player who is unfit, no regular, or clearly rises less than the target (`swap_edge`
+    per day, learned) is given up.
     """
-    options = [p for p in squad if not p.locked and p.player_id != target.player_id and keeps_cover(squad, p)]
-    if replaced:
-        pushed = next((p for p in options if p.player_id == replaced), None)
-        if pushed is not None:
-            return pushed
+    gaps = best_of(squad).empty_slots if squad else 0
+    options = [
+        p for p in squad
+        if not p.locked and p.player_id != target.player_id and keeps_cover(squad, p)
+        and best_of([o for o in squad if o is not p]).empty_slots <= gaps
+    ]
     for p in sell_order(options, min_play):
+        if p.fit and p.in_best:
+            continue
         if not p.fit or not p.regular(min_play):
             return p
-        if p.in_best:
-            continue
         if target.forecast >= p.forecast + swap_edge and target.today >= p.today:
             return p
     return None
@@ -274,9 +306,27 @@ def cover_target(squad: Sequence[Candidate], market: Iterable[Candidate], opts: 
     return min(options, key=lambda c: (max(c.bid_low, c.price, c.value), -c.expected), default=None)
 
 
+def liquidation_value(squad: Sequence[Candidate], ratio: float, max_sales: int) -> int:
+    """What selling players really brings in before a deadline, sold one after the other in the sell
+    order: never a locked player, never one of the best eleven, never the last fit cover of a position,
+    at most `max_sales` sales, each valued at its value after a forecast fall times the sell ratio.
+    Only the confirmed squad counts, open bids are no collateral."""
+    remaining = list(squad)
+    total = sales = 0
+    for p in sell_order(squad, 1.0):
+        if sales >= max_sales:
+            break
+        if p.locked or p.in_best or not keeps_cover(remaining, p):
+            continue
+        total += int(max(p.value + min(p.forecast, 0), 0) * ratio)
+        remaining.remove(p)
+        sales += 1
+    return total
+
+
 def credit(budget: int, team_value: int, repayable: int) -> int:
     """The money the trader may spend beyond the balance: up to the max bid of the 33 % rule, but
-    never more debt than selling the players outside the best eleven pays back before the deadline."""
+    never more debt than the simulated liquidation (`liquidation_value`) pays back before the deadline."""
     room = analytics.max_bid(budget, team_value) - max(budget, 0)
     return max(0, min(room, repayable - max(0, -budget)))
 
@@ -288,13 +338,59 @@ def repay_from(deadline: datetime) -> datetime:
     return min(update, deadline - timedelta(hours=1))
 
 
-def profit_margin(target: Candidate, bid: int) -> int:
-    """Forecast gain over the holding time minus what the bid is above the market value."""
-    return target.gain - max(bid - target.value, 0)
+### Deadline phases. Stateless: rebuilt from the clock and the deadline every round, also after a restart
+PREPARE_BEFORE = timedelta(hours=24)
+FINAL_BEFORE = timedelta(minutes=60)
 
 
-def is_profit_buy(target: Candidate, bid: int, min_margin: int) -> bool:
-    return target.fit and target.forecast > 0 and target.today >= 0 and profit_margin(target, bid) >= min_margin
+def phase(now: datetime, deadline: datetime | None) -> str:
+    """normal; prepare (24 h before: no credit for profit trades); repay (from the last market value
+    update: debt is paid back, no credit for auctions ending before the deadline, profit bids only on
+    auctions ending after it); final (last hour: no new profit bids, no credit)."""
+    if deadline is None or now >= deadline:
+        return "normal"
+    if deadline - now <= FINAL_BEFORE:
+        return "final"
+    if now >= repay_from(deadline):
+        return "repay"
+    if deadline - now <= PREPARE_BEFORE:
+        return "prepare"
+    return "normal"
+
+
+### ===============================================================================
+### Net profit: what a profit buy brings after selling it again
+### ===============================================================================
+
+
+def expected_proceeds(target: Candidate, ratio: float) -> int:
+    """The value after the holding time, sold at the (conservative) instant sale ratio."""
+    return int(max(target.value + target.gain, 0) * ratio)
+
+
+def expected_profit(target: Candidate, bid: int, ratio: float) -> int:
+    """Net: proceeds of the sale minus the bid. Kickbase charges no fee, the sale ratio is the cost."""
+    return expected_proceeds(target, ratio) - bid
+
+
+def max_profit_bid(target: Candidate, ratio: float, min_margin: int, min_roi: float) -> int:
+    """The most a profit buy may cost: it still keeps `min_margin` euro and `min_roi` (share) net."""
+    proceeds = expected_proceeds(target, ratio)
+    limit = min(proceeds - min_margin, proceeds / (1 + max(min_roi, 0.0)))
+    return int(limit // coach.BID_STEP * coach.BID_STEP)
+
+
+def is_profit_buy(target: Candidate, bid: int, min_margin: int, ratio: float, min_roi: float) -> bool:
+    if bid <= 0 or not target.fit or target.forecast <= 0 or target.today < 0:
+        return False
+    profit = expected_profit(target, bid, ratio)
+    return profit >= min_margin and profit >= bid * min_roi
+
+
+def profit_rank(target: Candidate, bid: int, ratio: float) -> float:
+    """Net return per euro and market value update: a cheap player with a good return beats an
+    expensive one that only makes more in absolute terms."""
+    return expected_profit(target, bid, ratio) / max(bid, 1) / PROFIT_HOLD
 
 
 ### ===============================================================================
@@ -302,20 +398,21 @@ def is_profit_buy(target: Candidate, bid: int, min_margin: int) -> bool:
 ### ===============================================================================
 
 
-def bid_for(target: Candidate, extra: float, cap: int | None, profit: bool) -> int | None:
+def bid_for(target: Candidate, extra: float, cap: int | None) -> int | None:
     """Between the league's usual markup (`bid_low`) and enough to beat the likely bidders
     (`bid_high`); `extra` (0..1) is learned from won and lost auctions per price class.
 
-    A profit buy keeps at least half of the forecast gain, and no bid goes beyond `cap`."""
+    Rounded up to the bid step and checked after rounding: never below the minimum, never above
+    `cap` (the smallest of every limit). No bid without a valid price."""
     low = max(target.bid_low, target.price, target.value)
+    if low <= 0:
+        return None
     high = max(target.bid_high, low)
     bid = low + min(max(extra, 0.0), 1.0) * (high - low)
-    if profit:
-        bid = min(bid, target.value + max(target.gain, 0) / 2)
     bid = math.ceil(bid / coach.BID_STEP) * coach.BID_STEP
-    if bid < low:
-        return None
     if cap is not None and bid > cap:
+        bid = cap // coach.BID_STEP * coach.BID_STEP # The most the cap allows, if still a valid bid
+    if bid < low:
         return None
     return int(bid)
 
@@ -350,25 +447,28 @@ class Learned:
 
     @property
     def gain_scale(self) -> float:
-        """The forecast gain is trusted this much. 1.0 until there are enough observations."""
-        return min(1.2, max(0.3, self.gain_ratio)) if self.gain_samples >= MIN_SAMPLES else 1.0
+        """The forecast gain is trusted this much: conservative, a forecast that came true more than
+        promised is not trusted beyond 1.0. 1.0 until there are enough observations."""
+        return min(1.0, max(0.3, self.gain_ratio)) if self.gain_samples >= MIN_SAMPLES else 1.0
 
     @classmethod
-    def load(cls, data: dict) -> Learned:
-        """Junk is dropped and every value clamped: it is also what an import sends."""
+    def load(cls, data: dict | None) -> Learned:
+        """Junk, NaN and infinity are dropped and every value clamped: it is also what an import sends."""
+        data = data if isinstance(data, dict) else {}
         extra: tuple[float, ...] = cls.extra
         with contextlib.suppress(TypeError, ValueError):
-            given = tuple(min(1.0, max(0.0, float(x))) for x in data.get("extra", ()))
-            if len(given) == len(coach.PRICE_CLASSES):
-                extra = given
+            given = tuple(parse_number(x) for x in data.get("extra", ()))
+            if len(given) == len(coach.PRICE_CLASSES) and all(x is not None for x in given):
+                extra = tuple(min(1.0, max(0.0, x)) for x in given) # type: ignore[type-var]
         known = {f.name for f in fields(cls)} - {"extra"}
         values = {}
         for f in fields(cls):
             if f.name in known and f.name in data:
-                with contextlib.suppress(TypeError, ValueError):
-                    value = type(getattr(cls, f.name))(data[f.name])
-                    low, high = LEARNED_LIMITS.get(f.name, (0, math.inf))
-                    values[f.name] = type(value)(min(max(value, low), high))
+                number = parse_number(data[f.name])
+                if number is None:
+                    continue
+                low, high = LEARNED_LIMITS.get(f.name, (0, 10**9))
+                values[f.name] = type(getattr(cls, f.name))(min(max(number, low), high))
         return cls(extra=extra, **values)
 
     def dump(self) -> dict:
@@ -415,12 +515,14 @@ def after_sale(state: Learned, profit: int, weight: float = 1.0) -> Learned:
     return replace(state, min_margin=int(min(1_500_000, max(50_000, state.min_margin * factor))))
 
 
-def after_forecast(state: Learned, forecast_gain: int, actual_gain: int) -> Learned:
-    """Smooths how much of a forecast gain really came. Tiny forecasts say nothing and are skipped."""
+def after_forecast(state: Learned, forecast_gain: int, actual_gain: int, weight: float = 1.0) -> Learned:
+    """Smooths how much of a forecast gain really came, over the same horizon it was made for
+    (PROFIT_HOLD updates). Tiny forecasts say nothing and are skipped; paper trades weigh `weight`."""
     if forecast_gain < 50_000:
         return state
     ratio = min(2.0, max(-1.0, actual_gain / forecast_gain))
-    return replace(state, gain_ratio=round(0.9 * state.gain_ratio + 0.1 * ratio, 4), gain_samples=state.gain_samples + 1)
+    alpha = 0.1 * min(max(weight, 0.0), 1.0)
+    return replace(state, gain_ratio=round((1 - alpha) * state.gain_ratio + alpha * ratio, 4), gain_samples=state.gain_samples + 1)
 
 
 def after_regret(state: Learned, change_after_sale: int) -> Learned:
@@ -446,8 +548,13 @@ class Trade:
     points_gain: float = 0
 
 
+### A Kickbase call that was sent but not (yet) confirmed: checked against Kickbase in the next round
+UNSETTLED = ("pending", "unknown")
+
+
 def week_of(at: datetime) -> str:
-    year, week, _ = at.isocalendar()
+    """ISO week in German time, so a Sunday evening sale is not filed under the next week."""
+    year, week, _ = at.astimezone(analytics.MARKET_VALUE_TIMEZONE).isocalendar()
     return f"{year}-W{week:02d}"
 
 
@@ -468,6 +575,8 @@ def weekly(trades: Iterable[Trade]) -> list[dict]:
                 w["shadow_profit"] += t.profit or 0
         elif t.status == "planned":
             w["planned"] += 1
+        elif t.status in UNSETTLED or t.status == "failed":
+            continue # Not a trade (yet): never counted, never 0 € profit
         elif t.kind == "bid":
             w["bids"] += 1
             if t.status == "won":

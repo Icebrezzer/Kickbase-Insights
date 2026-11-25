@@ -38,7 +38,7 @@ def main() -> None:
     o = t.Options.load({"min_gain": "7.5", "daily_bids": 999, "sell_window": 1, "nonsense": 1, "reserve": "x", "shadow": 0})
     assert (o.min_gain, o.daily_bids, o.sell_window, o.reserve, o.shadow) == (7.5, 30, 5, 0, False), o
     assert t.Options.load(None) == OPTS
-    assert set(t.OPTION_LIMITS) | {"shadow"} == {f for f in OPTS.__dataclass_fields__}
+    assert set(t.OPTION_LIMITS) | set(t.BOOL_OPTIONS) == {f for f in OPTS.__dataclass_fields__}
 
     ### Cover: the second goalkeeper is the only substitute, he stays; an injured one may always go
     assert not t.keeps_cover(s, by["g2"])
@@ -102,14 +102,15 @@ def main() -> None:
     chosen = t.cover_target(no_keeper, market, OPTS)
     assert chosen is not None and chosen.player_id == "k1", chosen
 
-    ### The price: between low and high by the learned extra, capped, and a profit buy keeps half the gain
-    m = p("m", 3, 10, value=10_000_000, price=10_000_000, bid_low=10_300_000, bid_high=11_000_000, gain=800_000, forecast=400_000)
-    assert t.bid_for(m, 0.0, None, profit=False) == 10_300_000
-    assert t.bid_for(m, 1.0, None, profit=False) == 11_000_000
-    assert t.bid_for(m, 1.0, None, profit=True) == 10_400_000, t.bid_for(m, 1.0, None, profit=True)
-    assert t.bid_for(m, 0.0, 10_000_000, profit=False) is None, "cap below the minimum"
-    assert t.is_profit_buy(m, 10_300_000, 150_000)
-    assert not t.is_profit_buy(replace(m, today=-10_000), 10_300_000, 150_000), "falling today"
+    ### The price: between low and high by the learned extra, never above the cap, never below the minimum
+    m = p("m", 3, 10, value=10_000_000, price=10_000_000, bid_low=10_300_000, bid_high=11_000_000, gain=1_800_000, forecast=400_000)
+    assert t.bid_for(m, 0.0, None) == 10_300_000
+    assert t.bid_for(m, 1.0, None) == 11_000_000
+    assert t.bid_for(m, 1.0, 10_555_000) == 10_550_000, "held at the cap, rounded down to the bid step"
+    assert t.bid_for(m, 0.0, 10_000_000) is None, "cap below the minimum"
+    ### Net: (10 + 1.8 Mio.) x 0.9 = 10.62 Mio. proceeds, 320k profit at 10.3 Mio.
+    assert t.is_profit_buy(m, 10_300_000, 150_000, 0.9, 0.02)
+    assert not t.is_profit_buy(replace(m, today=-10_000), 10_300_000, 150_000, 0.9, 0.02), "falling today"
 
     ### Learning: lost raises the bid of that price class, won lowers it; shadows count half
     state = t.Learned()

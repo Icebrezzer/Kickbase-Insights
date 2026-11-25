@@ -624,12 +624,12 @@ class SellOut(Schema):
 
 class TraderOptionsIn(Schema):
     """The autotrader's thresholds, see core.trader.Options. The bounds match its OPTION_LIMITS."""
-    min_gain: float = Field(2.0, ge=0, le=100) # Expected points the eleven gains at least
+    min_gain: float = Field(2.0, ge=0, le=100, allow_inf_nan=False) # Expected points the eleven gains at least
     max_cost_per_point: int = Field(300_000, ge=0, le=50_000_000) # € above the replaced player per point
     min_avg_edge: int = Field(10, ge=0, le=200) # % better season average than the replaced player
     min_play: int = Field(60, ge=0, le=100) # % of the club's last five matches
     lineup_share: int = Field(100, ge=10, le=100) # % of the free budget per lineup bid
-    profit_share: int = Field(60, ge=10, le=100) # % of the free budget per profit bid
+    profit_share: int = Field(60, ge=10, le=100) # % of team value plus balance all profit trades together
     reserve: int = Field(0, ge=0, le=500_000_000) # € never spent
     cover_max_price: int = Field(3_000_000, ge=0, le=50_000_000)
     daily_bids: int = Field(6, ge=0, le=30)
@@ -637,7 +637,10 @@ class TraderOptionsIn(Schema):
     stop_loss: int = Field(3_000_000, ge=0, le=100_000_000) # Weekly loss that pauses profit trading, 0 never
     sell_window: int = Field(20, ge=5, le=180) # Minutes before the auction ends
     starter_lock: int = Field(60, ge=0, le=1440) # Minutes before the first kick-off
+    min_roi: float = Field(2.0, ge=0, le=100, allow_inf_nan=False) # % net return of a profit buy
+    credit_mode: int = Field(1, ge=0, le=2) # 0 no credit, 1 eleven and substitutes, 2 also profit trades
     shadow: bool = True
+    rescue_override: bool = False # Rescue sales may sell locked players
 
 
 class AutomationSettingsIn(Schema):
@@ -746,6 +749,7 @@ class TraderOut(Schema):
     shadow_summary: ShadowSummaryOut = Field(default_factory=lambda: ShadowSummaryOut())
     learned: TraderLearnedOut
     paused: bool = False # Profit trading paused after a weekly loss
+    pause_reason: str | None = None # Live trading paused automatically, e.g. after repeated API errors
     enabled_on_server: bool = True
 
 

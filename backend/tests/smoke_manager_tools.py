@@ -168,7 +168,7 @@ def main() -> None:
         ### Autotrader: the dry run sends nothing to Kickbase, the live run bids and sells
         from sqlmodel import Session, select
 
-        from db.models import League, TradeLog
+        from db.models import League, TradeLog, TraderDebug
 
         current = client.get("/api/automation/settings").json()
         on = client.put("/api/automation/settings", json={**current, "trader": True, "traderLive": False})
@@ -232,6 +232,90 @@ def main() -> None:
         check({r.kind for r in logged} == {"bid", "sell"}, "live bid and sale are logged")
         live = [*live, bid, sale]
 
+        ### Unclear outcome: no answer from Kickbase leaves the entry `unknown`, the player blocked, and
+        ### the next round settles it against Kickbase instead of sending it again
+        from datetime import datetime, timedelta
+
+        from kickbase import KickbaseError as KbError
+
+        target = next(p for p in placed.players if p.seller is None and p.own_bid("1001") is None and p.id != free_agent.id)
+        real_offer = kb_client.place_offer
+
+        async def lost_answer(league_id, player_id, price):
+            await real_offer(league_id, player_id, price) # Reaches Kickbase, but the answer is lost
+            raise KbError("timeout")
+
+        kb_client.place_offer = lost_answer
+        lost = Action("bid", "lineup", target.id, target.last_name, target.market_value, target.market_value, reason="test")
+        outcome = client.portal.call(state.automation.trader._execute, league, "1001", kb_client, lost)
+        kb_client.place_offer = real_offer
+        check(outcome == "unknown", f"a lost answer is unknown, not failed ({outcome})")
+        squad_x = client.portal.call(kb_client.manager_squad, "4242", "1001")
+        market_x = client.portal.call(kb_client.market, "4242")
+        _, _ = state.automation.trader._plan(league, state.automation.get_settings("1001", "4242"), squad_x, 200_000_000, market_x, utcnow())
+        with Session(state.engine) as s:
+            debug = s.exec(select(TraderDebug).order_by(TraderDebug.id.desc())).first()
+        check(target.id in {p["id"] for p in debug.data["pending"]} and all(a["player_id"] != target.id for a in debug.data["actions"]),
+              "an unknown bid is not sent twice")
+        state.automation.trader._settle(league, "1001", squad_x, market_x, utcnow())
+        with Session(state.engine) as s:
+            settled = s.exec(select(TradeLog).where(TradeLog.player_id == target.id, TradeLog.kind == "bid")).one()
+        check(settled.status == "open", f"Kickbase shows the bid: settled as open ({settled.status})")
+
+        refused_bid = Action("bid", "lineup", "999999", "Niemand", 1_000_000, 1_000_000, reason="test")
+        check(client.portal.call(state.automation.trader._execute, league, "1001", kb_client, refused_bid) == "failed", "a refused call is failed")
+
+        ### A sale whose balance cannot be read afterwards is still a sale, with unknown proceeds (no 0 €)
+        real_budget = kb_client.own_budget
+        calls = {"n": 0}
+
+        async def flaky_budget(league_id):
+            calls["n"] += 1
+            if calls["n"] > 1:
+                raise KbError("timeout")
+            return await real_budget(league_id)
+
+        seller = client.portal.call(kb_client.manager_squad, "4242", "1001").players[-1]
+        kb_client.own_budget = flaky_budget
+        flaky = Action("sell", "room", seller.id, seller.last_name, seller.market_value, seller.market_value, reason="test", cost=1)
+        check(client.portal.call(state.automation.trader._execute, league, "1001", kb_client, flaky) == "done", "the sale went through")
+        kb_client.own_budget = real_budget
+        with Session(state.engine) as s:
+            sold = s.exec(select(TradeLog).where(TradeLog.player_id == seller.id, TradeLog.kind == "sell")).one()
+        check(sold.status == "sold" and sold.profit is None and sold.details["received_known"] is False, f"unknown proceeds stay unknown {sold.details}")
+        live = [*live, lost, flaky]
+
+        ### Two hours before the deadline with a negative balance: rescue sales only, no bid, starters kept
+        coach_view = client.get("/api/coach").json()
+        deadline_at = datetime.fromisoformat(coach_view["matchday"]["deadline"].replace("Z", "+00:00"))
+        rescue_plan, _ = state.automation.trader._plan(
+            league, state.automation.get_settings("1001", "4242"), squad_x, -3_000_000, market_x, deadline_at - timedelta(hours=2)
+        )
+        print("    rescue:", [(a.kind, a.purpose, a.name, a.price) for a in rescue_plan])
+        check(rescue_plan and all(a.kind in ("sell", "withdraw") for a in rescue_plan), "negative balance before the deadline: no bids, rescue only")
+        check(any(a.purpose == "rescue" for a in rescue_plan), "rescue sales planned")
+        far_plan, _ = state.automation.trader._plan(
+            league, state.automation.get_settings("1001", "4242"), squad_x, -3_000_000, market_x, deadline_at - timedelta(days=3)
+        )
+        check(not any(a.purpose == "rescue" for a in far_plan), "no rescue sales days before the deadline")
+
+        ### Dry run entries use up no live limits and block no player
+        with Session(state.engine) as s:
+            s.add(TradeLog(user_id="1001", league_id="4242", player_id="dry", kind="sell", purpose="turn", status="planned", price=1, market_value=1))
+            s.add(TradeLog(user_id="1001", league_id="4242", player_id="dry", kind="bid", purpose="profit", status="planned", price=1, market_value=1))
+            s.commit()
+        plan_after, _ = state.automation.trader._plan(league, state.automation.get_settings("1001", "4242"), squad_x, 200_000_000, market_x, utcnow())
+        state.automation.trader._last_debug.clear() # Log this round even if nothing changed
+        state.automation.trader._plan(league, state.automation.get_settings("1001", "4242"), squad_x, 200_000_000, market_x, utcnow())
+        with Session(state.engine) as s:
+            debug = s.exec(select(TraderDebug).order_by(TraderDebug.id.desc())).first()
+            bids = s.exec(select(TradeLog).where(TradeLog.kind == "bid")).all()
+        real_bids = sum(1 for r in bids if r.status not in ("planned", "failed"))
+        planned_now = sum(1 for a in [*debug.data["actions"], *debug.data["risk_blocked"]] if a["kind"] == "bid")
+        dry_bids = sum(1 for r in bids if r.status == "planned")
+        check(dry_bids > 0 and debug.data["bids_left"] + planned_now == 6 - real_bids,
+              f"daily bids count real calls only ({real_bids} real, {dry_bids} dry run)")
+
         ### Shadow trades: a paper sale and a paper purchase of a Kickbase listing, both a few days old,
         ### are settled into results and teach the trader
         from datetime import timedelta
@@ -262,7 +346,11 @@ def main() -> None:
         check(trader.status_code == 200, f"trader view ({trader.status_code} {trader.text[:300]})")
         tj = trader.json()
         check(len(tj["learned"]["extra"]) == 3 and tj["enabledOnServer"], "trader view has the learned bids per price class")
-        check(len(tj["trades"]) == len(dry) + len(live), f"trader view lists {len(tj['trades'])} trades")
+        with Session(state.engine) as s:
+            rows = s.exec(select(TradeLog).where(TradeLog.user_id == "1001", TradeLog.league_id == "4242")).all()
+        check(len(tj["trades"]) == min(len(rows), 40), f"trader view lists {len(tj['trades'])} trades")
+        check(not any(w["profit"] for w in tj["weeks"]) or all(r.profit is not None for r in rows if r.kind == "sell" and r.status == "sold"),
+              "unknown profits are not booked")
         check(tj["weeks"] and tj["weeks"][0]["sales"] >= 1 and tj["weeks"][0]["received"] > 0, f"week stats {tj['weeks'][:1]}")
         check(tj["learned"]["regretSamples"] >= 1 and tj["learned"]["shadowWon"] >= 1, f"shadows taught the trader {tj['learned']}")
         check(tj["shadowSummary"]["done"] >= 1 and len(tj["shadows"]) >= 2, f"shadow summary {tj['shadowSummary']}")
@@ -275,7 +363,11 @@ def main() -> None:
         export = client.get("/api/automation/trader/export?days=7")
         ej = export.json()
         check(export.status_code == 200 and ej["rounds"] and "decision" in ej["rounds"][-1]["data"]["market"][0], "export holds the decisions of the rounds")
-        imported = client.post("/api/automation/trader/import", json={"options": {"min_gain": 4.5, "daily_bids": 999, "nope": 1}, "learned": {"swap_edge": 1, "extra": [0.2, 0.5, 2]}})
+        tuned = {"options": {"min_gain": 4.5, "daily_bids": 999, "nope": 1}, "learned": {"swap_edge": 1, "extra": [0.2, 0.5, 2]}}
+        refused = client.post("/api/automation/trader/import", json=tuned)
+        check(refused.status_code == 403, f"without KBI_AUTOMATION__TRADER_ADMINS nobody changes the shared learning ({refused.status_code})")
+        state.settings.automation.trader_admins = ["1001"]
+        imported = client.post("/api/automation/trader/import", json=tuned)
         ij = imported.json()
         check(imported.status_code == 200, f"import ({imported.status_code} {imported.text[:200]})")
         check(ij["options"]["min_gain"] == 4.5 and ij["options"]["daily_bids"] == 30 and ij["ignored"] == ["options.nope"], f"options merged and clamped {ij}")
