@@ -206,7 +206,10 @@ function SettingsCard({ initial }: { initial: AutomationSettings }) {
               <OptionGroup title="Gewinnhandel">
                 <OptionField label="Höchstens gebunden in Gewinnhandel (% von Teamwert + Kontostand)" hint="Alle Gewinnkäufe und offenen Gewinn-Gebote zusammen" value={opts.profitShare} min={10} max={100} onCommit={(profitShare) => setOption({ profitShare })} />
                 <OptionField label="Mindestrendite netto (%)" hint="Nach Sofortverkauf (konservativ 90 % des Marktwerts), bezogen auf das Gebot" value={opts.minRoi} min={0} max={100} decimals onCommit={(minRoi) => setOption({ minRoi })} />
-                <OptionField label="Wochen-Stop-Loss (€, 0 = aus)" value={opts.stopLoss} min={0} max={100_000_000} money onCommit={(stopLoss) => setOption({ stopLoss })} />
+                <OptionField label="Wochen-Stop-Loss (€, 0 = aus)" hint="Realisierte Verluste des Gewinnhandels plus Buchverluste offener Positionen" value={opts.stopLoss} min={0} max={100_000_000} money onCommit={(stopLoss) => setOption({ stopLoss })} />
+                <OptionField label="Verkauf bei Verlust je Position (%, 0 = aus)" hint="Netto nach Sofortverkauf, gemessen am Kaufpreis, solange die Prognose nicht steigt" value={opts.positionStop} min={0} max={100} onCommit={(positionStop) => setOption({ positionStop })} />
+                <OptionField label="Trailing-Stop unter dem Höchststand (%, 0 = aus)" hint="Sichert einen Gewinn, wenn der Marktwert vom Höchststand seit dem Kauf so weit fällt" value={opts.trailingStop} min={0} max={50} onCommit={(trailingStop) => setOption({ trailingStop })} />
+                <OptionField label="Höchstens halten ohne Aussicht (Tage, 0 = aus)" value={opts.maxHoldDays} min={0} max={60} onCommit={(maxHoldDays) => setOption({ maxHoldDays })} />
               </OptionGroup>
               <OptionGroup title="Sicherheit">
                 <OptionField label="Budget-Reserve, nie ausgegeben (€)" value={opts.reserve} min={0} max={500_000_000} money onCommit={(reserve) => setOption({ reserve })} />
@@ -298,6 +301,7 @@ const PURPOSE_LABELS: Record<string, string> = {
   room: "Platz",
   rescue: "Budget",
   turn: "Prognose",
+  exit: "Ausstieg",
 }
 const STATUS_LABELS: Record<string, string> = {
   planned: "Probelauf",

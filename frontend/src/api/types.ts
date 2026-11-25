@@ -516,6 +516,9 @@ export type TraderOptions = {
   starterLock: number
   minRoi: number
   creditMode: number
+  trailingStop: number
+  positionStop: number
+  maxHoldDays: number
   shadow: boolean
   rescueOverride: boolean
 }
