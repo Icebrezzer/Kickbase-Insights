@@ -691,6 +691,7 @@ class TraderWeekOut(Schema):
     points_gain: float = 0 # Expected points the lineup purchases added
     shadow_trades: int = 0 # Paper purchases finished this week
     shadow_profit: int = 0 # ... and what they would have made
+    unknown: int = 0 # Sales whose profit is unknown (not in profit)
 
 
 class TradeOut(Schema):

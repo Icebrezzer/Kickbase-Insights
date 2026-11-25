@@ -764,7 +764,7 @@ def weekly(trades: Iterable[Trade]) -> list[dict]:
     weeks: dict[str, dict] = defaultdict(
         lambda: {
             "planned": 0, "bids": 0, "won": 0, "lost": 0, "sales": 0, "spent": 0, "received": 0, "profit": 0,
-            "points_gain": 0.0, "shadow_trades": 0, "shadow_profit": 0,
+            "points_gain": 0.0, "shadow_trades": 0, "shadow_profit": 0, "unknown": 0,
         }
     )
     for t in trades:
@@ -788,5 +788,8 @@ def weekly(trades: Iterable[Trade]) -> list[dict]:
         elif t.kind == "sell" and t.status == "sold":
             w["sales"] += 1
             w["received"] += t.price
-            w["profit"] += t.profit or 0
+            if t.profit is None:
+                w["unknown"] += 1 # Proceeds or price unknown: counted apart, never as 0 €
+            else:
+                w["profit"] += t.profit
     return [{"week": key, **weeks[key]} for key in sorted(weeks, reverse=True)]

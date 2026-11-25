@@ -397,6 +397,28 @@ def main() -> None:
         check(ij["options"]["min_gain"] == 4.5 and ij["options"]["daily_bids"] == 30 and ij["ignored"] == ["options.nope"], f"options merged and clamped {ij}")
         check(ij["learned"]["swap_edge"] == 50_000 and ij["learned"]["extra"] == [0.2, 0.5, 1.0], f"learned values clamped {ij['learned']}")
 
+        ### Dashboard: the latest round's state and the statistics
+        dash = client.get("/api/automation/trader/dashboard")
+        dj = dash.json()
+        print("    dashboard:", {k: dj.get(k) for k in ("phase", "budget", "open_bids", "credit", "worst_case", "gaps_confirmed", "gaps_projected", "runtime_ms")})
+        print("    stats:", dj.get("stats"))
+        check(dash.status_code == 200 and dj["at"] and dj["gaps_confirmed"] is not None and dj["runtime_ms"] is not None, "dashboard from the latest round")
+        check(isinstance(dj["candidates"], list) and all("decision" in c for c in dj["candidates"]), "candidates with their reason")
+        check(dj["stats"]["unknown_profits"] >= 1 and dj["stats"]["sales"] >= dj["stats"]["unknown_profits"], "unknown profits counted apart")
+
+        ### Notifications: an eleven with gaps close to the matchday is pushed once per deadline
+        from db.models import AutomationEvent
+
+        notes_before = len(state.automation.trader._pushes)
+        friday = utcnow() + timedelta(hours=10)
+        state.automation.trader._notify("4242", "1001", {"gaps_confirmed": 2, "gaps_projected": 1}, "prepare", friday, utcnow())
+        state.automation.trader._notify("4242", "1001", {"gaps_confirmed": 2, "gaps_projected": 1}, "prepare", friday, utcnow())
+        state.automation.trader._notify("4242", "1001", {"gaps_confirmed": 2}, "normal", friday, utcnow())
+        with Session(state.engine) as s:
+            gap_events = s.exec(select(AutomationEvent).where(AutomationEvent.key.like("trader-gaps:%"))).all()
+        check(len(gap_events) == 1 and len(state.automation.trader._pushes) == notes_before + 1, "gap warning once, only close to the matchday")
+        state.automation.trader._pushes.clear()
+
         ### Strategy profiles and the backtest on the league's real auctions
         profiles = client.get("/api/automation/trader/profiles").json()
         check(set(profiles) == {"conservative", "balanced", "aggressive"} and profiles["conservative"]["profitShare"] == 30, f"profiles {profiles['conservative']}")

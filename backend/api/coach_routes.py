@@ -242,6 +242,14 @@ async def trader_import(state: StateDep, league_id: LeagueIdDep, viewer: ViewerD
     return TraderImportOut(options=export["options"], learned=export["learned"], ignored=ignored)
 
 
+@router.get("/automation/trader/dashboard")
+async def trader_dashboard(state: StateDep, league_id: LeagueIdDep, viewer: ViewerDep) -> dict:
+    """The trader's state from its latest round (money, credit, worst case, phase, eleven, positions,
+    protections, the candidates with their reasons) and its statistics."""
+    automation = _automation(state)
+    return await asyncio.to_thread(automation.trader.dashboard, viewer.user_id, league_id)
+
+
 @router.get("/automation/trader/profiles", response_model=dict[str, TraderOptionsIn])
 async def trader_profiles(viewer: ViewerDep) -> dict:
     """The strategy profiles as complete options: a starting point to apply and adjust."""

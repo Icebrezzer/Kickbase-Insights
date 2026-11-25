@@ -28,6 +28,7 @@ import hashlib
 import json
 import logging
 import threading
+import time
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
@@ -120,6 +121,7 @@ class TraderService:
         self.settings = automation.settings
         self._pushes: list[tuple[str, str, str, str]] = [] # Filled while planning in a thread, sent after
         self._last_debug: dict[tuple[str, str], str] = {}
+        self._latest: dict[tuple[str, str], tuple[datetime, dict]] = {} # Latest round per league and user
         ### Learning is read, changed and written back: one at a time, so no round's update is lost.
         ### shortcut: a process lock, one backend container; several instances would need a DB lock
         self._learn = threading.Lock()
@@ -486,6 +488,7 @@ class TraderService:
         from api.insights import Insights
         from api.routes import analysis_limits
 
+        started = time.monotonic()
         opts = t.Options.load(row.trader_options)
         min_play = opts.min_play / 100
         user_id = row.user_id
@@ -631,6 +634,12 @@ class TraderService:
                 code = next((b["code"] for b in debug["risk_blocked"] if b["player_id"] == m["id"]), None)
                 if code:
                     m["decision"] += f" – blockiert: {code}"
+            ### The eleven: what is there for sure, and with every open and new bid won
+            new = [listings[a.player_id] for a in approved if a.kind == "bid" and a.player_id in listings]
+            debug["gaps_confirmed"] = t.best_of(own0).empty_slots if own0 else 11
+            debug["gaps_projected"] = t.best_of([*own0, *pending.values(), *new]).empty_slots if own0 or pending or new else 11
+            debug["runtime_ms"] = int((time.monotonic() - started) * 1000)
+            self._notify(league.id, user_id, debug, stage, deadline, now)
             self._log_debug(league.id, user_id, debug)
             return approved, [s for s in shadows if s.player_id not in {a.player_id for a in approved}]
 
@@ -1009,7 +1018,9 @@ class TraderService:
                                    details={"player_id": action.player_id, "market_value": action.market_value, "received": received})
 
     def _log_debug(self, league_id: str, user_id: str, data: dict) -> None:
-        """Stored only when the decisions changed since the last round, so quiet hours cost nothing."""
+        """Stored only when the decisions changed since the last round, so quiet hours cost nothing. The
+        latest round is kept in memory for the dashboard either way."""
+        self._latest[(league_id, user_id)] = (utcnow(), json.loads(json.dumps(data, default=str)))
         digest = hashlib.sha256(
             json.dumps([data.get("actions"), [(m["id"], m["decision"]) for m in data.get("market", [])]], default=str).encode()
         ).hexdigest()
@@ -1088,6 +1099,120 @@ class TraderService:
                     session.commit()
             session.commit()
 
+    def dashboard(self, user_id: str, league_id: str) -> dict:
+        """The trader's state now (from its latest round) and its statistics, for the dashboard."""
+        latest = self._latest.get((league_id, user_id))
+        if latest is None:
+            with Session(self.engine) as session:
+                row = session.exec(
+                    select(TraderDebug).where(TraderDebug.user_id == user_id, TraderDebug.league_id == league_id).order_by(TraderDebug.at.desc())
+                ).first()
+            latest = (row.at, row.data) if row else None
+        stats = self._stats(user_id, league_id)
+        if latest is None:
+            return {"at": None, "stats": stats}
+        at, d = latest
+        names = {p["id"]: p.get("name") for p in [*d.get("squad", []), *d.get("pending", []), *d.get("market", [])]}
+        protections = [
+            label for active, label in (
+                (d.get("keep_starters"), "Startelf gesperrt (Anpfiff naht oder keine automatische Aufstellung)"),
+                (d.get("keep_starters") and not d.get("lineup_known", True), "Aufstellung nicht lesbar: alle fitten Spieler gesperrt"),
+                (d.get("paused"), "Wochen-Stop-Loss: Gewinnhandel pausiert"),
+                (d.get("forecast_paused"), "Prognose unzuverlässig: Gewinnhandel pausiert"),
+                (d.get("phase") in ("prepare", "repay", "final"), "Spieltag naht: Ersatz vor Gewinnhandel, Kreditgrenzen"),
+                (d.get("phase") == "final", "Letzte Stunde: keine Gewinn-Gebote, kein Kredit"),
+                (d.get("credit_mode") == 0, "Kein Kredit"),
+                (d.get("reserve"), "Reserve wird nie ausgegeben"),
+            ) if active
+        ]
+        ### The candidates worth explaining: bids first, then the best net return, then the rest
+        market = sorted(
+            d.get("market", []),
+            key=lambda m: (not str(m.get("decision", "")).split(": ", 1)[-1].startswith("Gebot"), -(m.get("net_at_low") or -10**12)),
+        )[:15]
+        return {
+            "at": at,
+            "live": d.get("live"),
+            "phase": d.get("phase"),
+            "deadline": d.get("deadline"),
+            "repay_from": d.get("repay_from"),
+            "budget": d.get("budget"),
+            "open_bids": sum((d.get("open_bids") or {}).values()),
+            "cash_free": d.get("cash_free"),
+            "credit": d.get("credit"),
+            "credit_mode": d.get("credit_mode"),
+            "liquidation": d.get("liquidation"),
+            "worst_case": d.get("worst_case"),
+            "profit_room": d.get("profit_room"),
+            "gaps_confirmed": d.get("gaps_confirmed"),
+            "gaps_projected": d.get("gaps_projected"),
+            "unrealized": d.get("unrealized"),
+            "week_profit": d.get("week_profit"),
+            "positions": [{"player_id": pid, "name": names.get(pid), **v} for pid, v in (d.get("positions") or {}).items()],
+            "protections": protections,
+            "candidates": [
+                {k: m.get(k) for k in ("id", "name", "pos", "value", "price", "bid_low", "net_at_low", "p_win_at_low", "expected",
+                                       "ahead", "samples", "quality", "forecast", "gain", "money", "decision")}
+                for m in market
+            ],
+            "blocked": d.get("risk_blocked", []),
+            "actions": d.get("actions", []),
+            "runtime_ms": d.get("runtime_ms"),
+            "stats": stats,
+        }
+
+    def _stats(self, user_id: str, league_id: str) -> dict:
+        """Since the start: realized net (known profits only, unknown ones counted apart), per purpose,
+        auctions, markup, holding time, return per euro and day, blocked trades and matchdays at risk."""
+        with Session(self.engine) as session:
+            rows = list(session.exec(select(TradeLog).where(TradeLog.user_id == user_id, TradeLog.league_id == league_id).order_by(TradeLog.at)))
+            week_rounds = session.exec(
+                select(TraderDebug.data).where(TraderDebug.user_id == user_id, TraderDebug.league_id == league_id,
+                                               TraderDebug.at >= utcnow() - timedelta(days=7))
+            ).all()
+            debts = session.exec(
+                select(AutomationEvent.key).where(AutomationEvent.user_id == user_id, AutomationEvent.league_id == league_id,
+                                                  AutomationEvent.key.like("trader-debt:%"))
+            ).all()
+        real = [r for r in rows if r.status not in ("planned", "failed")]
+        sells = [r for r in real if r.kind == "sell" and r.status == "sold"]
+        known = [r for r in sells if r.profit is not None]
+        won = [r for r in real if r.kind == "bid" and r.status == "won"]
+        lost = [r for r in real if r.kind == "bid" and r.status == "lost"]
+        holds, capital_days = [], 0
+        for s in known:
+            bought = next((b for b in reversed(won) if b.player_id == s.player_id and (b.resolved_at or b.at) <= s.at), None)
+            if bought is not None:
+                days = max((s.at - (bought.resolved_at or bought.at)).days, 1)
+                holds.append(days)
+                capital_days += (bought.paid or bought.price) * days
+        purposes: dict[str, dict] = {}
+        for s in sells:
+            p = purposes.setdefault(s.purpose, {"sales": 0, "profit": 0, "unknown": 0})
+            p["sales"] += 1
+            if s.profit is None:
+                p["unknown"] += 1
+            else:
+                p["profit"] += s.profit
+        markups = [(b.paid or b.price) / b.market_value - 1 for b in won if b.market_value]
+        blocked = {(b["player_id"], b["code"]) for d in week_rounds for b in (d or {}).get("risk_blocked", [])}
+        return {
+            "realized": sum(r.profit for r in known),
+            "sales": len(sells),
+            "unknown_profits": len(sells) - len(known),
+            "data_completeness": round(len(known) / len(sells), 2) if sells else None,
+            "by_purpose": purposes,
+            "auctions_won": len(won),
+            "auctions_lost": len(lost),
+            "win_rate": round(len(won) / (len(won) + len(lost)), 2) if won or lost else None,
+            "avg_markup": round(sum(markups) / len(markups), 4) if markups else None,
+            "avg_hold_days": round(sum(holds) / len(holds), 1) if holds else None,
+            "return_per_euro_day": round(sum(r.profit for r in known) / capital_days, 6) if capital_days else None,
+            "blocked_this_week": len(blocked),
+            "matchdays_at_risk": len(set(debts)),
+            "matchdays_rescued": len({r.at.date() for r in sells if r.purpose == "rescue"}),
+        }
+
     def backtest(self, league: League, user_id: str, capital: int, folds: int) -> dict:
         """The profit trading strategies replayed on this league's real auctions (core.backtest)."""
         from api.insights import Insights
@@ -1118,6 +1243,30 @@ class TraderService:
             session.commit()
         self.automation.record(user_id, league_id, "trader-import", f"Gelerntes zurückgesetzt ({scope})", details={"before": before, "scope": scope})
         return before
+
+    def _notify(self, league_id: str, user_id: str, debug: dict, stage: str, deadline: datetime | None, now: datetime) -> None:
+        """Pushes that need the user, each once per period (deduplicated by key): the eleven has gaps
+        close to a matchday (once per deadline), the stop-loss paused profit trading (once per week),
+        the forecast is unreliable (once per day). The rest (trades, unclear status, debt, automatic
+        pause, login) is pushed where it happens."""
+        day = now.astimezone(analytics.MARKET_VALUE_TIMEZONE).date().isoformat()
+        notes = []
+        gaps = debug.get("gaps_confirmed", 0)
+        if gaps and stage in ("prepare", "repay", "final") and deadline is not None:
+            projected = debug.get("gaps_projected", gaps)
+            notes.append((f"trader-gaps:{league_id}:{user_id}:{deadline.isoformat()}", "Autotrader: Startelf unvollständig",
+                          f"{gaps} Platz/Plätze der Startelf leer vor dem Spieltag"
+                          + (f", mit allen offenen Geboten noch {projected}" if projected != gaps else "")))
+        if debug.get("paused"):
+            notes.append((f"trader-stoploss:{league_id}:{user_id}:{t.week_of(now)}", "Autotrader: Stop-Loss",
+                          "Gewinnhandel pausiert bis Wochenende: Wochenverlust hat das Limit erreicht"))
+        if debug.get("forecast_paused"):
+            notes.append((f"trader-forecast:{league_id}:{user_id}:{day}", "Autotrader: Prognose unzuverlässig",
+                          "Gewinnhandel pausiert, bis die Marktwertprognose wieder trifft"))
+        for key, title, message in notes:
+            if not self.automation._has_key(key):
+                self.automation.record(user_id, league_id, "trader", message, ok=False, key=key)
+                self._pushes.append((user_id, title, message, f"trader-note-{league_id}"))
 
     def _warn_debt(self, league: League, user_id: str, budget: int, deadline: datetime) -> None:
         """Once per matchday: the bench cannot cover the debt, the user has to decide what goes."""
