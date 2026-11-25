@@ -1,6 +1,6 @@
 # Autotrader – komplette Logik
 
-Stand: 25.11.2026, Branch `codex/autotrader-2`, Meilensteine 1 (Critical Safety Patch) und 2 (Trading Intelligence).
+Stand: 25.11.2026, Branch `codex/autotrader-2`, Meilensteine 1 (Critical Safety Patch), 2 (Trading Intelligence) und 3 (Learning Engine 2.0).
 
 Code:
 - `backend/core/trader.py`: reine Entscheidungen (Bewertung, Preis, Netto-Gewinn, Kredit, Phasen, Lernen).
@@ -95,13 +95,19 @@ Ein Spieler mit unklarem Aufruf ist für neue Aktionen gesperrt (`BLOCKED`). Nic
 
 Erledigte Schatten werden nach 120 Tagen gelöscht.
 
+**Auswahl:** bis zu 5 je Runde, zuerst der beste Kandidat **jeder Preisklasse**, dann die nächstbesten. So lernt der Trader nicht nur aus teuren Spitzenkandidaten. Abgelehnte Kandidaten werden als `near` mitbeobachtet.
+
 **Papier-Kauf:**
-- Ist ein Transfer bekannt: gewonnen, wenn der Gewinnerpreis ≤ dem Papiergebot war. Das wird mit halbem Gewicht gelernt.
-- Ein Kickbase-Angebot ohne Käufer gilt nach 1 Tag als gewonnen (bekannte Schwäche, Meilenstein 3).
+- Ist ein Transfer bekannt: gewonnen, wenn der Gewinnerpreis **kleiner** als das Papiergebot war. Gelernt wird mit halbem Gewicht, im globalen Modell und in der Liga.
+- **Gleichstand:** gilt als verloren, ohne Lerneffekt (wer den Zuschlag bekommt, ist unbekannt).
+- **Ohne Transfer verschwunden** (kein Käufer, zurückgezogen, neu eingestellt): nach 2 Tagen `expired`, **kein** Lerneffekt, kein angenommener Sieg.
 - Nach 2 Marktwert-Updates: Ergebnis = Wert × konservative Quote − Papierpreis.
 - Gelernt wird `after_forecast` mit halbem Gewicht. Nur Zweck `profit` lernt zusätzlich `after_sale`.
 
-**Papier-Verkauf:** entsteht nur zu einem **bestätigten** echten Verkauf (nicht im Probelauf, nicht bei Fehlschlag). Nach 3 Updates: Wertänderung → `after_regret`.
+**Papier-Verkauf:**
+- Entsteht nur zu einem **bestätigten** echten Verkauf (nicht im Probelauf, nicht bei Fehlschlag).
+- Nach 3 Updates: Was Halten netto mehr gebracht hätte = (Wert danach − Wert beim Verkauf) × Quote → `after_regret`.
+- **Rettungsverkäufe lernen nichts:** Ein erzwungener Verkauf sagt nichts über die Tausch-Schwelle.
 
 ---
 
@@ -230,6 +236,23 @@ Beispiel aus dem Auftrag:
 - Erlös: 9,72 Mio.
 - Ergebnis: **−480.000 €**, also kein Kauf. Auch die Risk Engine blockiert ihn (`PROFIT_NEGATIVE`).
 
+**Gebot nach Erwartungswert (`best_bid`):** Das ist der Standard, sobald die Liga genug Auktionen hat.
+- **Gewinnchance:** `P(win | Gebot)` = Anteil der gewonnenen Kickbase-Auktionen anderer Manager in der Liga (letzte 45 Tage, sonst alle), deren Gewinner **weniger** Aufschlag auf den Marktwert gezahlt hat.
+  - Zuerst gilt die eigene Preisklasse, ab 8 Auktionen; sonst die ganze Liga.
+  - Unter 8 Auktionen gibt es kein Modell.
+  - Gleichstand gilt als verloren.
+  - Auktionen ohne Gebote fehlen in den Daten. Die Schätzung ist dadurch eher vorsichtig.
+- **Wert des Zuschlags (`worth`):**
+
+  | Zweck | Wert |
+  |---|---|
+  | Gewinnhandel | Netto-Verkaufserlös |
+  | Startelf | Verdrängter × Quote + `max_cost_per_point` × Punktgewinn (dein Preis je Punkt als Bewertung) |
+  | Ersatz | `cover_max_price` |
+
+- **Wahl:** Das Gebot zwischen Mindestgebot und Obergrenze mit dem höchsten `P(win) × (worth − Gebot)`, geprüft in bis zu 40 Schritten. Ziel ist nicht die höchste Gewinnquote, sondern der beste Erwartungswert.
+- **Ohne Modell** (unter 8 Auktionen) und beim Gebot nach einem Platz-Verkauf (dort zählt eine hohe Chance): die gelernte Höhe `extra` zwischen `bid_low` und `bid_high` (siehe unten).
+
 **Preis je Punkt (Startelf):**
 - Formel: (Gebot − Marktwert des Verdrängten × konservative Quote) / Punktgewinn ≤ `max_cost_per_point`. Das ist die faire Transferdifferenz. Der Verdrängte wird dadurch **nicht** verkauft.
 - Das zusätzlich gebundene Kapital ist das ganze Gebot. Es steht in der Begründung („bindet X Mio.“).
@@ -324,17 +347,35 @@ planned (Probelauf) │ pending ─► open (Gebot) / sold (Verkauf)
 
 ---
 
-## 8. Lernen (gemeinsam für alle Ligen, `ModelState "trader"`)
+## 8. Lernen
+
+**Drei Ebenen:**
+
+| Ebene | Speicher | Inhalt |
+|---|---|---|
+| Global (Basismodell) | `ModelState "trader"` | Prognose-Kalibrierung (`gain_ratio`, Richtung, Pause), `min_margin`, `swap_edge`, globale Gebotshöhen |
+| Liga | `ModelState "trader:<liga>"` | eigene Gebotshöhen `extra` und Auktionszahlen (Bieterverhalten der Liga). Dazu kommt die Gewinnchance aus den Liga-Transfers (oben) |
+| Nutzer/Liga | Einstellungen (`Options`) | Risikobereitschaft, Kapitalanteile, Schutzregeln |
+
+- **Mischung (`blend`):** Gebotshöhe = w × Liga + (1 − w) × global, mit w = n / (n + 10). Dabei ist n die Zahl der Liga-Auktionen (Schatten zählen halb). Eine neue Liga startet also mit der globalen Erfahrung.
+- **Jede Auktion lernt doppelt:** im globalen Modell und in ihrer Liga.
+- **Bestehende Werte** bleiben als globales Basismodell erhalten (Migration ohne Datenverlust).
 
 | Wert | Start | Grenzen | Regel |
 |---|---|---|---|
-| `extra[Klasse]` | 0,3 | 0–1 | gewonnen −0,05·w, an höheres Gebot verloren +0,15·w (w = 1 echt, 0,5 Schatten) |
-| `min_margin` | 150.000 | 50.000–1,5 Mio. | echter Netto-Verlust ×(1+0,15w), Gewinn ×(1−0,03w) |
-| `gain_ratio` | 1,0 | −1…2 | EMA mit α = 0,1·w über (tatsächlich / Prognose) im Prognosehorizont (2 Updates) |
-| Prognose-Vertrauen | 1,0 | 0,3–**1,0** | ab 10 Verläufen |
-| `swap_edge` | 100.000 | 50.000–1 Mio. | Verkaufter stieg danach > 100.000 → ×1,1, sonst ×0,97 |
+| `extra[Klasse]` | 0,3 | 0–1 | gewonnen −0,05·w, an höheres Gebot verloren +0,15·w (w = 1 echt, 0,5 Schatten). Nur noch Rückfall, wenn das Gewinnchance-Modell fehlt |
+| `min_margin` | 150.000 | 50.000–1,5 Mio. | Netto-Verlust × (1 + 0,05·w·(1 + Größe)) = +5…20 %; Netto-Gewinn × (1 − 0,01·w·(1 + Größe)) = −1…3 %. Größe = Ergebnis / Marge, höchstens 3. Ein kleiner Gewinn gleicht keinen großen Verlust aus |
+| `gain_ratio` | 1,0 | −1…2 | EMA mit α = 0,1·w über (tatsächlich / Prognose) im selben Horizont (2 Updates); gespeichert wird die **unskalierte** Prognose |
+| Prognose-Vertrauen | 1,0 | 0,3–1,0 | ab 10 Verläufen |
+| `direction_hits` | 0 | ≥ 0 | Prognosen, deren Richtung stimmte; Trefferquote ab 10 Verläufen |
+| `forecast_pause` | 0 | 0/1 | **Prognose-Pause:** Ab 10 Verläufen setzt `gain_ratio` < 0,3 den Gewinnhandel aus. Wieder an erst über 0,45 (Hysterese). Schattentransfers lernen weiter, so kann er zurückkehren |
+| `swap_edge` | 100.000 | 50.000–1 Mio. | Halten hätte netto > 100.000 mehr gebracht → ×1,1, sonst ×0,97 (ohne Rettungsverkäufe) |
 
-Laden und Import: NaN, Infinity und falsche Typen werden verworfen, alle Werte begrenzt.
+**Sicherheit des Lernens:**
+- **Parallele Runden:** Lesen, Lernen und Schreiben laufen unter einer Sperre. Kein Update geht verloren; der Smoke-Test prüft das mit zwei Threads. Das gilt je Prozess, also für einen Container.
+- **Versionierung:** Gespeicherte Zustände tragen `version: 2`. Ältere Zustände laden mit Standardwerten für neue Felder.
+- **Laden und Import:** NaN, Infinity und falsche Typen werden verworfen, alle Werte begrenzt.
+- **Zurücksetzen:** `POST /api/automation/trader/reset?scope=global|league` (nur Admins). Die alten Werte stehen im Ereignis `trader-import` und lassen sich zurückimportieren.
 
 ---
 
@@ -375,6 +416,9 @@ Booleans akzeptieren nur `true/false`, `1/0` und die gleichnamigen Texte. `"fals
 - Phasen: 24 Std. / letztes Update / 60 Min.
 - Qualität: 0,6 × Schnitt + 0,4 × Form. Wenig Daten: unter 3 Einsätzen ×1,5 Mindestgewinn.
 - Vorschau: 3 Spiele. Prognosewechsel: 0,5 %.
+- Gewinnchance-Modell ab 8 Auktionen, 40 Gebotsschritte.
+- Liga-Gewicht: n / (n + 10).
+- Prognose-Pause unter 0,3, wieder an über 0,45.
 
 ---
 
@@ -387,7 +431,9 @@ Booleans akzeptieren nur `true/false`, `1/0` und die gleichnamigen Texte. `"fals
 - **Debug-Runde** (`TraderDebug`, 21 Tage, nur bei Änderung):
   - Phase, aktive Prioritäten, Kontostand, Worst Case, `cash_free`, Kredit, `credit_mode`, Liquidationswert, `profit_room`.
   - Wochenergebnis und Buchverlust (Stop-Loss), jede Gewinnposition mit Kaufpreis, Netto jetzt und Urteil.
-  - Je Marktspieler zusätzlich `ahead`, `samples` und `quality`.
+  - Je Marktspieler zusätzlich `ahead`, `samples`, `quality` und `p_win_at_low` (Gewinnchance beim Mindestgebot).
+  - Je Runde: `league_auctions` (Datenbasis des Gewinnchance-Modells), `forecast_paused` und die verwendeten gelernten Werte.
+  - Export: `learned` (global), `learned_league`, `learned_effective`.
   - Offene Gebote, Limits, Pause, Startelf-Sperre, ob die Aufstellung lesbar war.
   - Kader, offene Gebote, Marktspieler mit `net_at_low`, Geld und Begründung.
   - `risk_blocked` mit Code, freigegebene Aktionen.
@@ -416,7 +462,9 @@ Gegen die echte Kickbase-API lässt sich das ohne Live-Zugang nicht prüfen. Die
 ## 12. Bekannte Grenzen
 
 - Pro Lücke wird nur einmal geboten. Ein verlorenes Gebot wird frühestens in der nächsten Runde ersetzt.
-- Das Lernen ist für alle Nutzer und Ligen gemeinsam. Eine Trennung nach Liga ist für Meilenstein 3 geplant.
+- Das Lernen der Prognose, der Marge und der Tausch-Schwelle ist für alle Nutzer gemeinsam. Gebotshöhen sind je Liga getrennt, die Gewinnchance kommt aus den Liga-Transfers.
+- **Höhere Startelf-Gebote:** Das Gebot nach Erwartungswert nutzt bei Startelf-Käufen deinen Preis je Punkt als Bewertung. Ist `max_cost_per_point` großzügig, fällt das Gebot höher aus als früher, weil es die Gewinnchance stärker gewichtet. In der Demo stieg ein Gebot so von 8,74 auf 9,81 Mio.
+- Gebotsgleichstände und Auktionen ohne Gebote sind in den Daten nicht sichtbar. Beide Lücken wirken vorsichtig.
 - Läuft der Server vom Vorabend bis zur Deadline durchgehend nicht, bleibt ein Minus stehen.
 - Rettungsverkäufe nutzen eine gierige Auswahl, kein kombinatorisches Optimum.
 - Kein Backtesting, keine Strategieprofile (Meilensteine 3–4). Die Gewichte und Schwellen von Meilenstein 2 sind begründete Startwerte, aber noch nicht kalibriert:
