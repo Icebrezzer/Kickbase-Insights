@@ -183,7 +183,8 @@ Ohne Live-Zugang und ohne Dokumentation ist nichts davon verifiziert, alles wird
 - **Serverausfall:** Fällt der Server vom Vorabend bis zur Deadline aus, bleibt ein Minus stehen.
 - **Mehrere Container** auf derselben Datenbank planen dieselbe Runde doppelt; die Lernsperre ist sicher, die Rundensperre nicht.
 - **Gewichte und Profilwerte** sind nicht kalibriert.
-- **Zurückziehen von Geboten** ist nie gegen Kickbase gelaufen.
+- ~~Zurückziehen von Geboten ist nie gegen Kickbase gelaufen.~~ Behoben und am 25.11. in v3.1.0-mgr.18 bestätigt: Kickbase-Gebote haben keine eigene ID, gelöscht wird mit der Nutzer-ID (`uoid`).
+- Das Maximalgebot ist jetzt Kontostand + 33 % Teamwert (abgeglichen mit BaseXI und Kickbases Ablehnung `ThirtyThreePercentRuleExceeded`).
 - **Gebot nach Erwartungswert** bei großzügigem `max_cost_per_point` → höhere Startelf-Gebote.
 
 ## 15. Offene Aufgaben
