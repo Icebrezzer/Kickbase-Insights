@@ -105,13 +105,13 @@ def parse_lineup(raw: Any) -> tuple[str | None, list[str]]:
         if isinstance(raw.get(key), list):
             players = raw[key]
             break
-    ### shortcut: guessed from the documented /lineup/overview ("lo" = lineup slot); the whole squad
-    ### may come back, the slots 1-11 are the eleven. Check the logged answer if it still mismatches
+    ### Kickbase answers {"it": [{"i": ..., "lo": <slot>, ...}]} with the slots counted from 0 (seen
+    ### 25.11.2026: the keeper at "lo": 0, the slots up to 10). The eleven are the eleven slots from the
+    ### lowest one, so a squad with bench players (no or a higher slot) and a count from 1 work too
     if any(isinstance(item, dict) and "lo" in item for item in players or []):
-        players = sorted(
-            (i for i in players if isinstance(i, dict) and isinstance(i.get("lo"), int) and 1 <= i["lo"] <= 11),
-            key=lambda i: i["lo"],
-        )
+        slotted = [i for i in players if isinstance(i, dict) and isinstance(i.get("lo"), int) and not isinstance(i.get("lo"), bool)]
+        first = 0 if any(i["lo"] == 0 for i in slotted) else 1
+        players = sorted((i for i in slotted if first <= i["lo"] <= first + 10), key=lambda i: i["lo"])
     ids: list[str] = []
     for item in players or []:
         if isinstance(item, (str, int)):

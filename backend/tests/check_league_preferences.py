@@ -25,6 +25,15 @@ def main():
     ### Whole squad with lineup slots: only slots 1-11 are the eleven, in slot order
     squad = [{"i": str(i), "lo": 12 - i} for i in range(1, 12)] + [{"i": str(i), "lo": None} for i in range(12, 19)]
     assert parse_lineup({"type": "3-4-3", "it": squad}) == ("3-4-3", [str(i) for i in range(11, 0, -1)])
+    ### Kickbase's real answer (25.11.2026): slots counted from 0, the keeper on 0
+    real = [{"i": "6085", "n": "Seimen", "lo": 0, "pos": 1}, {"i": "11008", "lo": 5, "pos": 3}, {"i": "2687", "lo": 10, "pos": 4},
+            {"i": "608", "lo": 8, "pos": 4}, {"i": "15211", "lo": 3, "pos": 2}]
+    real += [{"i": str(100 + s), "lo": s, "pos": 3} for s in (1, 2, 4, 6, 7, 9)]
+    _, eleven = parse_lineup({"it": real})
+    assert len(eleven) == 11 and eleven[0] == "6085" and eleven[-1] == "2687", eleven
+    ### With bench players behind them (a higher slot or none), still the eleven
+    _, eleven = parse_lineup({"it": [*real, {"i": "900", "lo": 11}, {"i": "901"}, {"i": "902", "lo": None}]})
+    assert len(eleven) == 11 and not {"900", "901", "902"} & set(eleven), eleven
     assert parse_lineup({"type": "4-4-2", "lp": list(range(1, 12))}) == (
         "4-4-2",
         [str(i) for i in range(1, 12)],
