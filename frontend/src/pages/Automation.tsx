@@ -401,6 +401,8 @@ function TraderCard() {
             <Badge className="text-down" title={query.data.pauseReason}>Live-Handel pausiert</Badge>
           ) : query.data?.paused ? (
             <Badge className="text-down">Gewinnhandel pausiert</Badge>
+          ) : query.data?.learned.forecastPaused ? (
+            <Badge className="text-down">Gewinnhandel pausiert: Prognose unzuverlässig</Badge>
           ) : null
         }
       />
@@ -424,7 +426,11 @@ function TraderCard() {
                 <Stat
                   label="Prognose-Vertrauen"
                   value={share(tr.learned.gainScale)}
-                  hint={tr.learned.gainSamples >= 10 ? `aus ${tr.learned.gainSamples} Verläufen` : `lernt ab 10 Verläufen (${tr.learned.gainSamples})`}
+                  hint={
+                    tr.learned.gainSamples >= 10
+                      ? `aus ${tr.learned.gainSamples} Verläufen · Richtung ${share(tr.learned.directionRate)} getroffen`
+                      : `lernt ab 10 Verläufen (${tr.learned.gainSamples})`
+                  }
                 />
                 <Stat
                   label="Tausch-Schwelle"

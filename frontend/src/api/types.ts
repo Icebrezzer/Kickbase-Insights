@@ -585,6 +585,8 @@ export type Trader = {
     gainSamples: number
     swapEdge: number
     regretSamples: number
+    directionRate: number | null
+    forecastPaused: boolean
   }
   paused: boolean
   pauseReason: string | null
