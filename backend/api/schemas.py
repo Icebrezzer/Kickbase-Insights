@@ -622,6 +622,24 @@ class SellOut(Schema):
     response: str | None = None
 
 
+class TraderOptionsIn(Schema):
+    """The autotrader's thresholds, see core.trader.Options. The bounds match its OPTION_LIMITS."""
+    min_gain: float = Field(2.0, ge=0, le=100) # Expected points the eleven gains at least
+    max_cost_per_point: int = Field(300_000, ge=0, le=50_000_000) # € above the replaced player per point
+    min_avg_edge: int = Field(10, ge=0, le=200) # % better season average than the replaced player
+    min_play: int = Field(60, ge=0, le=100) # % of the club's last five matches
+    lineup_share: int = Field(100, ge=10, le=100) # % of the free budget per lineup bid
+    profit_share: int = Field(60, ge=10, le=100) # % of the free budget per profit bid
+    reserve: int = Field(0, ge=0, le=500_000_000) # € never spent
+    cover_max_price: int = Field(3_000_000, ge=0, le=50_000_000)
+    daily_bids: int = Field(6, ge=0, le=30)
+    daily_sales: int = Field(3, ge=0, le=30)
+    stop_loss: int = Field(3_000_000, ge=0, le=100_000_000) # Weekly loss that pauses profit trading, 0 never
+    sell_window: int = Field(20, ge=5, le=180) # Minutes before the auction ends
+    starter_lock: int = Field(60, ge=0, le=1440) # Minutes before the first kick-off
+    shadow: bool = True
+
+
 class AutomationSettingsIn(Schema):
     auto_scout: bool = False
     scout_threshold: int = Field(250_000, ge=0, le=50_000_000)
@@ -630,11 +648,93 @@ class AutomationSettingsIn(Schema):
     deadline_alerts: bool = True
     listing_alerts: bool = True
     sell_alerts: bool = True
+    trader: bool = False
+    trader_live: bool = False
+    trader_profit: bool = True
+    trader_options: TraderOptionsIn = Field(default_factory=lambda: TraderOptionsIn())
 
 
 class AutomationSettingsOut(AutomationSettingsIn):
     session_expires_at: datetime | None = None # Automation works until then, without the env account
     uses_service_account: bool = False
+    trader_on_server: bool = True # KBI_AUTOMATION__TRADER
+
+
+class TraderWeekOut(Schema):
+    week: str # ISO week, e.g. 2026-W48
+    planned: int = 0 # Dry run
+    bids: int = 0
+    won: int = 0
+    lost: int = 0
+    sales: int = 0
+    spent: int = 0
+    received: int = 0
+    profit: int = 0 # Realized: sale minus purchase
+    points_gain: float = 0 # Expected points the lineup purchases added
+    shadow_trades: int = 0 # Paper purchases finished this week
+    shadow_profit: int = 0 # ... and what they would have made
+
+
+class TradeOut(Schema):
+    id: int
+    at: datetime
+    player_id: str
+    name: str | None = None
+    kind: str # bid or sell
+    purpose: str
+    status: str
+    price: int
+    market_value: int
+    paid: int | None = None
+    profit: int | None = None
+    points_gain: float = 0
+    reason: str | None = None
+
+
+class ShadowOut(Schema):
+    id: int
+    at: datetime
+    player_id: str
+    name: str | None = None
+    kind: str # buy or sell
+    purpose: str
+    status: str # watching, holding, lost, expired, done
+    bid: int = 0
+    market_value: int
+    winner_price: int | None = None
+    value_after: int | None = None
+    result: int | None = None # buy: profit on paper; sell: value change after the sale
+
+
+class ShadowSummaryOut(Schema):
+    open: int = 0
+    done: int = 0
+    profit: int = 0
+    hit_rate: float | None = None # Share of finished paper purchases with a profit
+    sold_then_rose: float | None = None # Share of sold players who rose by 100k+ afterwards
+
+
+class TraderLearnedOut(Schema):
+    extra: list[float] # Per price class: where between the usual and the safe bid it bids (0..1)
+    min_margin: int # Forecast gain a profit purchase needs at least
+    won: int
+    lost: int
+    shadow_won: int = 0
+    shadow_lost: int = 0
+    gain_scale: float = 1.0 # How much of a forecast gain is trusted
+    gain_samples: int = 0
+    swap_edge: int = 100_000 # How much more per day a swap target has to rise
+    regret_samples: int = 0
+
+
+class TraderOut(Schema):
+    weeks: list[TraderWeekOut] = []
+    trades: list[TradeOut] = []
+    shadows: list[ShadowOut] = []
+    shadow_summary: ShadowSummaryOut = Field(default_factory=lambda: ShadowSummaryOut())
+    learned: TraderLearnedOut
+    paused: bool = False # Profit trading paused after a weekly loss
+    enabled_on_server: bool = True
 
 
 class AutomationEventOut(Schema):

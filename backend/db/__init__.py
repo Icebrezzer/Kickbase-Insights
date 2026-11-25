@@ -128,7 +128,14 @@ _LATER_COLUMNS = {
         "analysis_squad_limit": "INTEGER",
         "analysis_club_limit": "INTEGER",
     },
-    "userautomation": {"listing_alerts": "BOOLEAN DEFAULT TRUE", "sell_alerts": "BOOLEAN DEFAULT TRUE"},
+    "userautomation": {
+        "listing_alerts": "BOOLEAN DEFAULT TRUE",
+        "sell_alerts": "BOOLEAN DEFAULT TRUE",
+        "trader": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "trader_live": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "trader_profit": "BOOLEAN NOT NULL DEFAULT TRUE",
+        "trader_options": "JSON NOT NULL DEFAULT '{}'",
+    },
 }
 
 

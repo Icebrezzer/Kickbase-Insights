@@ -165,6 +165,105 @@ def main() -> None:
         client.portal.call(state.automation.tick, utcnow())
         check(True, "automation round ran")
 
+        ### Autotrader: the dry run sends nothing to Kickbase, the live run bids and sells
+        from sqlmodel import Session, select
+
+        from db.models import League, TradeLog
+
+        current = client.get("/api/automation/settings").json()
+        on = client.put("/api/automation/settings", json={**current, "trader": True, "traderLive": False})
+        check(on.status_code == 200 and on.json()["trader"] and not on.json()["traderLive"], "trader on, dry run")
+        with Session(state.engine) as s:
+            league = s.get(League, "4242")
+        kb_client = state.automation.client_for_user("1001")
+        budget_before = client.portal.call(kb_client.own_budget, "4242").budget
+        dry = client.portal.call(state.automation.trader.round, league, state.automation.get_settings("1001", "4242"), kb_client, utcnow())
+        check(client.portal.call(kb_client.own_budget, "4242").budget == budget_before, f"dry run changed nothing ({len(dry)} planned)")
+        print("    dry run:", [(a.kind, a.purpose, a.name, a.price, a.reason) for a in dry])
+        with Session(state.engine) as s:
+            planned = s.exec(select(TradeLog).where(TradeLog.status == "planned")).all()
+        check(len(planned) == len(dry), f"{len(planned)} planned trades logged")
+
+        ### With money to spend the plan buys for the eleven, within the free squad slots
+        squad_now = client.portal.call(kb_client.manager_squad, "4242", "1001")
+        market_now = client.portal.call(kb_client.market, "4242")
+        rich, paper = state.automation.trader._plan(league, state.automation.get_settings("1001", "4242"), squad_now, 200_000_000, market_now, utcnow())
+        print("    paper trades:", [(s.player_id, s.purpose, s.bid) for s in paper])
+        check(len(paper) > 0 and all(s.bid >= s.market_value for s in paper), "rejected candidates are followed on paper")
+        print("    plan with 200 Mio.:", [(a.kind, a.purpose, a.name, a.price, a.reason) for a in rich])
+        slots = 18 - len(squad_now.players) - sum(1 for p in market_now.players if p.own_bid("1001") is not None)
+        check(any(a.purpose == "lineup" for a in rich), "a lineup purchase is planned when money is there")
+        check(sum(1 for a in rich if a.kind == "bid") <= max(slots, 0) + sum(1 for a in rich if a.kind == "sell"), "bids fit the free squad slots")
+
+        open_before = sum(p.own_bid("1001") or 0 for p in market_now.players)
+        client.put("/api/automation/settings", json={**current, "trader": True, "traderLive": True})
+        live = client.portal.call(state.automation.trader.round, league, state.automation.get_settings("1001", "4242"), kb_client, utcnow())
+        print("    live run:", [(a.kind, a.purpose, a.name, a.price, a.reason) for a in live])
+        market_after = client.portal.call(kb_client.market, "4242")
+        open_bids = {p.id: p.own_bid("1001") for p in market_after.players if p.own_bid("1001") is not None}
+        check(
+            all(open_bids.get(a.player_id) == a.price for a in live if a.kind == "bid"),
+            f"every live bid is at Kickbase ({len(open_bids)} open own bids)",
+        )
+        new_bids = sum(a.price for a in live if a.kind == "bid")
+        received = sum(a.price for a in live if a.kind == "sell")
+        check(new_bids <= max(0, budget_before - open_before) + received, "the trader's bids fit the free budget")
+        ### The live steps themselves: a bid at Kickbase and a sale, both in the log and the week
+        from sync.trader import Action
+
+        free_agent = next(p for p in market_after.players if p.seller is None and p.own_bid("1001") is None)
+        bid = Action("bid", "profit", free_agent.id, free_agent.last_name, free_agent.market_value, free_agent.market_value, reason="test")
+        client.portal.call(state.automation.trader._execute, league, "1001", kb_client, bid)
+        placed = client.portal.call(kb_client.market, "4242")
+        check(any(p.id == free_agent.id and p.own_bid("1001") == free_agent.market_value for p in placed.players), "live bid placed")
+        bench = client.portal.call(kb_client.manager_squad, "4242", "1001").players[-1]
+        sale = Action("sell", "room", bench.id, bench.last_name, bench.market_value, bench.market_value, reason="test")
+        client.portal.call(state.automation.trader._execute, league, "1001", kb_client, sale)
+        with Session(state.engine) as s:
+            logged = s.exec(select(TradeLog).where(TradeLog.status.in_(["open", "sold"]))).all()
+        check({r.kind for r in logged} == {"bid", "sell"}, "live bid and sale are logged")
+        live = [*live, bid, sale]
+
+        ### Shadow trades: a paper sale and a paper purchase of a Kickbase listing, both a few days old,
+        ### are settled into results and teach the trader
+        from datetime import timedelta
+
+        from db.models import MarketValueHistory, ShadowTrade, Transfer
+
+        listed_now = {p.id for p in client.portal.call(kb_client.market, "4242").players}
+        with Session(state.engine) as s:
+            traded = set(s.exec(select(Transfer.player_id)).all())
+            quiet = [
+                pid for pid, points in s.exec(select(MarketValueHistory.player_id, MarketValueHistory.points)).all()
+                if pid not in listed_now and pid not in traded and len(points) > 30
+            ][:2]
+            old = utcnow() - timedelta(days=6)
+            s.add(ShadowTrade(league_id="4242", player_id=quiet[0], kind="sell", purpose="room", market_value=1_000_000, at=old))
+            s.add(ShadowTrade(league_id="4242", player_id=quiet[1], kind="buy", purpose="profit", bid=1_000_000,
+                              market_value=1_000_000, forecast_gain=200_000, free_agent=True, at=old))
+            s.commit()
+        empty_market = client.portal.call(kb_client.market, "4242")
+        state.automation.trader._settle_shadows(league, empty_market, utcnow())
+        state.automation.trader._settle_shadows(league, empty_market, utcnow())
+        with Session(state.engine) as s:
+            shadows = {r.kind: r for r in s.exec(select(ShadowTrade).where(ShadowTrade.player_id.in_(quiet))).all()}
+        check(shadows["sell"].status == "done" and shadows["sell"].result is not None, f"paper sale settled ({shadows['sell'].result})")
+        check(shadows["buy"].status == "done" and shadows["buy"].result is not None, f"paper purchase settled ({shadows['buy'].result})")
+
+        trader = client.get("/api/automation/trader")
+        check(trader.status_code == 200, f"trader view ({trader.status_code} {trader.text[:300]})")
+        tj = trader.json()
+        check(len(tj["learned"]["extra"]) == 3 and tj["enabledOnServer"], "trader view has the learned bids per price class")
+        check(len(tj["trades"]) == len(dry) + len(live), f"trader view lists {len(tj['trades'])} trades")
+        check(tj["weeks"] and tj["weeks"][0]["sales"] >= 1 and tj["weeks"][0]["received"] > 0, f"week stats {tj['weeks'][:1]}")
+        check(tj["learned"]["regretSamples"] >= 1 and tj["learned"]["shadowWon"] >= 1, f"shadows taught the trader {tj['learned']}")
+        check(tj["shadowSummary"]["done"] >= 1 and len(tj["shadows"]) >= 2, f"shadow summary {tj['shadowSummary']}")
+        opts = client.put("/api/automation/settings", json={**current, "traderOptions": {"minGain": 5, "maxCostPerPoint": 200000}})
+        check(opts.status_code == 200 and opts.json()["traderOptions"]["minGain"] == 5, "trader options are stored")
+        bad = client.put("/api/automation/settings", json={**current, "traderOptions": {"dailyBids": 1000}})
+        check(bad.status_code == 422, f"out of range options are refused ({bad.status_code})")
+        client.put("/api/automation/settings", json={**current, "trader": False})
+
         events = client.get("/api/automation/events")
         check(events.status_code == 200, f"events ({len(events.json())})")
 

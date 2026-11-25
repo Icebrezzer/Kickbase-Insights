@@ -37,7 +37,9 @@ from api.schemas import (
     RivalsOut,
     ScoutRunOut,
     SellOut,
+    TraderOut,
 )
+from core.trader import Options
 from db.models import utcnow
 from kickbase import KickbaseClient
 
@@ -169,6 +171,11 @@ def _settings_out(state, viewer, row) -> AutomationSettingsOut:
         deadline_alerts=row.deadline_alerts,
         listing_alerts=row.listing_alerts,
         sell_alerts=row.sell_alerts,
+        trader=row.trader,
+        trader_live=row.trader_live,
+        trader_profit=row.trader_profit,
+        trader_options=Options.load(row.trader_options).__dict__,
+        trader_on_server=state.settings.automation.trader,
         session_expires_at=automation.session_expiry(viewer.user_id),
         uses_service_account=automation.accounts.service_user_id == viewer.user_id,
     )
@@ -197,6 +204,13 @@ async def put_automation(
 async def automation_events(state: StateDep, league_id: LeagueIdDep, viewer: ViewerDep):
     automation = _automation(state)
     return await asyncio.to_thread(automation.events, viewer.user_id, league_id)
+
+
+@router.get("/automation/trader", response_model=TraderOut)
+async def trader_view(state: StateDep, league_id: LeagueIdDep, viewer: ViewerDep) -> TraderOut:
+    """The autotrader's bids and sales, the weekly statistics and what it learned (shared by all leagues)."""
+    automation = _automation(state)
+    return TraderOut.model_validate(await asyncio.to_thread(automation.trader.view, viewer.user_id, league_id))
 
 
 @router.post("/automation/scout", response_model=ScoutRunOut)

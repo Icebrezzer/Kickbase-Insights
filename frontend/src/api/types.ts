@@ -491,8 +491,97 @@ export type AutomationSettings = {
   deadlineAlerts: boolean
   listingAlerts: boolean
   sellAlerts: boolean
+  trader: boolean
+  traderLive: boolean
+  traderProfit: boolean
+  traderOptions: TraderOptions
   sessionExpiresAt?: string | null
   usesServiceAccount?: boolean
+  traderOnServer?: boolean
+}
+
+export type TraderOptions = {
+  minGain: number
+  maxCostPerPoint: number
+  minAvgEdge: number
+  minPlay: number
+  lineupShare: number
+  profitShare: number
+  reserve: number
+  coverMaxPrice: number
+  dailyBids: number
+  dailySales: number
+  stopLoss: number
+  sellWindow: number
+  starterLock: number
+  shadow: boolean
+}
+
+export type Shadow = {
+  id: number
+  at: string
+  playerId: string
+  name: string | null
+  kind: "buy" | "sell"
+  purpose: string
+  status: "watching" | "holding" | "lost" | "expired" | "done" | string
+  bid: number
+  marketValue: number
+  winnerPrice: number | null
+  valueAfter: number | null
+  result: number | null
+}
+
+export type TraderWeek = {
+  week: string
+  planned: number
+  bids: number
+  won: number
+  lost: number
+  sales: number
+  spent: number
+  received: number
+  profit: number
+  pointsGain: number
+  shadowTrades: number
+  shadowProfit: number
+}
+
+export type Trade = {
+  id: number
+  at: string
+  playerId: string
+  name: string | null
+  kind: "bid" | "sell"
+  purpose: "lineup" | "profit" | "room" | "rescue" | "turn" | string
+  status: "planned" | "open" | "won" | "lost" | "expired" | "sold" | string
+  price: number
+  marketValue: number
+  paid: number | null
+  profit: number | null
+  pointsGain: number
+  reason: string | null
+}
+
+export type Trader = {
+  weeks: TraderWeek[]
+  trades: Trade[]
+  shadows: Shadow[]
+  shadowSummary: { open: number; done: number; profit: number; hitRate: number | null; soldThenRose: number | null }
+  learned: {
+    extra: number[]
+    minMargin: number
+    won: number
+    lost: number
+    shadowWon: number
+    shadowLost: number
+    gainScale: number
+    gainSamples: number
+    swapEdge: number
+    regretSamples: number
+  }
+  paused: boolean
+  enabledOnServer: boolean
 }
 
 export type AutomationEvent = {

@@ -68,6 +68,7 @@ from sync.learning import LearningService
 from sync.learning import sell_ratio as learned_sell_ratio
 from sync.odds import OddsService
 from sync.push import PushService
+from sync.trader import TraderService
 
 log = logging.getLogger(__name__)
 
@@ -154,6 +155,7 @@ class AutomationService:
         self._last_lineup_check: dict[tuple[str, str], datetime] = {}
         self._locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._task: asyncio.Task | None = None
+        self.trader = TraderService(self)
 
     ### ==============================================================================================
     ### Lifecycle
@@ -234,6 +236,7 @@ class AutomationService:
                         | UserAutomation.deadline_alerts
                         | UserAutomation.listing_alerts
                         | UserAutomation.sell_alerts
+                        | UserAutomation.trader
                     )
                 )
             )
@@ -1095,6 +1098,11 @@ class AutomationService:
                     "/login",
                 )
                 self.record(row.user_id, league.id, "push", "Hinweis: Sitzung läuft bald ab", key=session_key)
+
+        ### Autotrader before the lineup, so a new player can already be fielded in this round
+        if row.trader:
+            async with self._lock(*key):
+                await self.trader.round(league, row, client, now)
 
         ### The best eleven, more often the closer the deadline
         if row.auto_lineup and coach.lineup_open(fixtures, now):

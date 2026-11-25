@@ -180,6 +180,8 @@ class AutomationSettings(BaseModel):
     max_squad_size: int = 18
     ### Local hour of the daily sell advice push, before the market value update at 22:00
     sell_advice_hour: int = 20
+    ### Server-wide kill switch of the autotrader. Off stops every bid and sale it would make
+    trader: bool = True
 
 
 class Settings(BaseSettings):

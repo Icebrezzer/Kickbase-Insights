@@ -299,6 +299,14 @@ class UserAutomation(SQLModel, table=True):
     listing_alerts: bool = True
     ### Push a daily sell advice before the market value update
     sell_alerts: bool = True
+    ### Autotrader (sync/trader.py): bids and sells on its own for a better eleven and for profit
+    trader: bool = False
+    ### Off: a dry run that only logs and pushes what it would do
+    trader_live: bool = False
+    ### Also trade for market value profit between matchdays, not only for the eleven
+    trader_profit: bool = True
+    ### Thresholds and limits, see core.trader.Options. Missing keys use its defaults
+    trader_options: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False, server_default="{}"))
     updated_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
 
 
@@ -387,6 +395,49 @@ class MatchdayLineup(SQLModel, table=True):
     day: int = Field(primary_key=True)
     manager_id: str = Field(primary_key=True)
     players: list = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+
+
+class TradeLog(SQLModel, table=True):
+    """A bid or sale of the autotrader, its outcome and profit. Feeds the learning and the week stats."""
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True)
+    league_id: str = Field(index=True)
+    player_id: str = Field(index=True)
+    at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime, index=True)
+    kind: str # bid or sell
+    purpose: str # lineup, profit, room (sold to make room), rescue (negative budget), turn (forecast turned)
+    ### planned (dry run), open, won, lost, expired, sold
+    status: str = "open"
+    price: int = _money(0) # The bid, or what a sale brought
+    market_value: int = _money(0)
+    paid: int | None = _money() # What a won bid finally cost
+    profit: int | None = _money() # Of a sale: received minus what the trader paid
+    points_gain: float = 0 # Expected points the eleven gains with a lineup purchase
+    resolved_at: datetime | None = _ts()
+    details: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+
+
+class ShadowTrade(SQLModel, table=True):
+    """A trade on paper: a purchase the trader passed on (or could not make), followed as if it had
+    bid, or a real sale, followed to see what the player did afterwards. Teaches the trader."""
+    id: int | None = Field(default=None, primary_key=True)
+    league_id: str = Field(index=True)
+    player_id: str = Field(index=True)
+    at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime, index=True)
+    kind: str # buy or sell
+    purpose: str # Why it was considered: profit, lineup, cover; for a sale the sale's purpose
+    ### buy: watching (auction running), holding (would have won), lost, expired, done; sell: watching, done
+    status: str = "watching"
+    bid: int = _money(0) # The bid it would have placed
+    market_value: int = _money(0) # When decided
+    forecast_gain: int = _money(0) # The forecast gain over the holding time when decided
+    free_agent: bool = False # Listed by Kickbase: without a transfer the bid would have won
+    paid: int | None = _money()
+    won_day: int | None = None # Market value day the purchase would have happened
+    winner_price: int | None = _money()
+    value_after: int | None = _money()
+    result: int | None = _money() # buy: profit on paper; sell: market value change after the sale
+    resolved_at: datetime | None = _ts()
 
 
 ### ===============================================================================

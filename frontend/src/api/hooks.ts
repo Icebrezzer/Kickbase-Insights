@@ -16,6 +16,7 @@ import type {
   PushKey,
   ScoutRun,
   SellResult,
+  Trader,
   Battle,
   FairValues,
   Fixtures,
@@ -320,6 +321,7 @@ export function useSell() {
 export const useAutomationSettings = () => useLeagueQuery<AutomationSettings>(["automation-settings"], "/automation/settings")
 export const useAutomationEvents = () =>
   useLeagueQuery<AutomationEvent[]>(["automation-events"], "/automation/events", { refetchInterval: 60_000 })
+export const useTrader = () => useLeagueQuery<Trader>(["trader"], "/automation/trader", { refetchInterval: 60_000 })
 export const useForecastQuality = () => useLeagueQuery<ForecastQuality>(["forecast-quality"], "/automation/forecast", { staleTime: 10 * 60_000 })
 
 export function useSaveAutomation() {

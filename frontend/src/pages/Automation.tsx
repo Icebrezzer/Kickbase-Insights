@@ -12,8 +12,9 @@ import {
   useLearning,
   usePushKey,
   useSaveAutomation,
+  useTrader,
 } from "@/api/hooks"
-import type { AutomationSettings } from "@/api/types"
+import type { AutomationSettings, TraderOptions } from "@/api/types"
 import { Badge, Button, Card, CardHeader, EmptyState, PageHeader, QueryState, Stat } from "@/components/ui"
 import { cn } from "@/lib/cn"
 import { compactMoney, dateTime, decimal, number, share } from "@/lib/format"
@@ -27,6 +28,7 @@ export default function Automation() {
       <div className="space-y-4">
         <PushCard />
         <QueryState query={settings}>{(data) => <SettingsCard initial={data} />}</QueryState>
+        <TraderCard />
         <ForecastCard />
         <LearningCard />
         <EventsCard />
@@ -65,6 +67,8 @@ function SettingsCard({ initial }: { initial: AutomationSettings }) {
     setForm(next)
     save.mutate(next)
   }
+  const opts = form.traderOptions
+  const setOption = (patch: Partial<TraderOptions>) => change({ traderOptions: { ...form.traderOptions, ...patch } })
   const commitThreshold = () => {
     const value = Number(threshold.replace(/\D/g, ""))
     if (Number.isFinite(value) && value !== form.scoutThreshold) change({ scoutThreshold: value })
@@ -139,7 +143,269 @@ function SettingsCard({ initial }: { initial: AutomationSettings }) {
             />
           </label>
         </div>
+        <Switch
+          checked={form.trader}
+          onChange={(trader) => change({ trader })}
+          label="Autotrader"
+          hint={
+            form.traderOnServer === false
+              ? "Auf dem Server abgeschaltet (KBI_AUTOMATION__TRADER)."
+              : "Bietet für eine bessere Startelf und für Marktwert-Gewinne, verkauft Verletzte, Nicht-Stammspieler und schwache Steigerer – immer mit einem Ersatz pro Position."
+          }
+        />
+        <div className={cn("pb-2", !form.trader && "pointer-events-none opacity-50")}>
+          <Switch
+            checked={form.traderLive}
+            onChange={(traderLive) => {
+              if (traderLive && !window.confirm("Ab jetzt bietet und verkauft der Autotrader wirklich bei Kickbase. Verkäufe lassen sich nicht rückgängig machen. Fortfahren?")) return
+              change({ traderLive })
+            }}
+            label="Live handeln"
+            hint="Aus: Probelauf – protokolliert und meldet nur, was er tun würde."
+          />
+          <Switch
+            checked={form.traderProfit}
+            onChange={(traderProfit) => change({ traderProfit })}
+            label="Gewinnhandel zwischen den Spieltagen"
+            hint="Kauft Spieler mit steigender Prognose und verkauft sie, sobald die Prognose dreht. Pausiert nach dem Wochen-Stop-Loss."
+          />
+          <Switch
+            checked={opts.shadow}
+            onChange={(shadow) => setOption({ shadow })}
+            label="Schattentransfers"
+            hint="Verfolgt ausgelassene Käufe und echte Verkäufe auf dem Papier weiter: Hätte das Gebot gereicht, was brachte der Spieler, was tat der Marktwert nach dem Verkauf? Daraus lernt er Gebotshöhe, Prognose-Vertrauen und Tausch-Schwelle."
+          />
+          <details className="py-3">
+            <summary className="cursor-pointer text-sm font-medium">Feineinstellungen</summary>
+            <div className="mt-3 space-y-4">
+              <OptionGroup title="Startelf">
+                <OptionField label="Mindest-Plus erwartete Punkte der Elf" value={opts.minGain} min={0} max={100} decimals onCommit={(minGain) => setOption({ minGain })} />
+                <OptionField label="Höchster Mehrpreis je zusätzlichem Punkt (€)" hint="Gebot minus Marktwert des verdrängten Spielers, geteilt durch das Punkte-Plus" value={opts.maxCostPerPoint} min={0} max={50_000_000} money onCommit={(maxCostPerPoint) => setOption({ maxCostPerPoint })} />
+                <OptionField label="Punkteschnitt mindestens besser (%)" value={opts.minAvgEdge} min={0} max={200} onCommit={(minAvgEdge) => setOption({ minAvgEdge })} />
+                <OptionField label="Mindest-Einsatzquote letzte 5 Spiele (%)" value={opts.minPlay} min={0} max={100} onCommit={(minPlay) => setOption({ minPlay })} />
+                <OptionField label="Anteil des freien Budgets je Startelf-Gebot (%)" value={opts.lineupShare} min={10} max={100} onCommit={(lineupShare) => setOption({ lineupShare })} />
+              </OptionGroup>
+              <OptionGroup title="Gewinnhandel">
+                <OptionField label="Anteil des freien Budgets je Gewinn-Gebot (%)" value={opts.profitShare} min={10} max={100} onCommit={(profitShare) => setOption({ profitShare })} />
+                <OptionField label="Wochen-Stop-Loss (€, 0 = aus)" value={opts.stopLoss} min={0} max={100_000_000} money onCommit={(stopLoss) => setOption({ stopLoss })} />
+              </OptionGroup>
+              <OptionGroup title="Sicherheit">
+                <OptionField label="Budget-Reserve, nie ausgegeben (€)" value={opts.reserve} min={0} max={500_000_000} money onCommit={(reserve) => setOption({ reserve })} />
+                <OptionField label="Höchstpreis für einen Ersatzspieler (€)" value={opts.coverMaxPrice} min={0} max={50_000_000} money onCommit={(coverMaxPrice) => setOption({ coverMaxPrice })} />
+                <OptionField label="Gebote pro Tag" value={opts.dailyBids} min={0} max={30} onCommit={(dailyBids) => setOption({ dailyBids })} />
+                <OptionField label="Verkäufe pro Tag" value={opts.dailySales} min={0} max={30} onCommit={(dailySales) => setOption({ dailySales })} />
+                <OptionField label="Verkauf für Platz: Minuten vor Auktionsende" value={opts.sellWindow} min={5} max={180} onCommit={(sellWindow) => setOption({ sellWindow })} />
+                <OptionField label="Stammspieler-Sperre: Minuten vor dem 1. Anpfiff" hint="Bis 5 Min. nach dem ersten Anpfiff des Spieltags" value={opts.starterLock} min={0} max={1440} onCommit={(starterLock) => setOption({ starterLock })} />
+              </OptionGroup>
+            </div>
+          </details>
+        </div>
       </div>
+    </Card>
+  )
+}
+
+function OptionGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div>
+      <div className="mb-2 text-xs font-semibold tracking-wide text-muted uppercase">{title}</div>
+      <div className="grid gap-3 sm:grid-cols-2">{children}</div>
+    </div>
+  )
+}
+
+/** A number that is saved when the field is left, clamped to the server's bounds. */
+function OptionField({
+  label,
+  hint,
+  value,
+  min,
+  max,
+  money,
+  decimals,
+  onCommit,
+}: {
+  label: string
+  hint?: string
+  value: number
+  min: number
+  max: number
+  money?: boolean
+  decimals?: boolean
+  onCommit: (value: number) => void
+}) {
+  const [text, setText] = useState(String(value))
+  useEffect(() => setText(String(value)), [value])
+  const parse = (raw: string) => (money ? Number(raw.replace(/\D/g, "") || 0) : Number(raw.replace(",", ".")))
+  const commit = () => {
+    const parsed = parse(text)
+    const next = Number.isFinite(parsed) ? Math.max(min, Math.min(max, decimals ? parsed : Math.round(parsed))) : value
+    setText(String(next))
+    if (next !== value) onCommit(next)
+  }
+  return (
+    <label className="text-sm">
+      <span className="mb-1 block text-xs font-medium text-muted">{label}</span>
+      <input
+        inputMode={money ? "numeric" : "decimal"}
+        value={money ? parse(text).toLocaleString("de-DE") : text}
+        onChange={(event) => setText(event.target.value)}
+        onBlur={commit}
+        className="h-10 w-full rounded-xl border border-line bg-surface px-3 tabular-nums"
+      />
+      {hint && <span className="mt-0.5 block text-xs text-muted">{hint}</span>}
+    </label>
+  )
+}
+
+const PURPOSE_LABELS: Record<string, string> = {
+  lineup: "Startelf",
+  cover: "Ersatz",
+  near: "knapp verworfen",
+  profit: "Gewinn",
+  room: "Platz",
+  rescue: "Budget",
+  turn: "Prognose",
+}
+const STATUS_LABELS: Record<string, string> = {
+  planned: "Probelauf",
+  open: "offen",
+  won: "gewonnen",
+  lost: "verloren",
+  expired: "abgelaufen",
+  sold: "verkauft",
+  watching: "Auktion läuft",
+  holding: "gehalten",
+  done: "ausgewertet",
+}
+
+function TraderCard() {
+  const query = useTrader()
+  return (
+    <Card>
+      <CardHeader
+        title="Autotrader"
+        description="Wochenbilanz, letzte Gebote und Verkäufe. Gelernt wird aus allen Ligen gemeinsam."
+        action={query.data?.paused ? <Badge className="text-down">Gewinnhandel pausiert</Badge> : null}
+      />
+      <QueryState query={query}>
+        {(tr) => {
+          const week = tr.weeks[0]
+          const auctions = tr.learned.won + tr.learned.lost
+          return (
+            <div className="space-y-4 p-4 sm:p-5">
+              <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+                <Stat label="Gewinn diese Woche" value={week ? compactMoney(week.profit) : "–"} hint={week ? `${week.sales} Verkäufe, ${compactMoney(week.received)} erlöst` : "noch kein Handel"} />
+                <Stat label="Gebote diese Woche" value={week ? `${week.won} / ${week.bids}` : "–"} hint={week ? `gewonnen · ${week.planned} im Probelauf` : undefined} />
+                <Stat label="Zuschlagsquote" value={auctions ? share(tr.learned.won / auctions) : "–"} hint={`aus ${number(auctions)} Auktionen`} />
+                <Stat label="Mindest-Gewinn" value={compactMoney(tr.learned.minMargin)} hint={`Gebotshöhe je Preisklasse ${tr.learned.extra.map((x) => decimal(x * 100)).join(" / ")} %`} />
+                <Stat
+                  label="Schattentransfers"
+                  value={tr.shadowSummary.done ? compactMoney(tr.shadowSummary.profit) : "–"}
+                  hint={`${tr.shadowSummary.done} ausgewertet, ${tr.shadowSummary.open} laufen · Trefferquote ${share(tr.shadowSummary.hitRate)}`}
+                />
+                <Stat
+                  label="Prognose-Vertrauen"
+                  value={share(tr.learned.gainScale)}
+                  hint={tr.learned.gainSamples >= 10 ? `aus ${tr.learned.gainSamples} Verläufen` : `lernt ab 10 Verläufen (${tr.learned.gainSamples})`}
+                />
+                <Stat
+                  label="Tausch-Schwelle"
+                  value={compactMoney(tr.learned.swapEdge)}
+                  hint={`mehr Prognose pro Tag als der Verkaufte · nach Verkauf gestiegen: ${share(tr.shadowSummary.soldThenRose)}`}
+                />
+                <Stat label="Auktionen auf dem Papier" value={`${tr.learned.shadowWon} / ${tr.learned.shadowWon + tr.learned.shadowLost}`} hint="hätte das Gebot gereicht" />
+              </div>
+              {tr.weeks.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm tabular-nums">
+                    <thead className="text-left text-xs text-muted">
+                      <tr>
+                        <th className="py-1 pr-3 font-medium">Woche</th>
+                        <th className="py-1 pr-3 font-medium">Gebote</th>
+                        <th className="py-1 pr-3 font-medium">Gekauft</th>
+                        <th className="py-1 pr-3 font-medium">Verkauft</th>
+                        <th className="py-1 pr-3 font-medium">Ausgaben</th>
+                        <th className="py-1 pr-3 font-medium">Erlöse</th>
+                        <th className="py-1 pr-3 font-medium">Gewinn</th>
+                        <th className="py-1 pr-3 font-medium">+Punkte</th>
+                        <th className="py-1 font-medium">Schatten</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-line">
+                      {tr.weeks.map((w) => (
+                        <tr key={w.week}>
+                          <td className="py-1.5 pr-3">{w.week}</td>
+                          <td className="py-1.5 pr-3">{w.bids}</td>
+                          <td className="py-1.5 pr-3">{w.won}</td>
+                          <td className="py-1.5 pr-3">{w.sales}</td>
+                          <td className="py-1.5 pr-3">{compactMoney(w.spent)}</td>
+                          <td className="py-1.5 pr-3">{compactMoney(w.received)}</td>
+                          <td className={cn("py-1.5 pr-3", w.profit > 0 ? "text-up" : w.profit < 0 ? "text-down" : "")}>{compactMoney(w.profit)}</td>
+                          <td className="py-1.5 pr-3">{decimal(w.pointsGain)}</td>
+                          <td className="py-1.5">{w.shadowTrades ? `${compactMoney(w.shadowProfit)} (${w.shadowTrades})` : "–"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {tr.trades.length === 0 ? (
+                <EmptyState title="Noch kein Handel" />
+              ) : (
+                <div className="divide-y divide-line">
+                  {tr.trades.map((trade) => (
+                    <div key={trade.id} className="flex items-start justify-between gap-3 py-2">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+                          <Badge>{trade.kind === "bid" ? "Gebot" : "Verkauf"}</Badge>
+                          <Badge>{PURPOSE_LABELS[trade.purpose] ?? trade.purpose}</Badge>
+                          {dateTime(trade.at)}
+                        </div>
+                        <p className="mt-0.5 text-sm break-words">
+                          {trade.name ?? trade.playerId} · {compactMoney(trade.price)}
+                          {trade.reason && <span className="text-muted"> – {trade.reason}</span>}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right text-sm tabular-nums">
+                        <div className="text-xs text-muted">{STATUS_LABELS[trade.status] ?? trade.status}</div>
+                        {trade.profit != null && <div className={trade.profit >= 0 ? "text-up" : "text-down"}>{compactMoney(trade.profit)}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {tr.shadows.length > 0 && (
+                <div>
+                  <div className="mb-1.5 text-xs font-medium text-muted">Schattentransfers – nur auf dem Papier</div>
+                  <div className="divide-y divide-line">
+                    {tr.shadows.map((s) => (
+                      <div key={s.id} className="flex items-start justify-between gap-3 py-2 text-sm">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+                            <Badge>{s.kind === "buy" ? "Kauf" : "nach Verkauf"}</Badge>
+                            <Badge>{PURPOSE_LABELS[s.purpose] ?? s.purpose}</Badge>
+                            {dateTime(s.at)}
+                          </div>
+                          <p className="mt-0.5 break-words">
+                            {s.name ?? s.playerId}
+                            {s.kind === "buy" && ` · Gebot ${compactMoney(s.bid)}`}
+                            {s.winnerPrice != null && <span className="text-muted"> · Zuschlag bei {compactMoney(s.winnerPrice)}</span>}
+                          </p>
+                        </div>
+                        <div className="shrink-0 text-right tabular-nums">
+                          <div className="text-xs text-muted">{STATUS_LABELS[s.status] ?? s.status}</div>
+                          {s.result != null && <div className={s.result >= 0 ? "text-up" : "text-down"}>{compactMoney(s.result)}</div>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        }}
+      </QueryState>
     </Card>
   )
 }
@@ -333,6 +599,7 @@ const KIND_LABELS: Record<string, string> = {
   alert: "Deadline",
   sell: "Verkauf",
   push: "Hinweis",
+  trader: "Autotrader",
 }
 
 function EventsCard() {
