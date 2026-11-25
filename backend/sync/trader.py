@@ -65,6 +65,9 @@ SAFE_SELL_RATIO = 0.9
 ### Paper purchases started per round and league, the most promising first
 SHADOWS_PER_ROUND = 5
 SHADOW_KEEP = timedelta(days=120)
+### Sales of profit positions ("turn" is the name before milestone 2); only these count for the stop-loss
+EXIT_PURPOSES = ("exit", "turn")
+EXIT_ORDER = ("SPORT", "STOP", "TRAIL", "TURN", "TAKE", "TIME")
 ### Debug rounds are kept this long
 DEBUG_KEEP = timedelta(days=21)
 ### An unconfirmed call that Kickbase does not show after this long failed
@@ -496,9 +499,13 @@ class TraderService:
         unsettled = {h.player_id for h in real if h.status in t.UNSETTLED}
         bought = {h.player_id: h for h in real if h.kind == "bid" and h.status == "won"}
         week = t.week_of(now)
-        week_profit = sum(h.profit or 0 for h in real if h.kind == "sell" and t.week_of(h.resolved_at or h.at) == week)
-        ### stop_loss 0 switches it off; a loss of exactly the limit already pauses
-        paused = opts.stop_loss > 0 and week_profit <= -opts.stop_loss
+        ### Weekly stop-loss of the profit trading: realized losses of profit positions this week, plus
+        ### what the open profit positions would lose if sold now (computed below with the squad).
+        ### Sporting transfers and rescue sales do not count. 0 switches it off; exactly the limit pauses.
+        week_profit = sum(
+            h.profit or 0 for h in real
+            if h.kind == "sell" and h.purpose in EXIT_PURPOSES and t.week_of(h.resolved_at or h.at) == week
+        )
         scale = state.gain_scale
         raw_gain: dict[str, int] = {}
 
@@ -520,6 +527,8 @@ class TraderService:
                 gain=int(raw_gain[pid] * scale),
                 value=value,
                 team_id=team_id,
+                ahead=context.expectation_ahead(pid, position, status, team_id, average),
+                samples=context.samples(pid),
             )
 
         ### Starters: kept around the kick-off; without the automatic lineup also between matchdays,
@@ -547,6 +556,17 @@ class TraderService:
         repay_from = t.repay_from(deadline) if deadline is not None else None
         stage = t.phase(now, deadline)
         team_value = sum(p.market_value or 0 for p in squad.players)
+
+        ### Open profit positions: bought by the trader for profit, still owned. Their purchase price is
+        ### the won bid's, else the one Kickbase shows; unknown stays out of every sum
+        positions = {
+            c.player_id: (c, cost)
+            for c in own
+            if (h := bought.get(c.player_id)) is not None and h.purpose == "profit"
+            and (cost := h.paid or cost_of.get(c.player_id)) is not None
+        }
+        unrealized = sum(int(c.value * ratio) - cost for c, cost in positions.values())
+        paused = opts.stop_loss > 0 and (week_profit <= -opts.stop_loss or week_profit + min(unrealized, 0) <= -opts.stop_loss)
 
         ### Open bids: every one counts as spent, and as a player to come (projected squad). Never as
         ### a player who is there (confirmed squad): sales, cover and credit only look at `own`
@@ -622,18 +642,31 @@ class TraderService:
                     "deadline": deadline.isoformat(), "repay_from": repay_from.isoformat(),
                 }, {})
 
-        ### A profit purchase whose forecast turned is sold in the evening, before the update at 22:00
-        if sales_left > 0 and self.settings.automation.sell_advice_hour <= local.hour < 22:
-            for c in own:
-                held = bought.get(c.player_id)
-                if held and held.purpose == "profit" and not c.locked and not c.in_best and c.forecast < 0 and t.keeps_cover(own, c):
-                    actions.append(
-                        Action("sell", "turn", c.player_id, names.get(c.player_id, c.player_id), int(c.value * ratio), c.value,
-                               reason="Prognose dreht ins Minus", cost=cost_of.get(c.player_id))
-                    )
-                    own = _with_best([o for o in own if o.player_id != c.player_id])
-                    sales_left -= 1
-                    break
+        ### Profit positions: hold or sell, every round (the price is the same all day until 22:00).
+        ### One exit per round, the most urgent reason first; never a locked player, never one of the
+        ### best eleven, never the last cover. Every position's verdict goes to the debug log
+        exits: dict[str, str] = {}
+        urgent: list[tuple[int, t.Candidate, str, str]] = []
+        for pid, (c, cost) in positions.items():
+            held = bought[pid]
+            since = analytics.market_value_day(held.resolved_at or held.at)
+            peak = max((int(v) for d, v in (histories.get(pid) or []) if d >= since), default=None)
+            verdict = t.exit_reason(c, cost, peak, (now - (held.resolved_at or held.at)).days, ratio, state.min_margin, opts)
+            if verdict is None:
+                exits[pid] = "halten"
+            elif c.locked or c.in_best or not t.keeps_cover(own, c):
+                exits[pid] = f"{verdict[0]}, aber geschützt (gesperrt, Startelf oder letzter Ersatz)"
+            else:
+                exits[pid] = verdict[0]
+                urgent.append((EXIT_ORDER.index(verdict[0]), c, verdict[0], verdict[1]))
+        if urgent and sales_left > 0:
+            _, c, code, text = min(urgent, key=lambda u: u[0])
+            actions.append(
+                Action("sell", "exit", c.player_id, names.get(c.player_id, c.player_id), int(c.value * ratio), c.value,
+                       reason=f"{text} ({code})", cost=positions[c.player_id][1])
+            )
+            own = _with_best([o for o in own if o.player_id != c.player_id])
+            sales_left -= 1
 
         ### The trader's own bids that are not needed anymore (a rival won the slot's other auction, a
         ### player was won) are withdrawn, the most useful kept first; the user's own bids never
@@ -694,16 +727,17 @@ class TraderService:
             elif pid not in offers:
                 why[pid] = "keine Marktdaten"
 
-        options: list[tuple[float, str, t.Candidate, t.Upgrade | None]] = []
-        ### Order: fill the eleven, then improve it, then trade for profit, then the substitutes
+        options: list[tuple[tuple[int, float], str, t.Candidate, t.Upgrade | None]] = []
+        ### Order by phase (t.priority): normally fill the eleven, improve it, profit, substitutes;
+        ### close to the matchday fill, substitutes, improve, profit last
         for c in market_candidates:
             upgrade = t.lineup_upgrade(planned, c, opts)
             if upgrade is not None:
-                options.append(((2e9 if upgrade.fills else 1e9) + upgrade.gain, "lineup", c, upgrade))
+                options.append((t.priority("lineup", upgrade.fills, stage, upgrade.gain), "lineup", c, upgrade))
             elif row.trader_profit and not paused and c.fit and c.forecast > 0 and c.expires_at is not None and stage != "final":
                 ### Ranked by net return per euro and update at the lowest bid, not by the absolute gain
                 low = t.bid_for(c, 0.0, None)
-                options.append((t.profit_rank(c, low, ratio) if low else -1.0, "profit", c, None))
+                options.append((t.priority("profit", False, stage, t.profit_rank(c, low, ratio) if low else -1.0), "profit", c, None))
             else:
                 why[c.player_id] = (
                     "verletzt/fraglich" if not c.fit
@@ -716,8 +750,8 @@ class TraderService:
         cover_pool = [c for c in market_candidates if not any(o[2] is c for o in options if o[1] == "lineup")]
         for c in cover_pool:
             if c is t.cover_target(planned, [c], opts):
-                options.append((-1e9 - max(c.bid_low, c.price, c.value), "cover", c, None))
-        options.sort(key=lambda o: -o[0])
+                options.append((t.priority("cover", False, stage, -max(c.bid_low, c.price, c.value)), "cover", c, None))
+        options.sort(key=lambda o: o[0], reverse=True)
         money_seen: dict[str, int] = {}
 
         shadows: list[ShadowTrade] = []
@@ -753,8 +787,11 @@ class TraderService:
             elif gaps > 0 or (purpose == "cover" and c.position not in t.missing_cover(planned)):
                 why[c.player_id] = f"{label}: erst die Startelf füllen" if gaps > 0 else "Ersatz: Position schon abgedeckt"
                 continue # The eleven comes first, profit and substitutes wait for it
-            ### Keep enough to fill the other empty slots cheaply
+            ### Keep enough to fill the other empty slots cheaply, and a profit trade leaves the money for
+            ### every missing substitute, so profit never crowds out the bench for good
             keep = max(t.best_of([*planned, c]).empty_slots, 0) * opts.cover_max_price
+            if purpose == "profit":
+                keep += len(t.missing_cover(planned)) * opts.cover_max_price
             money_seen[c.player_id] = money_for(c, free, purpose) - keep
             bid = _price(c, purpose, upgrade, extra, money_seen[c.player_id], opts, state, ratio, profit_room) if slots > 0 else None
             sale = None
@@ -795,7 +832,10 @@ class TraderService:
                 sales_left -= 1
                 sold_now = True
             if upgrade is not None:
-                reason = f"+{upgrade.gain:.0f} erw. Punkte in der Elf, {t.cost_per_point(upgrade, bid) / 1e3:.0f} Tsd. € je Punkt"
+                reason = (
+                    f"+{upgrade.gain:.0f} erw. Punkte in der Elf, {t.cost_per_point(upgrade, bid, ratio) / 1e3:.0f} Tsd. € je Punkt"
+                    + (" (Lücke)" if upgrade.fills else f", bindet {bid / 1e6:.1f} Mio.")
+                )
             elif purpose == "cover":
                 reason = f"Ersatz für Position {c.position}"
             else:
@@ -820,6 +860,7 @@ class TraderService:
                 "gain": c.gain, "value": c.value, "price": c.price, "bid_low": c.bid_low, "bid_high": c.bid_high,
                 "expires_at": c.expires_at.isoformat() if c.expires_at else None, "in_best": c.in_best, "locked": c.locked,
                 "net_at_low": t.expected_profit(c, low, ratio) if (low := t.bid_for(c, 0.0, None)) else None,
+                "ahead": c.ahead, "samples": c.samples, "quality": t.quality(c),
             }
 
         return finish(actions, shadows, {
@@ -827,7 +868,10 @@ class TraderService:
             "worst_case": budget - sum(all_open.values()), "cash_free": free, "credit": loan, "credit_mode": opts.credit_mode,
             "liquidation": t.liquidation_value(own0, ratio, opts.daily_sales), "profit_room": profit_room,
             "reserve": opts.reserve, "open_bids": all_open, "slots": slots, "bids_left": bids_left, "sales_left": sales_left,
-            "paused": paused, "keep_starters": keep_starters, "lineup_known": bool(saved), "sell_ratio": ratio,
+            "paused": paused, "week_profit": week_profit, "unrealized": unrealized,
+            "priorities": "nah am Spieltag: Lücke > Ersatz > Verbesserung > Gewinn" if stage != "normal" else "normal: Lücke > Verbesserung > Gewinn > Ersatz",
+            "positions": {pid: {"cost": cost, "net_now": int(c.value * ratio) - cost, "verdict": exits.get(pid)} for pid, (c, cost) in positions.items()},
+            "keep_starters": keep_starters, "lineup_known": bool(saved), "sell_ratio": ratio,
             "deadline": deadline.isoformat() if deadline else None,
             "repay_from": repay_from.isoformat() if repay_from else None,
             "squad": [player(c) for c in own0], "pending": [player(c) for c in pending.values()],
@@ -1135,13 +1179,13 @@ def _price(
     if purpose == "profit":
         caps += [profit_room, t.max_profit_bid(c, ratio, state.min_margin, opts.min_roi / 100)]
     if upgrade is not None:
-        caps.append(int(upgrade.replaced_value + opts.max_cost_per_point * max(upgrade.gain, 0.1)))
+        caps.append(int(upgrade.replaced_value * ratio + opts.max_cost_per_point * max(upgrade.gain, 0.1)))
     bid = t.bid_for(c, extra, min(caps))
     if bid is None:
         return None
     if purpose == "profit" and not t.is_profit_buy(c, bid, state.min_margin, ratio, opts.min_roi / 100):
         return None
-    if upgrade is not None and not t.worth_it(upgrade, bid, opts):
+    if upgrade is not None and not t.worth_it(upgrade, bid, opts, ratio):
         return None
     return bid
 

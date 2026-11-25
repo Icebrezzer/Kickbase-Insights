@@ -639,6 +639,9 @@ class TraderOptionsIn(Schema):
     starter_lock: int = Field(60, ge=0, le=1440) # Minutes before the first kick-off
     min_roi: float = Field(2.0, ge=0, le=100, allow_inf_nan=False) # % net return of a profit buy
     credit_mode: int = Field(1, ge=0, le=2) # 0 no credit, 1 eleven and substitutes, 2 also profit trades
+    trailing_stop: int = Field(5, ge=0, le=50) # % below the peak since the purchase, 0 off
+    position_stop: int = Field(10, ge=0, le=100) # % net loss on the purchase price, 0 off
+    max_hold_days: int = Field(7, ge=0, le=60) # Days without enough left to gain, 0 off
     shadow: bool = True
     rescue_override: bool = False # Rescue sales may sell locked players
 

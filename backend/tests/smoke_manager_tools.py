@@ -299,6 +299,25 @@ def main() -> None:
         )
         check(not any(a.purpose == "rescue" for a in far_plan), "no rescue sales days before the deadline")
 
+        ### Exit system: a profit position bought three days ago is judged every round, and an exit
+        ### verdict on an unprotected player becomes one sale
+        bench_player = next(c for c in squad_x.players[::-1])
+        with Session(state.engine) as s:
+            s.add(TradeLog(user_id="1001", league_id="4242", player_id=bench_player.id, kind="bid", purpose="profit", status="won",
+                           price=bench_player.market_value * 3, paid=bench_player.market_value * 3, market_value=bench_player.market_value,
+                           at=utcnow() - timedelta(days=3), resolved_at=utcnow() - timedelta(days=3)))
+            s.commit()
+        state.automation.trader._last_debug.clear()
+        exit_plan, _ = state.automation.trader._plan(league, state.automation.get_settings("1001", "4242"), squad_x, 5_000_000, market_x, utcnow())
+        with Session(state.engine) as s:
+            debug = s.exec(select(TraderDebug).order_by(TraderDebug.id.desc())).first()
+        verdict = debug.data["positions"].get(bench_player.id, {}).get("verdict")
+        print("    position:", debug.data["positions"].get(bench_player.id), "plan:", [(a.kind, a.purpose, a.reason) for a in exit_plan])
+        check(verdict is not None and debug.data["unrealized"] < 0, f"the position is judged ({verdict}), its book loss counted")
+        exited = [a for a in exit_plan if a.purpose == "exit"]
+        check((verdict in ("SPORT", "STOP", "TRAIL", "TURN", "TAKE", "TIME")) == (len(exited) == 1), "an exit verdict on a free player is one sale")
+        check(debug.data["paused"] is (debug.data["unrealized"] + debug.data["week_profit"] <= -3_000_000), "book losses count for the stop-loss")
+
         ### Dry run entries use up no live limits and block no player
         with Session(state.engine) as s:
             s.add(TradeLog(user_id="1001", league_id="4242", player_id="dry", kind="sell", purpose="turn", status="planned", price=1, market_value=1))
@@ -310,7 +329,10 @@ def main() -> None:
         with Session(state.engine) as s:
             debug = s.exec(select(TraderDebug).order_by(TraderDebug.id.desc())).first()
             bids = s.exec(select(TradeLog).where(TradeLog.kind == "bid")).all()
-        real_bids = sum(1 for r in bids if r.status not in ("planned", "failed"))
+        from core.analytics import MARKET_VALUE_TIMEZONE
+
+        midnight = utcnow().astimezone(MARKET_VALUE_TIMEZONE).replace(hour=0, minute=0, second=0, microsecond=0)
+        real_bids = sum(1 for r in bids if r.status not in ("planned", "failed") and r.at >= midnight)
         planned_now = sum(1 for a in [*debug.data["actions"], *debug.data["risk_blocked"]] if a["kind"] == "bid")
         dry_bids = sum(1 for r in bids if r.status == "planned")
         check(dry_bids > 0 and debug.data["bids_left"] + planned_now == 6 - real_bids,

@@ -64,6 +64,9 @@ class Options:
     starter_lock: int = 60 # Minutes before the first kick-off from which starters are kept
     min_roi: float = 2.0 # Net return a profit buy must make at least, in percent of the bid
     credit_mode: int = 1 # 0: never on credit, 1: only for the eleven and substitutes, 2: also profit trades
+    trailing_stop: int = 5 # Percent below the peak since the purchase that sells a position in profit, 0 off
+    position_stop: int = 10 # Percent net loss on the purchase price that sells a position, 0 off
+    max_hold_days: int = 7 # Days a profit position may be held without enough left to gain, 0 off
     shadow: bool = True # Learn from paper trades too
     rescue_override: bool = False # Rescue sales may also sell locked players (starters, fresh buys)
 
@@ -131,6 +134,9 @@ OPTION_LIMITS: dict[str, tuple[float, float]] = {
     "starter_lock": (0, 24 * 60),
     "min_roi": (0.0, 100.0),
     "credit_mode": (0, 2),
+    "trailing_stop": (0, 50),
+    "position_stop": (0, 100),
+    "max_hold_days": (0, 60),
 }
 
 
@@ -154,6 +160,8 @@ class Candidate:
     gain: int # Forecast change over the next PROFIT_HOLD updates, scaled by what the forecast is worth
     value: int
     team_id: str | None = None
+    ahead: float | None = None # Mean expected points over the next three matches, None when unknown
+    samples: int | None = None # Matches played of the club's last five: how much data form and play rest on
     ### Squad only
     in_best: bool = False
     locked: bool = False # Bought by the trader too recently, or a starter before the kick-off
@@ -247,10 +255,33 @@ class Upgrade:
     fills: bool = False # He takes an empty slot of the eleven
 
 
+### Season average and form weigh this much in the quality score (form reacts faster, the average is
+### the larger sample). Not yet calibrated by a backtest (milestone 4)
+AVERAGE_WEIGHT = 0.6
+### Fewer matches than this of the last five: the data is thin, a swap needs this much more gain
+THIN_SAMPLES = 3
+THIN_FACTOR = 1.5
+
+
+def quality(p: Candidate) -> float | None:
+    """Average and form in one number, so a clearly better average can outweigh a slightly weaker
+    recent form and the other way round. None when neither is known."""
+    if p.average is not None and p.form is not None:
+        return AVERAGE_WEIGHT * p.average + (1 - AVERAGE_WEIGHT) * p.form
+    return p.average if p.average is not None else p.form
+
+
 def lineup_upgrade(squad: Sequence[Candidate], target: Candidate, opts: Options) -> Upgrade | None:
-    """`target` makes the eleven clearly better: at least `min_gain` expected points more, a proven
-    regular, and a better season average (by `min_avg_edge`) and form than the player he replaces.
-    An empty slot only needs him to be fit and a regular."""
+    """`target` makes the eleven clearly better. Always: fit and a proven regular (`min_play`, known).
+
+    An empty slot needs no more: a complete eleven beats a small gain (its price is judged by the
+    real points). A swap also needs:
+    - at least `min_gain` expected points more next matchday, half as much again when the target's
+      data is thin (fewer than three of the last five matches),
+    - a higher quality score (average and form weighed) by `min_avg_edge` percent; a target without
+      any average or form is no swap, missing data is no proof,
+    - not worse over the next three matches (`ahead`), so one easy opponent is no reason to buy.
+    """
     if not target.fit or target.play is None or target.play < opts.min_play / 100:
         return None
     before = best_of(squad)
@@ -260,31 +291,33 @@ def lineup_upgrade(squad: Sequence[Candidate], target: Candidate, opts: Options)
     fills = after.empty_slots < before.empty_slots
     ### The real points, not the empty slot penalty: price per point stays meaningful for a gap too
     gain = after.expected - before.expected
-    if not fills and gain < max(opts.min_gain, 0.1):
+    thin = target.samples is not None and target.samples < THIN_SAMPLES
+    if not fills and gain < max(opts.min_gain, 0.1) * (THIN_FACTOR if thin else 1.0):
         return None
     by_id = {p.player_id: p for p in squad}
     out = [by_id[pid] for pid in before.player_ids if pid not in after.player_ids and pid in by_id]
     same = [p for p in out if p.position == target.position]
     replaced = min(same or out, key=lambda p: p.expected) if out else None
-    if replaced is not None:
-        if (
-            target.average is not None
-            and replaced.average is not None
-            and (target.average < replaced.average * (1 + opts.min_avg_edge / 100) or target.average <= replaced.average)
-        ):
+    if replaced is not None and not fills:
+        mine, theirs = quality(target), quality(replaced)
+        if mine is None:
             return None
-        if target.form is not None and replaced.form is not None and target.form <= replaced.form:
+        if theirs is not None and (mine <= theirs or mine < theirs * (1 + opts.min_avg_edge / 100)):
+            return None
+        if target.ahead is not None and replaced.ahead is not None and target.ahead < replaced.ahead:
             return None
     return Upgrade(round(gain, 1), replaced.player_id if replaced else None, replaced.value if replaced else 0, fills)
 
 
-def cost_per_point(upgrade: Upgrade, bid: int) -> float:
-    """What the bid costs above the replaced player's value, per expected point gained."""
-    return max(bid - upgrade.replaced_value, 0) / max(upgrade.gain, 0.1)
+def cost_per_point(upgrade: Upgrade, bid: int, ratio: float = 1.0) -> float:
+    """The transfer difference per expected point: the bid minus what the replaced player would bring
+    at the (conservative) instant sale ratio. He is not sold by this; it is the fair price comparison.
+    The capital really tied up is the whole bid (see the debug log)."""
+    return max(bid - upgrade.replaced_value * ratio, 0) / max(upgrade.gain, 0.1)
 
 
-def worth_it(upgrade: Upgrade, bid: int, opts: Options) -> bool:
-    return cost_per_point(upgrade, bid) <= opts.max_cost_per_point
+def worth_it(upgrade: Upgrade, bid: int, opts: Options, ratio: float = 1.0) -> bool:
+    return cost_per_point(upgrade, bid, ratio) <= opts.max_cost_per_point
 
 
 def cover_target(squad: Sequence[Candidate], market: Iterable[Candidate], opts: Options) -> Candidate | None:
@@ -391,6 +424,61 @@ def profit_rank(target: Candidate, bid: int, ratio: float) -> float:
     """Net return per euro and market value update: a cheap player with a good return beats an
     expensive one that only makes more in absolute terms."""
     return expected_profit(target, bid, ratio) / max(bid, 1) / PROFIT_HOLD
+
+
+### ===============================================================================
+### Priorities: what goes first depends on how close the matchday is
+### ===============================================================================
+
+### Tier per purpose. Normal trading: fill the eleven, improve it, profit, substitutes. Close to a
+### matchday (prepare/repay/final): fill the eleven, substitutes, improve it, profit last
+TIERS = {
+    False: {"fill": 4, "lineup": 3, "profit": 2, "cover": 1},
+    True: {"fill": 4, "cover": 3, "lineup": 2, "profit": 0},
+}
+
+
+def priority(purpose: str, fills: bool, stage: str, score: float) -> tuple[int, float]:
+    """Sort key, highest first: the tier of the purpose in this phase, then its own score (points
+    gained, net return per euro, or the lower price of a substitute)."""
+    near = stage in ("prepare", "repay", "final")
+    return TIERS[near]["fill" if fills else purpose], score
+
+
+### ===============================================================================
+### Selling profit positions: compare holding with selling
+### ===============================================================================
+
+### A forecast fall of this share of the value (or a fall today too) is a real turn, not noise
+TURN_SHARE = 0.005
+
+
+def exit_reason(p: Candidate, cost: int, peak: int | None, held_days: int, ratio: float, min_margin: int,
+                opts: Options) -> tuple[str, str] | None:
+    """Why a profit position should be sold now, or None to keep holding. Selling brings
+    `value x ratio` now; holding brings the forecast gain (`gain x ratio`) later, with its risk.
+
+    In this order: sporting failure; position stop-loss; trailing stop; forecast turn (confirmed by a
+    fall today or a clear forecast fall); take profit (in profit and holding brings less than the
+    minimum margin); time limit (held too long without enough left to gain). Stops and trails only
+    fire while the forecast is not rising again, so a dip the forecast sees recovering is held.
+    """
+    proceeds = int(p.value * ratio)
+    pnl = proceeds - cost
+    further = int(max(p.gain, 0) * ratio)
+    if not p.fit:
+        return "SPORT", "verletzt oder fällt aus"
+    if opts.position_stop and pnl <= -cost * opts.position_stop / 100 and p.forecast <= 0:
+        return "STOP", f"Verlust {pnl / 1e3:+.0f} Tsd. € erreicht die Positionsgrenze"
+    if opts.trailing_stop and peak is not None and int(peak * ratio) > cost and p.value <= peak * (1 - opts.trailing_stop / 100) and p.forecast <= 0:
+        return "TRAIL", f"{(peak - p.value) / 1e3:.0f} Tsd. € unter dem Höchststand seit dem Kauf"
+    if p.forecast < 0 and (p.today < 0 or p.forecast <= -p.value * TURN_SHARE):
+        return "TURN", "Prognose dreht ins Minus"
+    if pnl > 0 and further < min_margin:
+        return "TAKE", f"Gewinn {pnl / 1e3:+.0f} Tsd. € gesichert, Halten bringt kaum mehr"
+    if opts.max_hold_days and held_days >= opts.max_hold_days and further < min_margin:
+        return "TIME", f"seit {held_days} Tagen gehalten ohne genug Aussicht"
+    return None
 
 
 ### ===============================================================================

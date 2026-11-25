@@ -60,6 +60,26 @@ class MatchContext:
             form, fixture, self.placements, self.win_probability(fixture, team_id), self.weights
         )
 
+    def expectation_ahead(
+        self, player_id: str, position: int, status: int, team_id: str | None, average_points: int | None, matches: int = 3
+    ) -> float | None:
+        """Mean expected points over the club's next `matches` fixtures, by the same model: odds where
+        Kickbase has them (the next matchday), the table and home/away for the later ones. None
+        without fixtures. The status is taken as it is now."""
+        ahead = sorted((f for f in self.fixtures if f.day >= self.day and team_id in (f.team1_id, f.team2_id)), key=lambda f: f.day)[:matches]
+        if not ahead:
+            return None
+        form = coach.FormInput(player_id, position, status, team_id, average_points, self.recent(player_id)[:5])
+        values = [
+            coach.expected_points(form, f, self.placements, self.win_probability(f, team_id) if f.day == self.day else None, self.weights).expected
+            for f in ahead
+        ]
+        return round(sum(values) / len(values), 1)
+
+    def samples(self, player_id: str) -> int:
+        """How many of the club's last five matches the player played: the data behind form and play."""
+        return sum(1 for m in self.recent(player_id)[:5] if m.played)
+
 
 def load_context(
     session: Session, competition_id: int, player_ids: Iterable[str] | None, now: datetime

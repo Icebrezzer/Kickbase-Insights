@@ -78,9 +78,12 @@ def main() -> None:
     assert t.lineup_upgrade(s, replace(star, form=1), OPTS) is None, "worse recent form, no buy"
     assert t.lineup_upgrade(s, star, replace(OPTS, min_gain=500)) is None, "the minimum gain is a setting"
     replaced = by[up.replaced]
-    near = replace(star, average=replaced.average * 1.05)
-    assert t.lineup_upgrade(s, near, OPTS) is None, "5 % better average is not clearly better"
+    ### Average and form weighed together: 5 % better on both is not clearly better, a clearly better
+    ### form can make up for a close average
+    near = replace(star, average=replaced.average * 1.05, form=replaced.form * 1.05)
+    assert t.lineup_upgrade(s, near, OPTS) is None, "5 % better is not clearly better"
     assert t.lineup_upgrade(s, near, replace(OPTS, min_avg_edge=0)) is not None
+    assert t.lineup_upgrade(s, replace(near, form=replaced.form * 1.5), OPTS) is not None, "much better form counts"
 
     ### Price/performance: 15 Mio. more for 2 points is not worth it, for 60 points it is
     small = t.Upgrade(2.0, "f2", 5_000_000)
