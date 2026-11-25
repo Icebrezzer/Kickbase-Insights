@@ -177,7 +177,7 @@ Nicht verfügbar und deshalb **nicht** verwendet:
 
 ```
 free       = Kontostand − Reserve − alle offenen Gebote          (geplante Verkäufe zählen NICHT)
-max_bid    = (Mannschaftswert + Kontostand) × 0,33 (+ Kontostand, wenn negativ)    [Kickbase-Regel, nicht verifiziert]
+max_bid    = Kontostand + 33 % × Mannschaftswert    [wie BaseXI „Max. Invest“; passt zur Kickbase-Ablehnung ohne Kader]
 liquidation = simulierter Verkauf Spieler für Spieler in Verkaufsreihenfolge:
               nie gesperrt, nie beste Elf, nie letzter fitter Ersatz einer Position,
               höchstens daily_sales Verkäufe, Wert = (Marktwert + fallende Prognose) × konservative Quote
