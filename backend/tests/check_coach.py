@@ -193,7 +193,8 @@ def main() -> None:
     assert partial.learned and partial.win == c.ExpectationWeights().win, partial
     matches = [[d, p, 90, 5] for d, p in zip(range(1, 9), (100, 120, 80, 150, 0, 200, 90, 110), strict=True)]
     history = ln.history_rows(matches, {d: ("3", d % 2 == 0) for d in range(1, 9)}, {"3": 18})
-    assert len(history) == 5 and history[0].actual == 150 and history[0].table == 1.0
+    ### The opponent's table of back then is unknown and today's would be from the future: no table term
+    assert len(history) == 5 and history[0].actual == 150 and history[0].table == 0.0
 
     ### Learning: the bidder model finds that need decides who wins
     samples = []

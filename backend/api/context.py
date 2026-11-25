@@ -103,12 +103,18 @@ def load_context(
         for o in session.exec(select(MatchOdds).where(MatchOdds.match_id.in_(match_ids)))
         if o.home and o.away
     }
-    return MatchContext(fixtures, placements, forms, odds, upcoming, day, learned_weights(session))
+    return MatchContext(fixtures, placements, forms, odds, upcoming, day, learned_weights(session, competition_id))
 
 
-def learned_weights(session: Session) -> coach.ExpectationWeights:
-    """The expected points weights learned from the real points (sync.learning), if any."""
-    row = session.get(ModelState, "expectation")
+def expectation_key(competition_id: int | None) -> str:
+    """Each competition learns its own weights: the 2. Bundesliga scores differently from the 1."""
+    return f"expectation:{competition_id}" if competition_id is not None else "expectation"
+
+
+def learned_weights(session: Session, competition_id: int | None = None) -> coach.ExpectationWeights:
+    """The expected points weights learned from the real points of this competition (sync.learning),
+    the weights stored before they were kept per competition as a fallback, else the defaults."""
+    row = session.get(ModelState, expectation_key(competition_id)) or session.get(ModelState, "expectation")
     data = row.data if row else {}
     if not data or not data.get("rows"):
         return coach.ExpectationWeights()

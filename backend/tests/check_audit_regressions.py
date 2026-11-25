@@ -268,6 +268,53 @@ class DataTests(unittest.TestCase):
             engine.dispose()
 
 
+class ExpectationLearningTests(unittest.TestCase):
+    """Expected points are learned per competition, from its own players only, without counting a
+    logged match twice and without today's table for past matches."""
+
+    def test_competitions_learn_apart(self):
+        from api.context import learned_weights
+        from db.models import ExpectationLog, ModelState, PlayerForm
+        from sync.learning import LearningService
+
+        engine = create_db_engine("sqlite://")
+        try:
+            init_db(engine)
+            with Session(engine) as session:
+                for cid, team in ((1, "a"), (2, "b")):
+                    session.add(Team(id=team, name=team, competition_id=cid, placement=1))
+                    for n in range(40):
+                        pid = f"{team}{n}"
+                        session.add(Player(id=pid, team_id=team, active=True))
+                        ### Competition 1 scores 10x what competition 2 scores
+                        points = 100 if cid == 1 else 10
+                        session.add(PlayerForm(player_id=pid, matches=[[d, points + (n + d) % 7, 90, None] for d in range(1, 13)]))
+                session.add(ExpectationLog(competition_id=1, day=12, player_id="a0", form=1, average=1, chance=1, actual=5))
+                session.commit()
+            service = LearningService.__new__(LearningService)
+            service.engine = engine
+            service.fit_expectations(1, force=True)
+            service.fit_expectations(2, force=True)
+            with Session(engine) as session:
+                one, two = session.get(ModelState, "expectation:1"), session.get(ModelState, "expectation:2")
+                self.assertIsNotNone(one)
+                self.assertIsNotNone(two)
+                self.assertIsNone(session.get(ModelState, "expectation"), "no shared key any more")
+                ### 40 players x 9 rebuilt matches each, the logged match of a0 not rebuilt again
+                self.assertEqual(one.data["history_rows"], 40 * 9 - 1)
+                self.assertEqual(two.data["history_rows"], 40 * 9, "only the own competition's players")
+                self.assertEqual(learned_weights(session, 2).rows, two.data["rows"])
+        finally:
+            engine.dispose()
+
+    def test_rebuilt_rows_use_no_table_of_today(self):
+        from core.learning import history_rows
+
+        rows = history_rows([[d, 50, 90, None] for d in range(1, 8)], {d: ("x", True) for d in range(1, 8)}, {"x": 18})
+        self.assertTrue(rows and all(r.table == 0.0 for r in rows))
+        self.assertEqual(len(history_rows([[d, 50, 90, None] for d in range(1, 8)], {}, {}, skip_days={5, 6})), len(rows) - 2)
+
+
 class DemoDatabaseTests(unittest.TestCase):
     def test_demo_never_uses_a_configured_database(self):
         from api.app import database_url

@@ -22,6 +22,8 @@ from core.analytics import least_squares
 ### ===============================================================================
 
 MIN_EXPECTATION_ROWS = 300
+### Held-out rows needed before the weights are judged on them instead of on the training rows
+HOLDOUT_MIN = 60
 
 
 @dataclass(frozen=True)
@@ -65,8 +67,13 @@ def fit_expectation(rows: Sequence[ExpectationRow]) -> coach.ExpectationWeights:
     usable = [r for r in rows if r.form is not None and r.average is not None]
     if len(usable) < MIN_EXPECTATION_ROWS:
         return default
+    ### Judged on rows the fit did not see: every fifth row is held out (with enough of them),
+    ### so the new weights must beat the defaults on new data, not on the data they were fitted to
+    test = usable[4::5] if len(usable) >= 5 * HOLDOUT_MIN else []
+    train = [r for i, r in enumerate(usable) if i % 5 != 4] if test else usable
+    judge = test or usable
     features, targets = [], []
-    for r in usable:
+    for r in train:
         base = _base(r, default.form, default.average)
         win_term = (r.win - coach.TYPICAL_WIN) if r.win is not None else 0.0
         table = r.table if r.win is None else 0.0
@@ -88,10 +95,10 @@ def fit_expectation(rows: Sequence[ExpectationRow]) -> coach.ExpectationWeights:
         average=round(min(max(b, 0.0), 1.5), 3),
         win=round(min(max(c / scale, 0.0), 1.0), 3) if 2 in active else default.win,
         table=round(min(max(d / scale, 0.0), 0.4), 3) if 3 in active else default.table,
-        rows=len(usable),
+        rows=len(train),
     )
-    error = sum(abs(predict(r, fitted) - r.actual) for r in usable) / len(usable)
-    default_error = sum(abs(predict(r, default) - r.actual) for r in usable) / len(usable)
+    error = sum(abs(predict(r, fitted) - r.actual) for r in judge) / len(judge)
+    default_error = sum(abs(predict(r, default) - r.actual) for r in judge) / len(judge)
     ### Only take the new weights when they really are better
     if error >= default_error:
         return coach.ExpectationWeights(rows=0, error=default_error, default_error=default_error)
@@ -101,18 +108,23 @@ def fit_expectation(rows: Sequence[ExpectationRow]) -> coach.ExpectationWeights:
 
 
 def history_rows(
-    matches: Sequence[Sequence], opponents: dict[int, tuple[str | None, bool]], placements: dict[str, int | None]
+    matches: Sequence[Sequence], opponents: dict[int, tuple[str | None, bool]], placements: dict[str, int | None],
+    skip_days: set[int] | frozenset[int] = frozenset(),
 ) -> list[ExpectationRow]:
     """Rows rebuilt from a player's past matches: for every match, what his earlier ones said.
 
     `matches` are the stored form rows `[matchday, points, minutes, role, ...]` in any order,
     `opponents` maps a matchday to the opponent and whether it was at home. Status and odds of the
-    past are unknown: the player counts as available, the table stands in for the odds.
+    past are unknown: the player counts as available. The table of back then is unknown too, and
+    today's would be knowledge of the future, so the table term is left out (0): its weight is
+    learned from the logged forecasts only. Matchdays in `skip_days` were logged as real forecasts
+    and are not counted twice.
     """
     ordered = sorted((m for m in matches if m and m[0] is not None), key=lambda m: m[0])
-    teams = max((v for v in placements.values() if v is not None), default=18)
     rows = []
     for index in range(3, len(ordered)):
+        if int(ordered[index][0]) in skip_days:
+            continue
         before = [coach.MatchForm(int(m[1]), int(m[2] or 0) if len(m) > 2 else 0, m[3] if len(m) > 3 else None) for m in ordered[:index]]
         recent = list(reversed(before))[:5]
         played_points = [m.points for m in before if m.played]
@@ -121,14 +133,14 @@ def history_rows(
         form = coach.form_points([m.points for m in recent if m.played])
         chance = coach.play_probability(recent) or 0.0
         day = int(ordered[index][0])
-        opponent, home = opponents.get(day, (None, None))
+        _, home = opponents.get(day, (None, None))
         rows.append(
             ExpectationRow(
                 form=form,
                 average=sum(played_points) / len(played_points),
                 chance=chance,
                 win=None,
-                table=coach.table_term(placements.get(opponent or ""), max(teams, 2)),
+                table=0.0,
                 home=home,
                 actual=int(ordered[index][1] or 0),
             )

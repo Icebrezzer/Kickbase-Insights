@@ -15,7 +15,7 @@ from pydantic.alias_generators import to_camel
 from sqlalchemy import Engine
 from sqlmodel import Session, select
 
-from api.context import load_context
+from api.context import expectation_key, load_context
 from core import coach, learning
 from core.config import Settings
 from db.models import (
@@ -48,8 +48,8 @@ def load_state(session: Session, key: str) -> dict:
     return dict(row.data) if row else {}
 
 
-def expectation_weights(session: Session) -> coach.ExpectationWeights:
-    data = load_state(session, "expectation")
+def expectation_weights(session: Session, competition_id: int | None = None) -> coach.ExpectationWeights:
+    data = load_state(session, expectation_key(competition_id)) or load_state(session, "expectation")
     if not data:
         return coach.ExpectationWeights()
     return coach.ExpectationWeights(**{k: v for k, v in data.items() if k in coach.ExpectationWeights.__dataclass_fields__})
@@ -151,18 +151,25 @@ class LearningService:
         return filled
 
     def fit_expectations(self, competition_id: int, force: bool = False) -> coach.ExpectationWeights | None:
-        if not force and not self._due("expectation"):
+        """Per competition (own key, own daily rhythm): its logged forecasts plus rows rebuilt from its
+        players' past matches. A match that was logged is not rebuilt as well (no double weight), and
+        the rebuilt rows carry no table term (today's table would be knowledge of the future)."""
+        key = expectation_key(competition_id)
+        if not force and not self._due(key):
             return None
         with Session(self.engine) as session:
-            logged = [
-                learning.ExpectationRow(r.form, r.average, r.chance, r.win, r.table, r.home, r.actual)
-                for r in session.exec(
+            logged_rows = [
+                r for r in session.exec(
                     select(ExpectationLog).where(
                         ExpectationLog.competition_id == competition_id, ExpectationLog.actual.is_not(None)
                     )
                 )
                 if r.actual is not None
             ]
+            logged = [learning.ExpectationRow(r.form, r.average, r.chance, r.win, r.table, r.home, r.actual) for r in logged_rows]
+            logged_days: dict[str, set[int]] = {}
+            for r in logged_rows:
+                logged_days.setdefault(r.player_id, set()).add(r.day)
             ### Rebuilt from the season's matches, so there is something to learn from on day one
             placements = {
                 t.id: t.placement for t in session.exec(select(Team).where(Team.competition_id == competition_id))
@@ -173,13 +180,20 @@ class LearningService:
                     opponents.setdefault(f.team1_id, {})[f.day] = (f.team2_id, True)
                 if f.team2_id:
                     opponents.setdefault(f.team2_id, {})[f.day] = (f.team1_id, False)
-            teams_of = dict(session.exec(select(Player.id, Player.team_id)).all())
+            ### Only players of this competition's clubs
+            teams_of = dict(session.exec(
+                select(Player.id, Player.team_id).where(Player.team_id.in_(list(placements)))
+            ).all())
             history = []
-            for pid, matches in session.exec(select(PlayerForm.player_id, PlayerForm.matches)).all():
-                history.extend(learning.history_rows(matches, opponents.get(teams_of.get(pid) or "", {}), placements))
+            for pid, matches in session.exec(
+                select(PlayerForm.player_id, PlayerForm.matches).where(PlayerForm.player_id.in_(list(teams_of)))
+            ).all():
+                history.extend(learning.history_rows(
+                    matches, opponents.get(teams_of.get(pid) or "", {}), placements, skip_days=logged_days.get(pid, set())
+                ))
         weights = learning.fit_expectation(logged + history)
         self._save(
-            "expectation",
+            key,
             {
                 "form": weights.form,
                 "average": weights.average,
@@ -433,7 +447,7 @@ class LearningService:
 
     def status(self, league: League) -> dict:
         with Session(self.engine) as session:
-            weights = load_state(session, "expectation")
+            weights = load_state(session, expectation_key(league.competition_id)) or load_state(session, "expectation")
             bidder = load_state(session, "bidder")
             mode = load_state(session, "achievement_mode")
             sell = load_state(session, "sell_ratio")
