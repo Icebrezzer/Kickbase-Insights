@@ -285,8 +285,19 @@ class TraderService:
             listing = next((p for p in market.players if p.id == action.player_id), None)
             offer_id = listing.own_offer_id(user_id) if listing else None
             if offer_id is None:
+                ### An own bid without a usable offer id: withdrawing cannot work, the bid stays (and
+                ### stays counted as spent)
+                if listing is not None and listing.own_bid(user_id) is not None:
+                    self.automation.record(user_id, league.id, "trader", f"{action.name}: Gebot hat keine Angebots-ID, nicht zurückgezogen", ok=False)
+                    return "failed"
                 return "skipped"
             await client.withdraw_offer(league.id, action.player_id, offer_id)
+            ### Checked, not assumed
+            after = await client.market(league.id)
+            still = next((p for p in after.players if p.id == action.player_id), None)
+            if still is not None and still.own_bid(user_id) is not None:
+                self.automation.record(user_id, league.id, "trader", f"{action.name}: Kickbase hat das Gebot nicht zurückgezogen", ok=False)
+                return "failed"
         except KickbaseAuthError:
             raise
         except KickbaseError as e:

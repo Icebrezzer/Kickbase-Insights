@@ -562,7 +562,8 @@ Gegen die echte Kickbase-API lässt sich das ohne Live-Zugang nicht prüfen. Die
 | Kein Abruf des Verkaufspreises vorab | – | Schätzung, danach Messung |
 | 0 Punkte nur bei negativem Kontostand **zum Anpfiff** | anderer Prüfzeitpunkt | Rückzahlung ab Vorabend, Push-Warnung |
 | Verkauf eines Starters 5 Min. nach Anpfiff behält seine Punkte | Punktverlust | Angabe des Nutzers. Sperre einstellbar (`starter_lock`) |
-| Gebote zurückziehen per `DELETE …/offers/{id}` | Zurückziehen scheitert | Ergebnis über den Markt geprüft. Gebot bleibt sonst offen und wird als ausgegeben gezählt |
+| Gebote zurückziehen per `DELETE …/offers/{id}` | **Im echten Test (25.11.) gescheitert**: Das Gebot blieb stehen | Vermutete Ursache: `uoid` am Marktspieler ist die **Angebots-ID** des eigenen Gebots (früher „userOfferId“), nicht eine Nutzer-ID. Beide Lesarten werden jetzt akzeptiert. Nach jedem Zurückziehen prüft die App den Markt erneut; steht das Gebot noch, gibt es einen Fehler statt Erfolg. Die Rohdaten zeigt `GET /api/market/{spieler}/raw` |
+| 33-%-Regel | Kickbase lehnt mit `ThirtyThreePercentRuleExceeded` ab | **Beobachtet (25.11.)** in einer Liga ohne Kaderspieler, als ein Testgebot nicht zurückgezogen werden konnte. Spricht dafür, dass offene Gebote auf das Maximalgebot angerechnet werden; der Trader rechnet sie ohnehin als ausgegeben. Die App zeigt den Fehler jetzt in Klartext |
 | Antwort der gespeicherten Aufstellung (`lo`-Plätze) | Aufstellung unbekannt | Dann gilt jeder fitte Spieler als gesperrt |
 | Gleichstand, Ändern von Geboten | unbekannt | nicht genutzt |
 

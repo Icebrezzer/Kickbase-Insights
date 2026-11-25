@@ -7,6 +7,7 @@ leagues their Kickbase account is in, chosen with the `league` query parameter.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Coroutine, Iterator
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -137,6 +138,7 @@ def get_league(session: SessionDep, league_id: LeagueIdDep) -> League:
 LeagueDep = Annotated[League, Depends(get_league)]
 
 router = APIRouter(prefix="/api")
+log = logging.getLogger(__name__)
 
 
 def cached(
@@ -559,13 +561,39 @@ async def withdraw_bid(
         entry = next((player for player in market.players if player.id == player_id), None)
         offer_id = entry.own_offer_id(user.id) if entry else None
         if offer_id is None:
-            raise HTTPException(404, "Für diesen Spieler hast du kein Gebot abgegeben.")
+            log.warning("No offer id to withdraw %s, Kickbase's item: %s", player_id, await _raw_market_item(client, league_id, player_id))
+            raise HTTPException(404, "Für diesen Spieler findet die App bei Kickbase kein eigenes Gebot mit Angebots-ID.")
         await client.withdraw_offer(league_id, player_id, offer_id)
+        ### Checked, not assumed: Kickbase answers OK also when nothing was deleted
+        after = await client.market(league_id)
+        still = next((p for p in after.players if p.id == player_id), None)
+        if still is not None and still.own_bid(user.id) is not None:
+            log.warning("Withdrawal of %s not taken, Kickbase's item: %s", player_id, await _raw_market_item(client, league_id, player_id))
+            raise HTTPException(502, "Kickbase hat das Zurückziehen bestätigt, das Gebot steht aber noch.")
         await state.sync.refresh_personal(league_id, client)
 
     await ask_kickbase(state, viewer, call)
     forget_private(state, league_id, viewer)
     return BidOut(own_bid=None)
+
+
+async def _raw_market_item(client: KickbaseClient, league_id: str, player_id: str) -> dict | None:
+    """Kickbase's market entry of one player exactly as sent, to check the field names."""
+    raw = await client.request("GET", f"/v4/leagues/{league_id}/market")
+    return next((item for item in (raw or {}).get("it", []) if str(item.get("i")) == player_id), None)
+
+
+@router.get("/market/{player_id}/raw")
+async def market_raw(state: StateDep, league_id: LeagueIdDep, viewer: ViewerDep, player_id: PlayerIdPath) -> dict:
+    """The viewer's own view of one market entry as Kickbase sends it (no other user's data, no
+    token): to check how Kickbase reports the own offer and its id."""
+    user_id = viewer.user_id
+
+    async def call(client: KickbaseClient) -> dict:
+        item = await _raw_market_item(client, league_id, player_id)
+        return {"viewer_id": user_id, "item": item}
+
+    return await ask_kickbase(state, viewer, call)
 
 
 @router.get("/watchlist", response_model=list[WatchedPlayerOut])

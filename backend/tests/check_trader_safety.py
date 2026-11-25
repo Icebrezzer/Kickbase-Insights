@@ -178,6 +178,17 @@ def main() -> None:
     ok(risk.validate([A("sell", "room", spare.player_id, 1)] * 2, ctx(sales_left=1)) == [None, risk.NOT_OWNED], "sold once")
     ok(risk.validate([A("sell", "room", spare.player_id, 1)], ctx(sales_left=0)) == [risk.DAILY_SALES], "daily sales")
 
+    ### Own offers on the market: "uoid"/"uop" read as offer id and price, the old reading as user id still
+    ### seen as a bid (but without an id to withdraw it), "ofs" first
+    from kickbase.models import MarketPlayer
+
+    item = MarketPlayer.model_validate
+    ok(item({"i": "7", "uoid": "88123", "uop": 1_500_000}).own_bid("1001") == 1_500_000, "uop alone is an own bid")
+    ok(item({"i": "7", "uoid": "88123", "uop": 1_500_000}).own_offer_id("1001") == "88123", "uoid as the offer id")
+    ok(item({"i": "7", "uoid": "1001", "uop": 1_500_000}).own_offer_id("1001") is None, "the user's id is no offer id")
+    ok(item({"i": "7", "ofs": [{"i": "o5", "u": "1001", "uop": 900_000}]}).own_offer_id("1001") == "o5", "ofs first")
+    ok(item({"i": "7", "prc": 1_000_000}).own_bid("1001") is None, "no own offer")
+
     ### Invariant over many plans: approved bids never exceed balance + allowed credit with every bid won
     import random
 

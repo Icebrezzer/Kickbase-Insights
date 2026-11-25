@@ -51,8 +51,17 @@ def _error_reason(response: httpx.Response) -> str | None:
         return response.text[:200] or None
     if isinstance(body, dict):
         reason = body.get("errMsg") or body.get("message") or body.get("err")
-        return str(reason)[:200] if reason is not None else None
+        if reason is None:
+            return None
+        text = str(reason)[:200]
+        return f"{text} – {REASONS[text]}" if text in REASONS else text
     return None
+
+
+### Kickbase's error codes the user meets, in plain words (the code stays, for searching)
+REASONS = {
+    "ThirtyThreePercentRuleExceeded": "das Gebot liegt über deinem Maximalgebot (33-%-Regel, offene Gebote zählen mit)",
+}
 
 
 class KickbaseHttp:

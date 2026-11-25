@@ -229,23 +229,28 @@ class MarketPlayer(KBModel):
     def own_bid(self, own_user_id: str) -> int | None:
         """What the logged in user currently bids for this player, if anything.
 
-        "ofs" is read first, the "uoid"/"uop" mirror on the item itself is the fallback because some
-        items only carry that.
+        "ofs" is read first. The item's own "uoid"/"uop" pair is the fallback: Kickbase only fills it
+        for the viewer's own offer ("user offer id" / "user offer price", as "userOfferId" /
+        "userOfferPrice" were called in the older API), so "uop" alone means an own bid. Read as a user
+        id before; both readings are accepted until a real answer settles it (see /market/{id}/raw).
         """
         for offer in self.offers:
             bidder = offer.user_id or offer.owner_id
             if bidder is not None and bidder == own_user_id:
                 return offer.price
-        if self.own_offer_user_id is not None and self.own_offer_user_id == own_user_id:
+        if self.own_offer_price is not None and self.own_offer_user_id is not None:
             return self.own_offer_price
         return None
 
     def own_offer_id(self, own_user_id: str) -> str | None:
-        """The id of the logged in user's offer, needed to withdraw it."""
+        """The id of the logged in user's offer, needed to withdraw it: from "ofs", else the item's
+        "uoid" when it is an offer id (with an own price, and not the user's id)."""
         for offer in self.offers:
             bidder = offer.user_id or offer.owner_id
-            if bidder is not None and bidder == own_user_id:
+            if bidder is not None and bidder == own_user_id and offer.id is not None:
                 return offer.id
+        if self.own_offer_price is not None and self.own_offer_user_id not in (None, own_user_id):
+            return self.own_offer_user_id
         return None
 
 
