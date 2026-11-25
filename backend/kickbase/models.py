@@ -229,27 +229,29 @@ class MarketPlayer(KBModel):
     def own_bid(self, own_user_id: str) -> int | None:
         """What the logged in user currently bids for this player, if anything.
 
-        "ofs" is read first. The item's own "uoid"/"uop" pair is the fallback: Kickbase only fills it
-        for the viewer's own offer ("user offer id" / "user offer price", as "userOfferId" /
-        "userOfferPrice" were called in the older API), so "uop" alone means an own bid. Read as a user
-        id before; both readings are accepted until a real answer settles it (see /market/{id}/raw).
+        As Kickbase sends it (seen 25.11.2026 with an open bid): the item has "uoid" = the bidder's
+        user id and "uop" = the price, and "ofs" lists the offers as {"u", "unm", "uoid", "uop", "st",
+        "uim"} - with no offer id of their own. "ofs" is read first, the item's pair is the fallback.
         """
         for offer in self.offers:
             bidder = offer.user_id or offer.owner_id
             if bidder is not None and bidder == own_user_id:
                 return offer.price
-        if self.own_offer_price is not None and self.own_offer_user_id is not None:
+        if self.own_offer_price is not None and self.own_offer_user_id == own_user_id:
             return self.own_offer_price
         return None
 
     def own_offer_id(self, own_user_id: str) -> str | None:
-        """The id of the logged in user's offer, needed to withdraw it: from "ofs", else the item's
-        "uoid" when it is an offer id (with an own price, and not the user's id)."""
+        """What goes into DELETE .../offers/{offerId} to withdraw the own offer.
+
+        Kickbase's offers carry no id of their own: one offer per manager and player, keyed by the
+        manager - "uoid" ("user offer id") is the user's id. An explicit "i" wins where an offer
+        has one (the demo, maybe older answers). The caller checks the market afterwards."""
         for offer in self.offers:
             bidder = offer.user_id or offer.owner_id
-            if bidder is not None and bidder == own_user_id and offer.id is not None:
-                return offer.id
-        if self.own_offer_price is not None and self.own_offer_user_id not in (None, own_user_id):
+            if bidder is not None and bidder == own_user_id:
+                return offer.id or offer.owner_id or bidder
+        if self.own_offer_price is not None and self.own_offer_user_id == own_user_id:
             return self.own_offer_user_id
         return None
 

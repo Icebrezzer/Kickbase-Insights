@@ -183,11 +183,15 @@ def main() -> None:
     from kickbase.models import MarketPlayer
 
     item = MarketPlayer.model_validate
-    ok(item({"i": "7", "uoid": "88123", "uop": 1_500_000}).own_bid("1001") == 1_500_000, "uop alone is an own bid")
-    ok(item({"i": "7", "uoid": "88123", "uop": 1_500_000}).own_offer_id("1001") == "88123", "uoid as the offer id")
-    ok(item({"i": "7", "uoid": "1001", "uop": 1_500_000}).own_offer_id("1001") is None, "the user's id is no offer id")
-    ok(item({"i": "7", "ofs": [{"i": "o5", "u": "1001", "uop": 900_000}]}).own_offer_id("1001") == "o5", "ofs first")
-    ok(item({"i": "7", "prc": 1_000_000}).own_bid("1001") is None, "no own offer")
+    ### A real market entry with an open bid (25.11.2026): no offer id, uoid is the bidder's user id
+    real = item({"i": "13888", "ofc": 1, "exs": 8679, "prc": 6468331, "uop": 6480000, "uoid": "4067677",
+                 "ofs": [{"u": "4067677", "unm": "Nicolinho", "uoid": "4067677", "uop": 6480000, "st": 0}], "mv": 6468331})
+    ok(real.own_bid("4067677") == 6_480_000, "own bid from ofs")
+    ok(real.own_offer_id("4067677") == "4067677", "withdrawn by the user's id, the offer has none of its own")
+    ok(real.own_bid("999") is None and real.own_offer_id("999") is None, "another viewer sees no own offer")
+    ok(item({"i": "7", "uoid": "1001", "uop": 1_500_000}).own_offer_id("1001") == "1001", "the item's pair as fallback")
+    ok(item({"i": "7", "ofs": [{"i": "o5", "u": "1001", "uop": 900_000}]}).own_offer_id("1001") == "o5", "an explicit id wins")
+    ok(item({"i": "13888", "ofc": 0, "prc": 6_468_331}).own_bid("4067677") is None, "no offer (ofc 0)")
 
     ### Invariant over many plans: approved bids never exceed balance + allowed credit with every bid won
     import random
