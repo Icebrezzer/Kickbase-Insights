@@ -105,7 +105,8 @@ function ManagerPlan({
   day: number | null
 }) {
   const manager = managers.find((m) => m.id === managerId)
-  const startBalance = manager ? (manager.budget ?? manager.estimatedBalance ?? 0) : 0
+  // An unknown balance stays empty: never a secured 0
+  const startBalance = manager?.budget ?? manager?.estimatedBalance ?? null
   const squad = useMemo(
     () => players.filter((p) => p.ownerId === managerId).sort((a, b) => a.position - b.position || b.marketValue - a.marketValue),
     [players, managerId],
@@ -118,7 +119,7 @@ function ManagerPlan({
   })
   const [lineup, setLineup] = useState(initial.lineup)
   const [source, setSource] = useState<Source>(initial.source)
-  const [balanceInput, setBalanceInput] = useState(String(startBalance))
+  const [balanceInput, setBalanceInput] = useState(startBalance == null ? "" : String(startBalance))
   const [selling, setSelling] = useState<string[]>([])
   const [pick, setPick] = useState<Pick | null>(null)
   const [dragging, setDragging] = useState<Pick | null>(null)
@@ -133,7 +134,9 @@ function ManagerPlan({
   }, [available, lineup])
   const sold = squad.filter((p) => selling.includes(p.id))
   const proceeds = sold.reduce((sum, p) => sum + p.marketValue, 0)
-  const balance = Number(balanceInput.replace(/[^\d-]/g, "")) || 0
+  const balanceDigits = balanceInput.replace(/[^\d-]/g, "")
+  const balance = balanceDigits && balanceDigits !== "-" ? Number(balanceDigits) : null
+  const after = balance == null ? null : balance + proceeds
   const counts = countPositions(available)
   const kickbaseLineup = saved && saved.length > 0
 
@@ -185,7 +188,7 @@ function ManagerPlan({
   }
 
   const reset = () => {
-    setBalanceInput(String(startBalance))
+    setBalanceInput(startBalance == null ? "" : String(startBalance))
     setSelling([])
     change(initial.lineup, initial.source)
   }
@@ -218,7 +221,8 @@ function ManagerPlan({
           <div className="relative">
             <input
               inputMode="numeric"
-              value={Number(balanceInput.replace(/[^\d-]/g, "") || 0).toLocaleString("de-DE")}
+              value={balance == null ? balanceDigits : balance.toLocaleString("de-DE")}
+              placeholder="unbekannt"
               onChange={(event) => setBalanceInput(event.target.value)}
               className="h-10 w-full rounded-xl border border-line bg-surface pr-8 pl-3 text-sm tabular-nums focus:border-accent focus:outline-none"
             />
@@ -327,11 +331,15 @@ function ManagerPlan({
       </Card>
 
       <Card className="grid grid-cols-2 gap-4 p-4 sm:p-5 lg:col-span-2">
-        <Stat label="Verkaufserlös" value={compactMoney(proceeds)} hint={`${sold.length} Spieler zum Marktwert`} />
         <Stat
-          label="Neuer Kontostand"
-          value={<span className={cn(balance + proceeds < 0 && "text-down")}>{compactMoney(balance + proceeds)}</span>}
-          hint={money(balance + proceeds)}
+          label="Verkaufserlös (geschätzt)"
+          value={compactMoney(proceeds)}
+          hint={`${sold.length} Spieler zum Marktwert – der echte Erlös kann abweichen`}
+        />
+        <Stat
+          label={sold.length > 0 ? "Neuer Kontostand (geschätzt)" : "Neuer Kontostand"}
+          value={after == null ? "unbekannt" : <span className={cn(after < 0 && "text-down")}>{compactMoney(after)}</span>}
+          hint={after == null ? "Kontostand oben eintragen" : money(after)}
         />
         <Stat label="Kaderwert danach" value={compactMoney(available.reduce((sum, p) => sum + p.marketValue, 0))} />
         <Stat
