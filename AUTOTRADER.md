@@ -1,6 +1,6 @@
 # Autotrader – komplette Logik
 
-Stand: 25.11.2026, Branch `codex/autotrader-2`, Meilenstein 1 (Critical Safety Patch).
+Stand: 25.11.2026, Branch `codex/autotrader-2`, Meilensteine 1 (Critical Safety Patch) und 2 (Trading Intelligence).
 
 Code:
 - `backend/core/trader.py`: reine Entscheidungen (Bewertung, Preis, Netto-Gewinn, Kredit, Phasen, Lernen).
@@ -26,7 +26,7 @@ alle 5 Min. (KBI_AUTOMATION__INTERVAL_MINUTES) je Nutzer und Liga, unter einer S
    ├─ [5] Planen (Strategie)
    │    ├─ Phase bestimmen (normal / prepare / repay / final)
    │    ├─ repay/final: Kontostand zum Spieltag sichern (Gebote zurückziehen, Rettungsverkäufe)
-   │    ├─ Gewinnkauf mit gedrehter Prognose verkaufen
+   │    ├─ Gewinnpositionen: halten oder verkaufen (Ausstiegssystem, 5.10)
    │    ├─ unnötige eigene Gebote zurückziehen
    │    ├─ Geld, Kredit, Gewinnhandels-Rahmen
    │    ├─ Kandidaten, Reihenfolge, Preise
@@ -119,7 +119,17 @@ Erledigte Schatten werden nach 120 Tagen gelöscht.
 | `today` | Marktwertänderung am letzten Update |
 | `forecast` | Prognose für das nächste Update |
 | `gain` | Prognose über 2 Updates × Prognose-Vertrauen (konservativ, höchstens 1,0) |
+| `ahead` | Ø erwartete Punkte der nächsten 3 Vereinsspiele, mit demselben Modell gerechnet: Quoten für den nächsten Spieltag, sonst Tabelle und Heim/Auswärts. `None` ohne Spielplan |
+| `samples` | gespielte Spiele der letzten 5 Vereinsspiele (Datenmenge hinter Form und Einsatzquote) |
 | `value`, `price`, `bid_low`, `bid_high`, `expires_at` | Marktwert, Preis, Gebotsspanne, Auktionsende |
+
+Qualität: `0,6 × Saisonschnitt + 0,4 × Form`. Ist nur einer der Werte bekannt, gilt dieser. Ohne beide Werte gilt die Qualität als unbekannt. Die Gewichtung ist noch nicht durch ein Backtesting kalibriert (Meilenstein 4).
+
+Nicht verfügbar und deshalb **nicht** verwendet:
+- Startelf-Wahrscheinlichkeit getrennt von der Einsatzquote.
+- Spielminuten.
+- Konkurrenz auf der Position.
+- Dauer von Verletzungen.
 
 - Kaderspieler ohne Einsatzdaten gelten als Stammspieler. Niemand wird wegen fehlender Zahlen verkauft.
 - Marktziele ohne Daten gelten **nicht** als Stammspieler.
@@ -175,15 +185,35 @@ Ausgeschlossen werden:
 - Abgelaufene Auktionen.
 - Spieler ohne Marktdaten.
 
-| Zweck | Bedingungen | Rang |
+| Zweck | Bedingungen | Bewertung innerhalb der Stufe |
 |---|---|---|
-| Lücke füllen | fit, Einsatzquote bekannt und ≥ `min_play`. Gewinn = echte Punkte | 2·10⁹ + Punkte |
-| Elf verbessern | zusätzlich Gewinn ≥ `min_gain`, Schnitt > Verdrängter × (1 + `min_avg_edge`), Form besser | 10⁹ + Punkte |
+| Lücke füllen | fit, Einsatzquote bekannt und ≥ `min_play`. Kein Mindestgewinn. Preis je Punkt aus echten Punkten | Punkte |
+| Elf verbessern | zusätzlich: Gewinn ≥ `min_gain` (×1,5 bei weniger als 3 der letzten 5 Spiele). Qualität > Verdrängter × (1 + `min_avg_edge`). Ziel ohne Schnitt und Form = kein Tausch. Über die nächsten 3 Spiele nicht schlechter als der Verdrängte | Punkte |
 | Gewinnhandel | kein Upgrade, Gewinnhandel an, kein Stop-Loss, fit, Prognose > 0, Auktionsende bekannt, nicht `final` | **Netto-Rendite je Euro und Update** beim Mindestgebot |
-| Ersatz | fehlender fitter Ersatz einer Position, billigster zuerst, Preis ≤ `cover_max_price` | −10⁹ − Preis |
+| Ersatz | fehlender fitter Ersatz einer Position, billigster zuerst, Preis ≤ `cover_max_price` | niedrigerer Preis |
+
+**Dynamische Prioritäten** (`priority`), höchste Stufe zuerst:
+
+| Phase | Reihenfolge |
+|---|---|
+| `normal` | Lücke → Verbesserung → Gewinnhandel → Ersatz |
+| `prepare`, `repay`, `final` | Lücke → Ersatz → Verbesserung → Gewinnhandel |
 
 - Solange die Elf (prognostiziert) Lücken hat, gibt es keine Gewinn- und keine Ersatz-Gebote.
-- **Stop-Loss:** Ist der realisierte Wochenverlust ≥ `stop_loss`, pausiert der Gewinnhandel. `0` = aus. Probeläufe und unbekannte Erlöse zählen nicht. Woche = ISO-Woche in Berlin-Zeit.
+- Ein Gewinn-Gebot lässt je fehlender Ersatzposition `cover_max_price` übrig. So verdrängt der Gewinnhandel die Ersatzbank nie dauerhaft.
+- **Gemeinsame Planung:** Die Gebote werden in Prioritätsreihenfolge mit laufendem Budget, Kaderplätzen und Bedarf vergeben. Jedes Gebot verändert den prognostizierten Kader für die nächsten.
+  - Gewinnhandel: Die Reihenfolge nach Rendite je Euro ist die gierige Lösung des Rucksackproblems. Sie ist bei teilbarem Budget optimal und bei wenigen Plätzen nahe am Optimum.
+  - Startelf: Die Lücken-Reserve verteilt das Budget auf alle Lücken.
+  - Auf einen Ganzzahl-Löser wurde bewusst verzichtet. Bei 6 Geboten pro Tag und ≤ 18 Plätzen brächte er laut Überschlag kaum Nutzen. Ein Backtest (Meilenstein 4) soll das bestätigen.
+- **Stop-Loss:** Der Gewinnhandel pausiert, wenn eine der beiden Grenzen erreicht ist:
+  - realisierter Wochenverlust der Gewinnpositionen ≥ `stop_loss`,
+  - realisierter Verlust + Buchverlust der offenen Gewinnpositionen (Wert × Quote − Kaufpreis) ≥ `stop_loss`.
+
+  Weitere Regeln:
+  - Sporttransfers und Rettungsverkäufe zählen nicht. Probeläufe und unbekannte Erlöse ebenfalls nicht.
+  - `0` = aus.
+  - Woche = ISO-Woche in Berlin-Zeit. Wiederaufnahme mit der neuen Woche oder sobald der Buchverlust kleiner wird.
+  - Die Rettung vor dem Spieltag läuft immer, auch bei aktivem Stop-Loss.
 
 ### 5.8 Netto-Gewinn und Preis
 
@@ -199,6 +229,10 @@ Beispiel aus dem Auftrag:
 - Annahmen: Marktwert 10 Mio., Prognose +800.000, Gebot 10,2 Mio., Quote 90 %.
 - Erlös: 9,72 Mio.
 - Ergebnis: **−480.000 €**, also kein Kauf. Auch die Risk Engine blockiert ihn (`PROFIT_NEGATIVE`).
+
+**Preis je Punkt (Startelf):**
+- Formel: (Gebot − Marktwert des Verdrängten × konservative Quote) / Punktgewinn ≤ `max_cost_per_point`. Das ist die faire Transferdifferenz. Der Verdrängte wird dadurch **nicht** verkauft.
+- Das zusätzlich gebundene Kapital ist das ganze Gebot. Es steht in der Begründung („bindet X Mio.“).
 
 **Gebot** (`bid_for`):
 - Mindestgebot `low` = max(`bid_low`, Preis, Marktwert).
@@ -219,6 +253,30 @@ Beispiel aus dem Auftrag:
 - Erlaubt sind nur: verletzte Spieler, Nicht-Stammspieler, Bankspieler, deren Ziel um ≥ `swap_edge` mehr steigen soll.
 - Direkt vor dem Verkauf wird geprüft, ob die Ziel-Auktion noch läuft (> 1 Min.).
 - Der Verkauf bringt in dieser Runde kein Geld (`OVER_BUDGET` für das abhängige Gebot). Das Gebot folgt frühestens in der nächsten Runde mit bestätigtem Kontostand. Geht die Auktion verloren, bleibt die Mannschaft trotzdem abgesichert.
+
+### 5.10 Ausstiegssystem für Gewinnpositionen (`exit_reason`)
+
+Für jeden vom Trader gekauften Gewinnspieler, der noch im Kader ist, prüft der Trader jede Runde: halten oder verkaufen. Der Preis ist bis 22 Uhr ganztägig gleich.
+- **Verkaufen** bringt sofort: Wert × Quote.
+- **Halten** bringt später: `gain` × Quote, mit Risiko.
+
+Der Kaufpreis kommt aus dem gewonnenen Gebot, sonst von Kickbase. Ist er unbekannt, wird nicht bewertet.
+
+| Code | Grund | Bedingung |
+|---|---|---|
+| `SPORT` | sportlicher Ausfall | nicht fit |
+| `STOP` | Positions-Stop-Loss | Netto-Verlust ≥ `position_stop` % des Kaufpreises und Prognose ≤ 0 |
+| `TRAIL` | Trailing-Stop | Höchststand seit Kauf lag netto im Gewinn, Wert ≤ Höchststand × (1 − `trailing_stop` %), Prognose ≤ 0 |
+| `TURN` | Prognosewechsel | Prognose < 0 **und** (heute gefallen oder Prognose ≤ −0,5 % des Werts). Ein einzelnes kleines Minus ist Rauschen |
+| `TAKE` | Take-Profit | netto im Gewinn und Halten bringt weniger als die Mindestmarge |
+| `TIME` | Zeitlimit | ≥ `max_hold_days` gehalten und Halten bringt weniger als die Mindestmarge |
+
+- Pro Runde höchstens ein Ausstieg, der dringendste in der Reihenfolge der Tabelle.
+- Nie ein gesperrter Spieler, nie einer der besten Elf, nie der letzte Ersatz. Das Urteil wird dann mit „geschützt“ protokolliert.
+- Tageslimit `daily_sales` gilt.
+- Das Urteil jeder Position steht im Debug-Protokoll (`positions`).
+- Kapitalrotation, also Verkauf zugunsten eines besser rentierenden Ziels, läuft weiter über den Platz-Verkauf (5.9) mit der gelernten `swap_edge`.
+- Sportliche Ausfälle von Nicht-Gewinnspielern werden nicht automatisch verkauft. Sie werden aber als erste für einen Platz abgegeben (5.9).
 
 ---
 
@@ -292,6 +350,9 @@ Laden und Import: NaN, Infinity und falsche Typen werden verworfen, alle Werte b
 | `profit_share` | 60 % | 10–100 | **kumuliert**: Anteil von Mannschaftswert + Kontostand für alle Gewinnpositionen |
 | `min_roi` | 2,0 % | 0–100 | Mindestrendite netto |
 | `credit_mode` | 1 | 0–2 | 0 nie, 1 Startelf/Ersatz, 2 auch Gewinnhandel |
+| `position_stop` | 10 % | 0–100 | Positions-Stop-Loss (0 = aus) |
+| `trailing_stop` | 5 % | 0–50 | Trailing-Stop unter dem Höchststand (0 = aus) |
+| `max_hold_days` | 7 | 0–60 | Zeitlimit für Gewinnpositionen (0 = aus) |
 | `reserve` | 0 | 0–500 Mio. | nie ausgegeben |
 | `cover_max_price` | 3 Mio. | 0–50 Mio. | Ersatz höchstens, Reserve je Lücke |
 | `daily_bids` / `daily_sales` | 6 / 3 | 0–30 | Tageslimits (Berlin-Zeit) |
@@ -312,6 +373,8 @@ Booleans akzeptieren nur `true/false`, `1/0` und die gleichnamigen Texte. `"fals
 - Gebotsschritt: 10.000 €. Verkaufsquote höchstens 0,9.
 - Abgleich unklarer Aufrufe: nach 10 Min. Pause: ab 3 Fehlern pro Stunde.
 - Phasen: 24 Std. / letztes Update / 60 Min.
+- Qualität: 0,6 × Schnitt + 0,4 × Form. Wenig Daten: unter 3 Einsätzen ×1,5 Mindestgewinn.
+- Vorschau: 3 Spiele. Prognosewechsel: 0,5 %.
 
 ---
 
@@ -322,7 +385,9 @@ Booleans akzeptieren nur `true/false`, `1/0` und die gleichnamigen Texte. `"fals
   - `options` gilt für die eigene Liga, `learned` nur für Admins (`403` sonst).
   - Die Werte **vorher** landen im Ereignis `trader-import`. Wer sie zurückimportiert, stellt den alten Stand wieder her.
 - **Debug-Runde** (`TraderDebug`, 21 Tage, nur bei Änderung):
-  - Phase, Kontostand, Worst Case, `cash_free`, Kredit, `credit_mode`, Liquidationswert, `profit_room`.
+  - Phase, aktive Prioritäten, Kontostand, Worst Case, `cash_free`, Kredit, `credit_mode`, Liquidationswert, `profit_room`.
+  - Wochenergebnis und Buchverlust (Stop-Loss), jede Gewinnposition mit Kaufpreis, Netto jetzt und Urteil.
+  - Je Marktspieler zusätzlich `ahead`, `samples` und `quality`.
   - Offene Gebote, Limits, Pause, Startelf-Sperre, ob die Aufstellung lesbar war.
   - Kader, offene Gebote, Marktspieler mit `net_at_low`, Geld und Begründung.
   - `risk_blocked` mit Code, freigegebene Aktionen.
@@ -354,5 +419,9 @@ Gegen die echte Kickbase-API lässt sich das ohne Live-Zugang nicht prüfen. Die
 - Das Lernen ist für alle Nutzer und Ligen gemeinsam. Eine Trennung nach Liga ist für Meilenstein 3 geplant.
 - Läuft der Server vom Vorabend bis zur Deadline durchgehend nicht, bleibt ein Minus stehen.
 - Rettungsverkäufe nutzen eine gierige Auswahl, kein kombinatorisches Optimum.
-- Kein Backtesting, keine Strategieprofile (Meilensteine 2–4).
+- Kein Backtesting, keine Strategieprofile (Meilensteine 3–4). Die Gewichte und Schwellen von Meilenstein 2 sind begründete Startwerte, aber noch nicht kalibriert:
+  - Qualität 0,6 / 0,4,
+  - Faktor 1,5 bei wenig Daten,
+  - Trailing-Stop 5 %, Positions-Stop 10 %, Zeitlimit 7 Tage.
+- Die Vorschau über 3 Spiele nimmt den heutigen Status als dauerhaft an und kennt keine Rotation.
 - Mehrere Backend-Instanzen: Die Rundensperre gilt je Prozess. Empfohlen ist ein Container.
