@@ -170,11 +170,11 @@ class OddsService:
                     (home, draw, away), source, raw = found[fixture.id]
                     row.home, row.draw, row.away, row.source = home, draw, away, source
                     row.raw = raw if isinstance(raw, dict) else {"answer": raw}
+                    row.updated_at = now # Only fresh odds count as fresh, see api.context.ODDS_MAX_AGE
                 else:
-                    ### Kept to see what Kickbase sends, even without odds
+                    ### Kept to see what Kickbase sends, even without odds; older odds keep their age
                     raw = answers.get(fixture.id)
                     row.raw = raw if isinstance(raw, dict) else {"answer": raw}
-                row.updated_at = now
                 session.add(row)
             session.commit()
 

@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlmodel import Session, select
 
 from core import analytics, coach
 from db.models import Fixture, MatchOdds, ModelState, PlayerForm, Team
+
+### Odds not refreshed for this long (refresh every few hours) are left out: the table takes over
+ODDS_MAX_AGE = timedelta(hours=48)
 
 
 @dataclass
@@ -101,7 +104,7 @@ def load_context(
     odds = {
         o.match_id: (o.home, o.draw, o.away)
         for o in session.exec(select(MatchOdds).where(MatchOdds.match_id.in_(match_ids)))
-        if o.home and o.away
+        if o.home and o.away and o.updated_at >= now - ODDS_MAX_AGE
     }
     return MatchContext(fixtures, placements, forms, odds, upcoming, day, learned_weights(session, competition_id))
 

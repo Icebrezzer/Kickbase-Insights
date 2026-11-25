@@ -526,6 +526,48 @@ class OddsTests(unittest.IsolatedAsyncioTestCase):
         finally:
             engine.dispose()
 
+    def test_stale_odds_do_not_look_fresh(self):
+        """A refresh without odds (outage, no data) keeps the old values with their old age; after
+        ODDS_MAX_AGE they are left out, and fresh odds count again."""
+        from api.context import ODDS_MAX_AGE, load_context
+        from db.models import MatchOdds
+
+        engine = create_db_engine("sqlite://")
+        try:
+            init_db(engine)
+            now = utcnow()
+            fixture = Fixture(id="f", competition_id=1, day=5, kickoff=now + timedelta(days=4), team1_id="h", team2_id="a")
+            with Session(engine) as session:
+                session.add(fixture)
+                session.commit()
+                session.refresh(fixture)
+                session.expunge(fixture)
+            service = OddsService(Settings(_env_file=None), engine)
+
+            def odds(at):
+                with Session(engine) as session:
+                    return load_context(session, 1, [], at).odds
+
+            service._store([fixture], {"f": ((2.0, 3.5, 4.0), "kickbase", {})}, {})
+            self.assertEqual(odds(now), {"f": (2.0, 3.5, 4.0)})
+            with Session(engine) as session:
+                stored = session.get(MatchOdds, "f").updated_at
+            ### Outage and missing data: the old odds stay, but do not become younger
+            service._store([fixture], {}, {"f": None})
+            service._store([fixture], {}, {"f": {"empty": True}})
+            with Session(engine) as session:
+                row = session.get(MatchOdds, "f")
+                self.assertEqual(row.updated_at, stored)
+                self.assertEqual(row.raw, {"empty": True})
+            later = now + ODDS_MAX_AGE + timedelta(hours=1)
+            self.assertEqual(odds(later), {}, "stale odds are not used")
+            ### Recovery: fresh odds count again
+            with patch("sync.odds.utcnow", return_value=later):
+                service._store([fixture], {"f": ((1.8, 3.6, 4.4), "kickbase", {})}, {})
+            self.assertEqual(odds(later), {"f": (1.8, 3.6, 4.4)})
+        finally:
+            engine.dispose()
+
 
 if __name__ == "__main__":
     unittest.main()
