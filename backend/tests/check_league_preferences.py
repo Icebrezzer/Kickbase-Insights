@@ -22,6 +22,9 @@ from sync.automation import parse_lineup
 def main():
     assert parse_lineup({"it": [{"i": str(i)} for i in range(1, 19)]}) == (None, [])
     assert parse_lineup({"lp": ["1", "1", "0", "2"]})[1] == ["1", "2"]
+    ### Whole squad with lineup slots: only slots 1-11 are the eleven, in slot order
+    squad = [{"i": str(i), "lo": 12 - i} for i in range(1, 12)] + [{"i": str(i), "lo": None} for i in range(12, 19)]
+    assert parse_lineup({"type": "3-4-3", "it": squad}) == ("3-4-3", [str(i) for i in range(11, 0, -1)])
     assert parse_lineup({"type": "4-4-2", "lp": list(range(1, 12))}) == (
         "4-4-2",
         [str(i) for i in range(1, 12)],

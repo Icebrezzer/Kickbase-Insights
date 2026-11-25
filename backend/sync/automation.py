@@ -105,6 +105,13 @@ def parse_lineup(raw: Any) -> tuple[str | None, list[str]]:
         if isinstance(raw.get(key), list):
             players = raw[key]
             break
+    ### shortcut: guessed from the documented /lineup/overview ("lo" = lineup slot); the whole squad
+    ### may come back, the slots 1-11 are the eleven. Check the logged answer if it still mismatches
+    if any(isinstance(item, dict) and "lo" in item for item in players or []):
+        players = sorted(
+            (i for i in players if isinstance(i, dict) and isinstance(i.get("lo"), int) and 1 <= i["lo"] <= 11),
+            key=lambda i: i["lo"],
+        )
     ids: list[str] = []
     for item in players or []:
         if isinstance(item, (str, int)):
@@ -838,11 +845,15 @@ class AutomationService:
                 details={"formation": view.best_formation, "players": view.best_lineup, "reason": reason},
             )
             raise
+        raw = None
         try:
-            _, now_saved = parse_lineup(await client.lineup(league.id))
+            raw = await client.lineup(league.id)
+            _, now_saved = parse_lineup(raw)
         except KickbaseError:
             now_saved = []
         confirmed = set(now_saved) == set(view.best_lineup)
+        if not confirmed:
+            log.warning("Saved lineup not confirmed, Kickbase answered: %s", _raw(raw))
         self.record(
             user_id,
             league.id,
