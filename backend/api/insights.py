@@ -108,6 +108,7 @@ class Insights:
         self._form_rows: dict[str, list] | None = None
         self._estimates: dict[str, int] | None = None
         self._prizes: dict[str, int] | None = None
+        self._purchase_cache: list[analytics.Purchase] | None = None
         self._correction: BalanceCorrectionOut | None = None
         ### Empty until the first sync after an update has stored it
         self.season = session.get(LeagueSeason, league.id) or LeagueSeason(league_id=league.id)
@@ -507,9 +508,11 @@ class Insights:
         return analytics.transfers_since(records, self.season.started_at)
 
     def _purchases(self) -> list[analytics.Purchase]:
-        records = self._transfer_records()
-        histories = self._histories(list({t.player_id for t in records}))
-        return analytics.kickbase_purchases(records, lambda player_id: histories.get(player_id) or [])
+        if self._purchase_cache is None:
+            records = self._transfer_records()
+            histories = self._histories(list({t.player_id for t in records}))
+            self._purchase_cache = analytics.kickbase_purchases(records, lambda player_id: histories.get(player_id) or [])
+        return self._purchase_cache
 
     def _player_out(
         self,

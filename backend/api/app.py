@@ -70,10 +70,10 @@ class ETagMiddleware(BaseHTTPMiddleware):
             return response
         body = b"".join([chunk async for chunk in response.body_iterator])
         etag = f'W/"{hashlib.blake2b(body, digest_size=12).hexdigest()}"'
-        if etag in request.headers.get("if-none-match", ""):
-            return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "no-cache"})
+        if etag in {value.strip() for value in request.headers.get("if-none-match", "").split(",")}:
+            return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "private, no-cache"})
         headers = {k: v for k, v in response.headers.items() if k.lower() != "content-length"}
-        headers.update({"ETag": etag, "Cache-Control": "no-cache"})
+        headers.update({"ETag": etag, "Cache-Control": "private, no-cache"})
         return Response(body, status_code=200, headers=headers)
 
 

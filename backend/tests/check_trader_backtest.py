@@ -62,6 +62,10 @@ def main() -> None:
     value_f = b._value(fast["f"], START)
     cheap = simulate("balanced", [b.Auction(START, "f", value_f, value_f)], fast)
     ok(cheap.won == 1 and cheap.net > 0, f"a strong riser is bought and sold at a profit ({cheap.net}, {dict(cheap.exits)})")
+    last_day = simulate("balanced", [b.Auction(START, "f", value_f, value_f)], fast, end=START)
+    ok(last_day.won == 1, "last-day auction is won")
+    ok(last_day.net == last_day.equity[-1][1] - 20_000_000,
+       "last-day holdings remain part of terminal net wealth")
     dear = simulate("balanced", [b.Auction(START, "f", value_f * 2, value_f)], fast)
     ok(dear.won == 0 and dear.lost == 1, "below the real winner's price: lost")
     bid_used = cheap.won and simulate("balanced", [b.Auction(START, "f", value_f, value_f)], fast)

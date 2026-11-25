@@ -258,4 +258,4 @@ def _simulate(result: Result, name: str, start: int, end: int, model: coach.Fore
         peak_equity = max(peak_equity, equity)
         result.max_drawdown = max(result.max_drawdown, peak_equity - equity)
     ### Every window starts with the same capital; the result adds up what each window made
-    result.net += cash - capital
+    result.net += cash + held - capital

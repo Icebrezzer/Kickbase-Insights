@@ -38,6 +38,7 @@ BREAKS_COVER = "BREAKS_COVER"
 NEW_GAP = "NEW_GAP" # The eleven would get an empty slot
 MANUAL_BID = "MANUAL_BID" # Never touched
 NOT_OPEN = "NOT_OPEN"
+ACTION_INVALID = "ACTION_INVALID"
 
 
 class Planned(Protocol):
@@ -116,6 +117,9 @@ def validate(actions: Sequence[Planned], ctx: Context) -> list[str | None]:
                 reason = NOT_OPEN
             else:
                 open_bids.pop(action.player_id)
+                clubs[ctx.club_of.get(action.player_id)] -= 1
+        elif reason is None:
+            reason = ACTION_INVALID
         results.append(reason)
     return results
 

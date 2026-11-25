@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from core.version import __version__
 from kickbase import models
@@ -240,12 +240,13 @@ class KickbaseClient:
                 if response.status_code == 401:
                     if not self.can_relogin:
                         raise KickbaseAuthError("Kickbase no longer accepts this session.", 401)
-                    if not relogged:
+                    if not relogged and attempt < retries:
                         ### The token was revoked early. Log in once more and retry right away.
                         relogged = True
                         self._token = None
                         await self._ensure_token()
                         continue
+                    raise KickbaseAuthError("Kickbase no longer accepts this session.", 401)
                 if response.status_code == 429 or response.status_code >= 500:
                     last_error = KickbaseError(
                         f"{method} {path} returned HTTP {response.status_code}", response.status_code
@@ -260,7 +261,11 @@ class KickbaseClient:
                         f"{message}: {reason}" if reason else message, response.status_code, reason
                     )
                 else:
-                    return response.json() if response.content else {}
+                    try:
+                        return response.json() if response.content else {}
+                    except ValueError as e:
+                        # A write may have succeeded even when its response is malformed.
+                        raise KickbaseError(f"{method} {path} returned invalid JSON") from e
 
             if attempt < retries:
                 await asyncio.sleep(delay)
@@ -269,7 +274,15 @@ class KickbaseClient:
         raise last_error
 
     async def _get(self, model: type[T], path: str, params: dict | None = None) -> T:
-        return model.model_validate(await self.request("GET", path, params=params))
+        data = await self.request("GET", path, params=params)
+        if model in (models.ManagerSquad, models.Market) and (
+            not isinstance(data, dict) or not isinstance(data.get("it", data.get("players")), list)
+        ):
+            raise KickbaseError(f"GET {path} returned no player list")
+        try:
+            return model.model_validate(data)
+        except ValidationError as e:
+            raise KickbaseError(f"GET {path} returned invalid data") from e
 
     ### ======================================================================================================
     ### Leagues

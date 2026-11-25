@@ -622,10 +622,10 @@ def forecast(
     than the window drop out on their own, matches still to come are unknown.
     """
     model = model or ForecastModel()
-    if len(points) < 2 or points[-1][1] <= 0:
+    if horizon < 1 or len(points) < 2 or points[-1][1] <= 0:
         return None
-    series = [c for _, c in _relative_series(points[-12:]) if c is not None]
-    if len(series) < 7:
+    series = [c for _, c in _relative_series(points[-8:])]
+    if len(series) < 7 or any(c is None for c in series):
         return None
     last_day = points[-1][0]
     value = float(points[-1][1])

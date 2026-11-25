@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from sqlalchemy import Engine
 from sqlmodel import Session, select
@@ -22,6 +23,19 @@ from db.models import PushSubscription
 log = logging.getLogger(__name__)
 
 KEY_FILE = "vapid_private.pem"
+
+
+def validate_endpoint(endpoint: str) -> str:
+    """Subscriptions must not turn the server into a relay to arbitrary/internal URLs."""
+    url = urlsplit(endpoint)
+    host = url.hostname or ""
+    allowed = host in {"fcm.googleapis.com", "updates.push.services.mozilla.com", "web.push.apple.com"}
+    allowed = allowed or host.endswith(".push.apple.com") or host.endswith(".notify.windows.com")
+    if (url.scheme != "https" or not allowed or url.port not in (None, 443)
+            or url.username is not None or url.password is not None or url.fragment
+            or any(c.isspace() for c in endpoint) or "\\" in endpoint):
+        raise ValueError("Unsupported push endpoint; use an HTTPS browser push service.")
+    return endpoint
 
 
 def _load_or_create_key(settings: Settings) -> bytes:
@@ -77,6 +91,7 @@ class PushService:
         return self.public_key is not None
 
     def subscribe(self, user_id: str, endpoint: str, p256dh: str, auth: str) -> None:
+        validate_endpoint(endpoint)
         with Session(self.engine) as session:
             session.merge(
                 PushSubscription(
@@ -105,6 +120,7 @@ class PushService:
     def _send(self, user_id: str, title: str, body: str, url: str, tag: str | None) -> int:
         from cryptography.hazmat.primitives import serialization
         from pywebpush import WebPushException, webpush
+        from requests import Session as HttpSession
 
         assert self._pem is not None
         key = serialization.load_pem_private_key(self._pem, password=None)
@@ -114,10 +130,12 @@ class PushService:
         vapid_key = base64.urlsafe_b64encode(der).rstrip(b"=").decode()
         payload = json.dumps({"title": title, "body": body, "url": url, "tag": tag})
         delivered = 0
-        with Session(self.engine) as session:
+        with Session(self.engine) as session, HttpSession() as http:
+            http.max_redirects = 0
             rows = session.exec(select(PushSubscription).where(PushSubscription.user_id == user_id)).all()
             for row in rows:
                 try:
+                    validate_endpoint(row.endpoint) # Also reject unsafe subscriptions stored before this check.
                     webpush(
                         subscription_info={"endpoint": row.endpoint, "keys": {"p256dh": row.p256dh, "auth": row.auth}},
                         data=payload,
@@ -125,6 +143,7 @@ class PushService:
                         vapid_claims={"sub": self.settings.push.subject or ""},
                         ttl=6 * 3600,
                         timeout=10,
+                        requests_session=http,
                     )
                     delivered += 1
                 except WebPushException as e:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import zlib
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -19,6 +20,7 @@ try:
     import fcntl
 except ImportError: # Windows, where the app is only developed
     fcntl = None
+    import msvcrt
 
 log = logging.getLogger(__name__)
 
@@ -174,12 +176,30 @@ def exclusive(engine: Engine, name: str) -> Iterator[None]:
             yield
         return
     path = engine.url.database
-    if engine.dialect.name != "sqlite" or not path or path == ":memory:" or fcntl is None:
+    if engine.dialect.name != "sqlite" or not path or path == ":memory:":
         yield
         return
-    with open(f"{path}.{name}.lock", "a") as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX)
+    with open(f"{path}.{name}.lock", "a+b") as handle:
+        if fcntl is not None:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+        else:
+            # Lock the same byte in every process, including an initially empty file.
+            import errno
+
+            handle.seek(0)
+            while True:
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError as e:
+                    if e.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                        raise
+                    time.sleep(0.05)
         try:
             yield
         finally:
-            fcntl.flock(handle, fcntl.LOCK_UN)
+            if fcntl is not None:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+            else:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)

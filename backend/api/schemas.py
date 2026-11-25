@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 from pydantic.alias_generators import to_camel
 
 from core import analytics
@@ -796,6 +796,13 @@ class PushSubscriptionIn(Schema):
     endpoint: str = Field(min_length=10, max_length=2000)
     p256dh: str = Field(min_length=10, max_length=500)
     auth: str = Field(min_length=4, max_length=200)
+
+    @field_validator("endpoint")
+    @classmethod
+    def valid_endpoint(cls, value: str) -> str:
+        from sync.push import validate_endpoint
+
+        return validate_endpoint(value)
 
 
 class BuyOptionOut(Schema):

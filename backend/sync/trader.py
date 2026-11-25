@@ -164,6 +164,8 @@ class TraderService:
             current = await asyncio.to_thread(self.automation.get_settings, row.user_id, league.id)
             if not (self.settings.automation.trader and current.trader and current.trader_live):
                 break
+            if not await self._revalidate(league, current, client, action):
+                break
             outcome = await self._execute(league, row.user_id, client, action)
             if outcome == "done":
                 executed.append(action)
@@ -179,6 +181,18 @@ class TraderService:
             user_id, title, message, tag = self._pushes.pop()
             await self._push(user_id, title, message, tag)
         return executed if row.trader_live and not pause else actions
+
+    async def _revalidate(self, league: League, row: UserAutomation, client: KickbaseClient, action: Action) -> bool:
+        """Re-plan on fresh account state; manual bids and elapsed deadlines can invalidate a plan."""
+        squad, budget, market = await asyncio.gather(
+            client.manager_squad(league.id, row.user_id), client.own_budget(league.id), client.market(league.id)
+        )
+        if budget.budget is None:
+            return False
+        saved = await self._saved_lineup(league, client)
+        fresh, _ = await asyncio.to_thread(self._plan, league, row, squad, budget.budget, market, utcnow(), saved)
+        return any((a.kind, a.purpose, a.player_id, a.price, a.for_player) ==
+                   (action.kind, action.purpose, action.player_id, action.price, action.for_player) for a in fresh)
 
     async def _push(self, user_id: str, title: str, message: str, tag: str) -> None:
         """A failed push is no failed trade: it never changes the outcome or repeats an action."""
@@ -284,6 +298,8 @@ class TraderService:
             market = await client.market(league.id)
             listing = next((p for p in market.players if p.id == action.player_id), None)
             offer_id = listing.own_offer_id(user_id) if listing else None
+            if listing is not None and listing.own_bid(user_id) != action.price:
+                return "skipped" # A manually changed bid no longer belongs to this plan.
             if offer_id is None:
                 ### An own bid without a usable offer id: withdrawing cannot work, the bid stays (and
                 ### stays counted as spent)
@@ -515,6 +531,8 @@ class TraderService:
         user_id = row.user_id
         own_ids = [p.id for p in squad.players]
         listed = {p.id: p for p in market.players}
+        expiries = {p.id: now + timedelta(seconds=p.expires_in) if p.expires_in is not None else None
+                    for p in market.players}
         with Session(self.engine) as session:
             membership = session.get(UserLeague, (user_id, league.id))
             max_squad, max_club = analysis_limits(self.settings, membership)
@@ -526,13 +544,14 @@ class TraderService:
                     )
                 ).all()
             )
+            insight = Insights(session, league, user_id, self.automation.model, max_squad, max_club)
             offers = {
                 o.id: o
-                for o in Insights(session, league, user_id, self.automation.model, max_squad, max_club).market()
+                for o in insight.market()
                 if o.id in listed
             }
             state = t.blend(*self._load_states(session, league.id))
-            shares = Insights(session, league, user_id, self.automation.model, max_squad, max_club).winning_shares()
+            shares = insight.winning_shares()
             ### Conservative: a learned ratio only ever lowers the safe one, an unknown one counts as safe
             ratio = min(learned_sell_ratio(session) or SAFE_SELL_RATIO, SAFE_SELL_RATIO)
             history = self._trades(session, user_id, league.id)
@@ -625,7 +644,7 @@ class TraderService:
         pending = {
             pid: replace(
                 candidate(pid, p.position, p.status, p.team_id, p.average_points, p.market_value), locked=True,
-                expires_at=offers[pid].expires_at if pid in offers else None,
+                expires_at=expiries[pid],
             )
             for pid, p in listed.items() if pid in open_bids
         }
@@ -727,7 +746,7 @@ class TraderService:
         ### The trader's own bids that are not needed anymore (a rival won the slot's other auction, a
         ### player was won) are withdrawn, the most useful kept first; the user's own bids never
         planned = [*own, *(c for pid, c in pending.items() if pid not in trader_bids)]
-        for c in sorted((pending[pid] for pid in trader_bids), key=lambda c: (_purpose_rank(trader_bids[c.player_id].purpose) * -1, -c.expected)):
+        for c in sorted((pending[pid] for pid in trader_bids if pid in open_bids), key=lambda c: (_purpose_rank(trader_bids[c.player_id].purpose) * -1, -c.expected)):
             purpose = trader_bids[c.player_id].purpose
             needed = (
                 t.lineup_upgrade(planned, c, opts) is not None if purpose == "lineup"
@@ -745,7 +764,7 @@ class TraderService:
         free = budget - opts.reserve - sum(open_bids.values())
         slots = max_squad - len(own) - len(open_bids)
         ### Credit only as far as selling sellable players (simulated one by one) pays it back
-        loan = t.credit(budget, team_value, t.liquidation_value(own, ratio, opts.daily_sales))
+        loan = t.credit(budget, team_value, t.liquidation_value(own, ratio, max(sales_left, 0)))
         ### Profit trades together never tie up more than `profit_share` of team value plus balance
         holdings = sum(c.value for c in own if (h := bought.get(c.player_id)) is not None and h.purpose == "profit")
         profit_room = int((team_value + budget) * opts.profit_share / 100) - holdings - sum(
@@ -761,11 +780,11 @@ class TraderService:
             seller = p.seller.id if p.seller else None
             if offer is None or seller == user_id or pid in pending or pid in sold_recently or pid in unsettled or offer.own_club_full:
                 continue
-            if offer.expires_at is not None and offer.expires_at <= now:
+            if expiries[pid] is not None and expiries[pid] <= now:
                 continue
             c = candidate(pid, p.position, p.status, p.team_id, p.average_points, p.market_value)
             market_candidates.append(
-                replace(c, price=p.price or p.market_value, bid_low=offer.bid_low or 0, bid_high=offer.bid_high or 0, expires_at=offer.expires_at)
+                replace(c, price=p.price or p.market_value, bid_low=offer.bid_low or 0, bid_high=offer.bid_high or 0, expires_at=expiries[pid])
             )
         free_agents = {pid for pid, p in listed.items() if p.seller is None}
 
@@ -956,6 +975,7 @@ class TraderService:
         return list(
             session.exec(
                 select(TradeLog).where(TradeLog.user_id == user_id, TradeLog.league_id == league_id, TradeLog.at >= since)
+                .order_by(TradeLog.at, TradeLog.id)
             )
         )
 

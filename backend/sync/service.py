@@ -695,10 +695,13 @@ class SyncService:
                 if pid in players:
                     players[pid].image = path
 
+            competition_teams = {tid for tid, team in teams.items() if team.competition_id == competition_id}
+            competition_teams.update(entry.id for entry in r.table.teams)
             for pid, p in players.items():
-                if pid not in seen:
+                if pid not in seen and p.team_id in competition_teams:
                     p.active = False
-                session.add(p)
+                if pid in seen or p.team_id in competition_teams:
+                    session.add(p)
 
             ### Market value histories
             stored = (

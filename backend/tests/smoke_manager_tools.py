@@ -493,7 +493,7 @@ def main() -> None:
         check(bool(key.get("publicKey")), "push key is generated")
         sub = client.post(
             "/api/push/subscribe",
-            json={"endpoint": "https://push.example.org/abc123456", "p256dh": "x" * 20, "auth": "y" * 8},
+            json={"endpoint": "https://fcm.googleapis.com/fake-test-subscription", "p256dh": "x" * 20, "auth": "y" * 8},
         )
         check(sub.status_code == 200 and sub.json()["subscribed"] == 1, "push subscription stored")
 
