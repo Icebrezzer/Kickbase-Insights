@@ -593,13 +593,14 @@ def estimate_balance(manager: str, events: Iterable[TransferEvent], start_money:
 
 
 def max_bid(balance: int, team_value: int) -> int:
-    """The highest bid a manager can place.
+    """The highest bid a manager can place: the balance plus 33 % of the team value (the players'
+    market values), open bids not yet subtracted.
 
-    The debt limit is a third of the team value including the balance.
+    BaseXI shows it the same way ("Kontostand + 33 % Teamwert"), and Kickbase refused a bid with
+    `ThirtyThreePercentRuleExceeded` in a league with no players (team value 0: only the balance).
+    The formula before (a third of team value plus balance) was too low with money in the bank.
     """
-    debt_limit = (team_value + balance) * 0.33
-    bid = debt_limit + balance if balance < 0 else debt_limit
-    return max(0, round(bid))
+    return max(0, round(balance + team_value * 0.33))
 
 
 ### ===============================================================================

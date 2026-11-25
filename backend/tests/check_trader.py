@@ -157,7 +157,13 @@ def main() -> None:
     ), w
     assert (w["shadow_trades"], w["shadow_profit"]) == (1, 250_000), w
     ### Credit: up to the max bid, but only as much debt as the bench pays back
-    assert t.credit(10_000_000, 100_000_000, 50_000_000) == 26_300_000
+    ### Max bid = balance + 33 % of the team value, as BaseXI shows it and Kickbase enforces it
+    from core import analytics
+
+    assert analytics.max_bid(-3_641_743, 251_918_457) == 79_491_348, analytics.max_bid(-3_641_743, 251_918_457)
+    assert analytics.max_bid(5_000_000, 0) == 5_000_000, "no players: only the balance"
+    assert analytics.max_bid(-1_000_000, 0) == 0
+    assert t.credit(10_000_000, 100_000_000, 50_000_000) == 33_000_000
     assert t.credit(10_000_000, 100_000_000, 5_000_000) == 5_000_000
     assert t.credit(-5_000_000, 100_000_000, 3_000_000) == 0
     assert t.credit(-5_000_000, 100_000_000, 20_000_000) == 15_000_000

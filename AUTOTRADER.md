@@ -555,7 +555,7 @@ Gegen die echte Kickbase-API lässt sich das ohne Live-Zugang nicht prüfen. Die
 
 | Annahme | Wenn sie falsch ist | Absicherung |
 |---|---|---|
-| Max-Gebot = 33-%-Regel wie in `analytics.max_bid` | Kredit zu groß oder zu klein | Kredit zusätzlich durch die Liquidation begrenzt. `credit_mode 0` schaltet ihn ganz ab |
+| Max-Gebot = Kontostand + 33 % des Mannschaftswerts, offene Gebote zählen mit | Kredit zu groß oder zu klein | **Abgeglichen (25.11.)** mit BaseXI („Max. Invest = Kontostand + 33 % Teamwert“: −3.641.743 € + 33 % von ~251,9 Mio. = 79.491.091 €) und mit Kickbases Ablehnung in einer Liga ohne Kader. Die frühere Formel (33 % von Teamwert + Kontostand) war bei positivem Kontostand zu niedrig und ist ersetzt. Der Kredit bleibt durch die Liquidation begrenzt; `credit_mode 0` schaltet ihn ganz ab |
 | Offene Gebote sind im Kontostand **nicht** abgezogen | doppelt abgezogen → zu vorsichtig | konservative Richtung |
 | Gewonnene Auktion wird erst beim Zuschlag abgebucht, mehrere Zuschläge zugleich möglich | – | Worst Case nimmt alle Zuschläge an |
 | Sofortverkauf ≈ 90 % des Marktwerts oder weniger | Erlös anders | Quote nie über 0,9, gelernt nur nach unten. Erlös wird nach dem Verkauf gemessen |
