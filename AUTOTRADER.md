@@ -1,6 +1,6 @@
 # Autotrader – komplette Logik
 
-Stand: 25.11.2026, Branch `codex/autotrader-2`, Meilensteine 1 (Critical Safety Patch), 2 (Trading Intelligence) und 3 (Learning Engine 2.0).
+Stand: 25.11.2026, Branch `codex/autotrader-2`, Meilensteine 1 (Critical Safety Patch), 2 (Trading Intelligence), 3 (Learning Engine 2.0) und 4 (Backtesting und Strategieprofile).
 
 Code:
 - `backend/core/trader.py`: reine Entscheidungen (Bewertung, Preis, Netto-Gewinn, Kredit, Phasen, Lernen).
@@ -440,6 +440,65 @@ Booleans akzeptieren nur `true/false`, `1/0` und die gleichnamigen Texte. `"fals
 
 ---
 
+## 10a. Strategieprofile
+
+`GET /api/automation/trader/profiles`. Auf der Automatik-Seite stehen sie unter Feineinstellungen → „Strategieprofil als Ausgangspunkt“: Die Seite zeigt jede Änderung (alt → neu), übernommen wird erst per Klick. Schattentransfers und Notfallregel bleiben, wie sie sind. Die Profile setzen nur Einstellungen; die harten Grenzen der Risk Engine gelten für alle.
+
+| Einstellung | Konservativ | Ausgewogen (= Standard) | Offensiv |
+|---|---|---|---|
+| Mindest-Punktgewinn | 5 | 2 | 1,5 |
+| € je Punkt | 250.000 | 300.000 | 400.000 |
+| Schnitt besser | 15 % | 10 % | 5 % |
+| Einsatzquote | 70 % | 60 % | 50 % |
+| Gewinnhandel gesamt | 30 % | 60 % | 80 % |
+| Reserve | 2 Mio. | 0 | 0 |
+| Mindestrendite netto | 2 % | 2 % | 1 % |
+| Kredit | Startelf/Ersatz | Startelf/Ersatz | auch Gewinnhandel |
+| Gebote / Verkäufe pro Tag | 6 / 3 | 6 / 3 | 10 / 5 |
+| Wochen-Stop-Loss | 1,5 Mio. | 3 Mio. | 5 Mio. |
+| Trailing / Positions-Stop / Halten | 4 % / 6 % / 5 Tage | 5 % / 10 % / 7 Tage | 8 % / 15 % / 10 Tage |
+
+Bestehende Einstellungen werden **nicht** automatisch umgestellt. Die Werte sind Vorschläge und noch nicht kalibriert (siehe 10b).
+
+## 10b. Backtest (`core/backtest.py`)
+
+`GET /api/automation/trader/backtest?capital=&folds=`. Auf der Automatik-Seite heißt der Bereich „Strategien im Rückblick vergleichen“.
+
+**Was nachgespielt wird:** der Gewinnhandel auf den **echten** Kickbase-Auktionen der Liga, jeweils mit dem tatsächlichen Gewinnerpreis.
+- **Wissen von damals:** Am Auktionstag entscheidet die Strategie nur mit den Marktwerten bis zu diesem Tag.
+- **Prognosemodell:** Je Testzeitraum wird es nur mit den Tagen davor trainiert (Walk-Forward, 3 aufeinanderfolgende Zeiträume, je mindestens 21 Tage Vorlauf).
+- **Gewinnchance:** Sie kommt nur aus früheren Auktionen.
+- **Zuschlag:** Ein Gebot gewinnt nur, wenn es **über** dem echten Gewinnerpreis lag. Gleichstand gilt als verloren.
+- **Halten und Verkaufen:** Gehalten wird mit denselben Ausstiegsregeln wie live, verkauft zum Tageswert × konservativer Quote. Am Ende eines Zeitraums wird alles verkauft.
+- **Kapital:** Jeder Zeitraum startet mit demselben Kapital. Es gelten Reserve, Gewinnhandels-Anteil, höchstens 5 Positionen, Gebote pro Tag und Wochen-Stop-Loss.
+
+**Verglichen werden:**
+1. Kein Handel.
+2. Die **alte Regel** vor dem Sicherheits-Patch, unverändert nachgebaut: Bruttomarge ohne Verkaufsquote, Gebotshöhe zwischen Median und 75 % der Aufschläge, Verkauf nur bei negativer Prognose.
+3. Konservativ, 4. Ausgewogen, 5. Offensiv (jeweils die aktuelle Logik).
+
+**Kennzahlen:** Nettoergebnis, Rendite, realisierter Gewinn, maximaler Rückgang (Drawdown), Gebote, gewonnen/verloren, Trades, Verlusttrades, Ø Haltedauer, Rendite je gebundenem Euro und Tag, Ausstiegsgründe.
+
+**Geprüft** (`tests/check_trader_backtest.py`):
+- Die alte Regel kauft einen brutto positiven, netto negativen Spieler und verliert Geld. Die neue Regel lässt ihn aus.
+- Ein stark steigender Spieler wird gekauft und mit Gewinn verkauft.
+- Unter dem Gewinnerpreis wird nicht gewonnen.
+- Eine andere Zukunft ändert die Kaufentscheidung nicht (kein Look-ahead), wohl aber das Ergebnis.
+- Gleichstand gilt als verloren, die Zeiträume sind korrekt getrennt.
+
+**Nicht nachspielbar, weil die Daten fehlen** (nichts wird erfunden):
+- welche anderen Spieler auf dem Markt standen,
+- die Fitness am Auktionstag (angenommen: fit),
+- Startelf und Punkte, Spieltage und Deadlines,
+- wie die Mitspieler auf einen anderen Gewinner reagiert hätten,
+- Verkäufe zwischen Managern.
+
+Er vergleicht also **Gewinnhandels-Strategien**, nicht den ganzen Trader. Ergebnisse sind kein Versprechen.
+
+**Demo-Daten:** Keine Strategie bietet. Der prognostizierte Gewinn aller Demo-Auktionen lag unter der Mindestmarge von 150.000 € (geprüft an 64 Auktionen); die Demo-Marktwerte schwanken dafür zu wenig. Das ist richtiges Verhalten. Erst eine echte Liga liefert eine aussagekräftige Kalibrierung.
+
+---
+
 ## 11. Nicht verifizierte Kickbase-Annahmen (Fail-Closed)
 
 Gegen die echte Kickbase-API lässt sich das ohne Live-Zugang nicht prüfen. Die API-Dokumentation (kevinskyba/kickbase-api-doc) beschreibt die betreffenden Antworten nicht.
@@ -467,7 +526,7 @@ Gegen die echte Kickbase-API lässt sich das ohne Live-Zugang nicht prüfen. Die
 - Gebotsgleichstände und Auktionen ohne Gebote sind in den Daten nicht sichtbar. Beide Lücken wirken vorsichtig.
 - Läuft der Server vom Vorabend bis zur Deadline durchgehend nicht, bleibt ein Minus stehen.
 - Rettungsverkäufe nutzen eine gierige Auswahl, kein kombinatorisches Optimum.
-- Kein Backtesting, keine Strategieprofile (Meilensteine 3–4). Die Gewichte und Schwellen von Meilenstein 2 sind begründete Startwerte, aber noch nicht kalibriert:
+- Der Backtest deckt nur den Gewinnhandel ab (10b). Die Gewichte und Schwellen von Meilenstein 2 und die Profilwerte sind begründete Startwerte. Kalibriert werden können sie erst mit dem Backtest einer echten Liga:
   - Qualität 0,6 / 0,4,
   - Faktor 1,5 bei wenig Daten,
   - Trailing-Stop 5 %, Positions-Stop 10 %, Zeitlimit 7 Tage.
