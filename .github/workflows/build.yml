@@ -28,9 +28,19 @@ jobs:
         run: pip install . ruff
       - name: Lint the new manager tools
         continue-on-error: true
-        run: ruff check --extend-ignore E501 core/coach.py sync/automation.py sync/push.py api/coach_routes.py tests
+        run: ruff check --extend-ignore E501 core/coach.py core/trader.py core/risk.py core/backtest.py sync/automation.py sync/trader.py sync/push.py api/coach_routes.py tests
       - name: Unit checks of the manager formulas
         run: python tests/check_coach.py
+      - name: Autotrader decisions
+        run: python tests/check_trader.py
+      - name: Autotrader safety (net profit, risk engine, credit, phases, invariants)
+        run: python tests/check_trader_safety.py
+      - name: Autotrader intelligence (lineup, priorities, exits)
+        run: python tests/check_trader_intelligence.py
+      - name: Autotrader learning (win probability, league models, forecast pause)
+        run: python tests/check_trader_learning.py
+      - name: Autotrader backtest (no look-ahead, real winner prices)
+        run: python tests/check_trader_backtest.py
       - name: League settings, migrations and lineup bounds
         run: python tests/check_league_preferences.py
       - name: Wealth reconstruction

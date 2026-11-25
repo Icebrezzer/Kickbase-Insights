@@ -104,6 +104,8 @@ All settings are environment variables with the `KBI_` prefix, nested settings u
 | `KBI_API__HIDE_HEALTH_CHECKS` | `false` | Leave the `GET /api/health` requests out of the container log. |
 | `KBI_ALLOW__BALANCES` | `false` | Show everyone the estimated balances and max bids of the other managers. Your own balance is always shown. |
 | `KBI_ALLOW__BALANCES_USERS` | – | Comma separated Kickbase user names or IDs who see the "Kontostände" even when they are off. |
+| `KBI_AUTOMATION__TRADER` | `true` | Server switch of the autotrader. Each league has its own switch on the Automatik page, off by default, starting as a dry run. |
+| `KBI_AUTOMATION__TRADER_ADMINS` | nobody | Comma separated Kickbase user names or IDs who may import or reset the learned trader values, which all leagues share. |
 | `KBI_DATABASE__HOST` | – | PostgreSQL host. Without it an SQLite database in `/data` is used. |
 | `KBI_DATABASE__PORT` / `__DATABASE` / `__USERNAME` / `__PASSWORD` | `5432` / `kickbase` / `kickbase` / – | PostgreSQL connection. |
 | `KBI_DATABASE__URL` | – | A full SQLAlchemy URL, wins over the fields above. |
