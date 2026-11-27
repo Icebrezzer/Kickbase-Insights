@@ -111,6 +111,17 @@ def analyze(export: dict) -> dict:
             reasons_by_player.setdefault(code, set()).add(str(m.get("id")))
         for text in (d.get("skipped") or {}).values():
             reasons[reason_code(text)] += 1
+    ### Profit trading at all possible? Best net result at the minimum bid of every rising, fit player
+    rising = {m.get("id"): m for d in normal for m in d.get("market", []) if m.get("fit") and (m.get("forecast") or 0) > 0}
+    nets = [m["net_at_low"] for m in rising.values() if isinstance(m.get("net_at_low"), (int, float))]
+    gains = sorted(m["gain"] / m["value"] * 100 for m in rising.values() if m.get("value") and isinstance(m.get("gain"), (int, float)))
+    profit_check = {
+        "rising_players": len(rising), "net_positive_at_min_bid": sum(1 for n in nets if n > 0),
+        "best_net_at_min_bid": max(nets) if nets else None,
+        "median_gain_pct": round(gains[len(gains) // 2], 2) if gains else None,
+        "max_gain_pct": round(gains[-1], 2) if gains else None,
+        "sell_ratio": next((d.get("sell_ratio") for d in reversed(normal) if d.get("sell_ratio")), None),
+    }
     options = export.get("options") or {}
     changed = {k: (DEFAULTS.get(k), v) for k, v in options.items() if k in DEFAULTS and DEFAULTS[k] != v}
     effective = export.get("learned_effective") or {}
@@ -126,6 +137,7 @@ def analyze(export: dict) -> dict:
         "rounds": len(rounds), "rescue_rounds": len(rounds) - len(normal),
         "rounds_with_actions": sum(1 for d in normal if d.get("actions")),
         "latest": round_summary(normal[-1]) if normal else None,
+        "profit_check": profit_check,
         "reasons": dict(reasons.most_common()),
         "players_per_reason": {k: len(v) for k, v in reasons_by_player.items()},
         "bids": {f"{p}/{s}": n for (p, s), n in bids.items()},
@@ -149,6 +161,13 @@ def report(result: dict) -> str:
                     "league_auctions", "actions"):
             lines.append(f"  {key:<26} {latest[key]}")
         lines.append(f"  {'risk_blocked':<26} {dict(latest['risk_blocked'])}")
+    pc = result["profit_check"]
+    lines.append(
+        f"Gewinnhandel möglich? {pc['net_positive_at_min_bid']} von {pc['rising_players']} steigenden Spielern netto positiv "
+        f"beim Mindestgebot (bester: {money(pc['best_net_at_min_bid'])}); Prognose über den Haltezeitraum Median "
+        f"{pc['median_gain_pct']} %, max. {pc['max_gain_pct']} %; Verkaufsquote {pc['sell_ratio']} "
+        f"(Gewinnschwelle ≈ {round((1 / pc['sell_ratio'] - 1) * 100, 1) if pc['sell_ratio'] else '–'} % + Aufschlag)"
+    )
     lines.append("Gründe ohne Kauf (alle Runden, Marktspieler-Runden):")
     for code, n in result["reasons"].items():
         lines.append(f"  {code:<36} {n:>6}  ({result['players_per_reason'].get(code, 0)} Spieler)")

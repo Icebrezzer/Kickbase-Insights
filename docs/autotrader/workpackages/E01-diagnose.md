@@ -15,7 +15,8 @@ Ziel des Epics: Für jede Liga ist ohne Codelesen erkennbar, **warum** der Trade
 - **Migration:** keine · **Rollback:** Revert des Commits.
 
 ### E01.01 – Reale JSON-Exporte analysieren
-- **Priorität:** P1 · **Status:** **blocked** (wartet auf Exporte des Auftraggebers) · **Abhängig von:** E00.08; besser nach E01.02 + E01.04 (frischer Export enthält dann Codes und Budgetvergleich) · **Aufwand:** S
+- **Priorität:** P1 · **Status:** **done** (27.11.2026, 2 Exporte) · **Abhängig von:** E00.08 · **Aufwand:** S
+- **Ergebnis:** `KNOWN_ISSUES.md` Abschnitt B. Hauptursachen: Verkaufsquote 0,9 macht Gewinnhandel unmöglich (KI-26), Qualitätsvergleich über Positionen blockiert Upgrades (KI-27), Reserve > Kontostand. Kredit ist **nicht** die primäre Ursache. Abnahme 1–3 erfüllt; Prioritäten in ADR-011 angepasst. `analyze_export.py` um die Prüfung „Gewinnhandel möglich?“ erweitert. Wiederholung nach E01.02/E01.04 mit frischem Export empfohlen.
 - **Ziel:** Ursache(n) der fehlenden Kaufvorschläge mit Daten belegen.
 - **Umfang:** `analyze_export.py` je Export; Gegenprüfung der Hypothesen in `KNOWN_ISSUES.md` B; Ergebnis als Abschnitt in `KNOWN_ISSUES.md` (ohne Nutzer-/Liga-IDs, ohne Spielernamen).
 - **Abnahmekriterien:** 1. Für die Liga ohne Käufe ist der/die dominierende Ablehnungsgrund/-gründe mit Häufigkeit belegt. 2. Jede Hypothese ist als bestätigt / widerlegt / nicht entscheidbar markiert. 3. Daraus abgeleitete Paketprioritäten sind in `MASTERPLAN.md` angepasst und begründet.

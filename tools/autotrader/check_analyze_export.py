@@ -23,7 +23,10 @@ EXPORT = {
             "squad": [{"value": 50_000_000}, {"value": 50_000_000}],
             "actions": [], "risk_blocked": [{"code": "OVER_BUDGET"}],
             "market": [
-                {"id": "1", "decision": "Gewinnhandel: Marge unter der Mindestmarge oder Budget zu knapp"},
+                {"id": "1", "decision": "Gewinnhandel: Marge unter der Mindestmarge oder Budget zu knapp",
+                 "fit": True, "forecast": 50_000, "gain": 200_000, "value": 10_000_000, "net_at_low": -120_000},
+                {"id": "6", "decision": "Gewinnhandel: Gebot 1,000,000 € (x)",
+                 "fit": True, "forecast": 90_000, "gain": 1_500_000, "value": 10_000_000, "net_at_low": 250_000},
                 {"id": "2", "decision": "kein Startelf-Upgrade, keine steigende Prognose"},
                 {"id": "3", "decision": "Startelf: Gebot 1,000,000 € (x) – blockiert: OVER_BUDGET"},
                 {"id": "4", "decision": "etwas Neues"},
@@ -46,6 +49,8 @@ def main() -> None:
     reasons = result["reasons"]
     assert reasons["PROFIT_MARGIN_OR_BUDGET"] == 1 and reasons["NO_RISING_FORECAST"] == 1, reasons
     assert reasons["RISK_OVER_BUDGET"] == 1 and reasons["OTHER"] == 1 and reasons["CLUB_LIMIT"] == 1, reasons
+    pc = result["profit_check"]
+    assert pc["rising_players"] == 2 and pc["net_positive_at_min_bid"] == 1 and pc["best_net_at_min_bid"] == 250_000, pc
     assert result["options_changed"] == {"min_roi": (2.0, 3.0)}, result["options_changed"]
     assert ax.reason_code(None) == "NONE"
     assert "Liga 4242" in ax.report(result)

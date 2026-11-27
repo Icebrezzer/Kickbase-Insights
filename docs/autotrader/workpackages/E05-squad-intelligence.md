@@ -32,3 +32,19 @@ Flag: `flexible_bench` (E05.02/E05.06), `player_roles` (E05.01/E05.05). Bei `off
 - **Priorität:** P3 · **Abhängig von:** E02.01 · **Aufwand:** M
 - **Ziel:** Gewichte (Schnitt/Form/Einsatz/kommende Spiele) aus Schema; Kalibrierung mit `ExpectationLog` (zeitlich getrennt). Keine neuen Datenquellen ohne Prüfung ihrer Zuverlässigkeit (Übergabe §11.3).
 - **Abnahmekriterien:** Fehlende Daten werden nicht als 0 oder als gut gewertet (Tests je Feld).
+
+### E05.08 – Qualitätsvergleich bei Formationswechsel (neu, aus E01.01)
+- **Priorität:** P1 · **Status:** todo – **wartet auf fachliche Entscheidung** · **Abhängig von:** E02.08 (Flag) · **Aufwand:** S · **Flag:** `upgrade_cross_position`
+- **Ausgangssituation:** KI-27. In Liga A waren 162 von 307 abgelehnten Elf-Verbesserungen Fälle, in denen der verdrängte Spieler auf einer anderen Position spielt. `lineup_upgrade` vergleicht dann dessen Saisonqualität mit der des Ziels.
+- **Ziel:** Bei Formationswechsel gilt nicht der Qualitätsvergleich über Positionen. Gilt stattdessen:
+  - (a) Vergleich mit dem schwächsten Starter **gleicher Position** und zusätzlich
+  - (b) Punktgewinn der Elf über die nächsten 3 Spiele (`ahead` je Spieler, aufsummiert über die Elf vorher und nachher) ≥ `min_gain`.
+- **Nicht enthalten:** Änderung von `min_gain`, `min_play` und `min_avg_edge`.
+- **Module:** `core/trader.py::lineup_upgrade`, Tests in `check_trader_intelligence.py`.
+- **Sicherheit:** S6 unberührt (kein Verkauf). Flag `off` = altes Verhalten (Determinismus-Test).
+- **Abnahmekriterien:**
+  1. Nachgerechnete letzte Runde aus Liga A (anonymisierte Testdaten): Der Verteidiger mit +23,5 Punkten wird zum Upgrade.
+  2. Ein Einmal-Effekt, also hoher Gewinn nur am nächsten Spieltag und über 3 Spiele schlechter, wird weiter abgelehnt.
+  3. Mit Flag `off` sind die Aktionen identisch zu vorher.
+- **Pflichttests:** Formationswechsel 3-5-2 → 4-4-2; Wechsel ohne `ahead`-Daten (Fail-Closed: Ablehnung wie bisher).
+- **Rollback:** Flag `off`.

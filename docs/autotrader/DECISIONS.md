@@ -48,3 +48,11 @@ Format: Kontext · Entscheidung · Folgen. Neue Einträge unten anhängen, alte 
 **Kontext:** `init_db` bricht ab, wenn die gespeicherte Schema-Version **höher** ist als die des Codes (`db/__init__.py`). Jede Erhöhung von `SCHEMA_VERSION` macht damit ein Image-Rollback ohne Backup unmöglich.
 **Entscheidung:** AT3-Tabellen (`strategyconfig`, `decisionsnapshot`, Portfolios) entstehen additiv per `create_all`, neue Spalten über `_LATER_COLUMNS`, Datenübernahmen idempotent beim Start. `SCHEMA_VERSION` wird nur bei nicht additiven Änderungen erhöht – dann mit Backup-Pflicht und ausdrücklichem Hinweis im Release.
 **Folgen:** Ältere Images starten weiter auf einer AT3-Datenbank und ignorieren neue Tabellen. Neue Spalten in bestehenden Tabellen brauchen einen Standardwert, damit ältere Images Zeilen weiter schreiben können.
+
+## ADR-011 – Prioritäten nach Auswertung der Exporte (27.11.2026, angenommen)
+**Kontext:** E01.01 zeigt: In der Liga ohne Käufe verhindert die angenommene Sofortverkaufsquote 0,9 jeden Gewinnhandel, und ein Qualitätsvergleich über Positionen verhindert fast alle Startelf-Upgrades. Kredit ist nicht die primäre Ursache (KNOWN_ISSUES B).
+**Entscheidung:**
+1. **Kickbase-Verkaufsquote klären** (Frage an den Auftraggeber) hat Vorrang vor E04. E06.04 (Auswertung echter Verkäufe) bleibt in Welle 1.
+2. **E05.08 neu, P1**, direkt nach E02.08: Formationswechsel-Upgrade hinter Flag.
+3. E04 (Finanzierung) bleibt wichtig, kommt aber nach E05.08. Ohne korrekte Verkaufsquote würden auch Liquidation und bedingte Tilgung mit einem falschen Wert rechnen.
+4. E01.00 und E01.04 laufen unverändert als Nächstes (Diagnose ohne Verhaltensänderung).

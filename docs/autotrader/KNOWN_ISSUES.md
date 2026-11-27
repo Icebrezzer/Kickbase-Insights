@@ -45,18 +45,51 @@ Status: `offen` · `geplant (WP)` · `behoben (Commit)`.
 | KI-17 | **Verifiziert.** Keine Saison- oder Mannschaftswertabhängigkeit; Strategieprofile sind statisch | `core/trader.py:101-113` | geplant E08 |
 | KI-18 | **Verifiziert.** Keine Portfolio-Simulation; Backtest nur für Gewinnhandel, alle Strategien sehen dieselben Auktionen | `core/backtest.py` | geplant E09 |
 
-## B. Hypothesen zur Liga ohne Kaufvorschläge (brauchen Exporte)
+## B. Liga ohne Kaufvorschläge – Ergebnis E01.01 (27.11.2026)
 
-Reihenfolge nach Plausibilität im Code; **keine ist bewiesen.** `tools/autotrader/analyze_export.py` zählt genau diese Gründe.
+Datengrundlage: zwei Exporte vom 27.11.2026, je ca. 2 Tage (25.11. 16:27 – 27.11. 19:31 UTC).
+- **Liga A:** Probelauf, Gewinnhandel an, 60 Runden, **0 Gebote**.
+- **Liga B:** live, 62 Runden, 22 Gebote, davon 4 gewonnen.
 
-1. `credit_mode = 1` und Kontostand ≈ 0 → Gewinnhandel ohne Geld (KI-02); Startelf-Käufe nur, wenn Upgrade-Filter passen.
-2. Lücken in der Elf (`gaps > 0`) → keine Gewinn- und Ersatzgebote („erst die Startelf füllen“), Lücken-Ziele scheitern an Einsatzquote/Preis.
-3. Gelernte `min_margin` hoch (KI-13) oder Prognosepause aktiv (KI-15).
-4. Wochen-Stop-Loss aktiv (inkl. Buchverlust).
-5. Unklarer Aufruf (`pending`/`unknown`) blockiert **alle** Gebote bis zu 2 Tage (`UNCONFIRMED_ACTION`).
-6. Kader voll (`slots ≤ 0`) und kein verzichtbarer Spieler (`pick_sale` = None).
-7. Startelf-Upgrades scheitern an `min_play` (Einsatzquote unbekannt = kein Kauf), Qualität, `ahead` oder `max_cost_per_point`.
-8. Schalter: `trader_profit` aus, Server-Schalter, automatische Pause.
+Beide Ligen nutzen dieselben, gegenüber dem Standard deutlich strengeren Einstellungen: `min_gain` 10, `min_play` 80 %, `min_avg_edge` 15 %, `reserve` 2 Mio., `profit_share` 35 %, `min_roi` 3 %. Ausgewertet mit `analyze_export.py` und einer Nachrechnung der letzten Runden mit `core/trader.py` (Skripte nicht im Repo, nur Rohdaten-Auswertung).
+
+**Ursache 1 – Gewinnhandel ist mit der Verkaufsquote 0,9 rechnerisch fast unmöglich (KI-26, belegt).**
+- Netto beim Mindestgebot war in **keiner** Runde für **keinen** steigenden, fitten Spieler positiv: Liga A 0 von 32, Liga B 0 von 27.
+- Der beste Wert lag bei −0,11 Mio. (A) bzw. −0,06 Mio. (B).
+- Mit 0,9 muss ein Spieler in 2 Updates um mehr als 11,1 % plus Gebotsaufschlag steigen. Die Prognosen lagen im Median bei 3,0 % (A) bzw. 1,3 % (B), höchstens bei 11,4 %.
+- Alle 526 Ablehnungen „Marge oder Budget“ in Liga A scheitern **an beidem**. Mehr Kredit allein hätte also **keinen einzigen** Gewinnkauf ausgelöst.
+- Die 0,9 ist eine **nicht verifizierte Annahme** (`AUTOTRADER.md` §11). Echte Verkäufe zur Kalibrierung gibt es in keinem der beiden Exporte.
+
+**Ursache 2 – Startelf-Upgrades scheitern am Qualitätsvergleich über Positionen hinweg (KI-27, belegt).**
+- In Liga A gab es 307 mögliche Elf-Verbesserungen (Spieler-Runden mit positivem Punktgewinn). Sie wurden abgelehnt wegen:
+  - 162 (8 Spieler): Qualität, **verdrängter Spieler auf anderer Position**;
+  - 58: Qualität, gleiche Position;
+  - 51: `min_gain` 10;
+  - 35: Einsatzquote unter 80 %.
+- Nur eine einzige Verbesserung bestand alle Filter.
+- Beispiel aus der letzten Runde: Ein Verteidiger (+23,5 erwartete Punkte) stellt die Formation von 3-5-2 auf 4-4-2 um und verdrängt einen Stürmer. Dessen erwartete Punkte sind niedriger (73,3), seine Qualität aber höher (151 gegen 101). Die Ablehnung erfolgt, weil `lineup_upgrade` den Verdrängten nimmt, wenn es keinen Spieler gleicher Position gibt (`core/trader.py:319-327`), und Qualitäten verschiedener Positionen vergleicht.
+- Ob diese Ablehnung fachlich gewollt ist, muss der Auftraggeber entscheiden (Schutz vor Einmal-Effekten oder ein Fehler).
+
+**Ursache 3 – Bargeld ist durch die Reserve negativ (belegt, verschärfend).**
+- In Liga A lag der Kontostand zwischen −12,98 und +2,82 Mio., die Reserve bei 2 Mio. `cash_free` war deshalb in jeder Runde negativ (−21,3 bis −1,5 Mio.).
+- Mit `credit_mode = 1` bekommt der Gewinnhandel dann kein Geld (KI-02). Freigegeben waren zuletzt 11,4 Mio. für Startelf/Ersatz und −1,5 Mio. für Gewinnhandel – bei einem Maximalgebot von 84,4 Mio.
+
+**Hypothesen aus E00:**
+
+| # | Hypothese | Ergebnis |
+|---|---|---|
+| 1 | `credit_mode 1` + Kontostand ≈ 0 | **bestätigt, aber nicht allein ursächlich** (Ursache 1 blockiert zuerst) |
+| 2 | Lücken in der Elf | widerlegt für A (`gaps` 0); in B wirksam (113× „erst die Startelf füllen“), dort aber gewollt |
+| 3 | `min_margin` hoch / Prognosepause | widerlegt (150.000 Standard, keine Pause, aber auch keine Prognose-Kalibrierung: `gain_samples` 0) |
+| 4 | Stop-Loss | widerlegt |
+| 5 | Unklarer Aufruf | widerlegt (A hat keine Trades) |
+| 6 | Kader voll | teilweise (76× in A, nicht dominierend) |
+| 7 | Upgrade-Filter | **bestätigt** (Ursache 2; zusätzlich `min_gain` 10 und `min_play` 80 %) |
+| 8 | Schalter | widerlegt (Trader an, Gewinnhandel an) |
+
+**Liga B, Nebenbefunde:**
+- Am 25.11. um 12:17/13:48 gab es 13 Gebote mit „+1.0xx Punkten“. Das war der Lücken-Strafwert einer älteren Version (vor `4b85715`); alle diese Gebote sind `expired`. Seit 17:13 bietet der Trader plausibel auf Lücken.
+- Ein gewonnenes Gebot steht mit `paid` 15,80 Mio. bei einem Gebot von 15,28 Mio. im Log. `paid` kommt bei fehlendem Wert aus dem Kickbase-Kaufpreis; die Ursache ist nicht geklärt (KI-28).
 
 ## C. Qualität, Tests, Doku
 
@@ -68,4 +101,7 @@ Reihenfolge nach Plausibilität im Code; **keine ist bewiesen.** `tools/autotrad
 | KI-22 | `AUDIT-2026-11-25.md` sagt „nicht gepusht, [skip ci]“; der Branch ist inzwischen gepusht und CI lief für `4b85715` erfolgreich (25.11., 22:43 UTC) | Hinweis, kein Handlungsbedarf |
 | KI-23 | Lokale Prüfumgebung hat kein Node → Frontend-Build/-Tests nur in CI | Hinweis |
 | KI-24 | Jeder Push auf irgendeinen Branch baut und veröffentlicht ein Image (`type=ref,event=branch`, `type=sha`). Vorschau-Images entstehen damit automatisch; `latest` nur von `main` | Hinweis für Release-Strategie |
+| KI-26 | Sofortverkaufsquote 0,9 ist unverifiziert und bestimmt allein, ob Gewinnhandel möglich ist (siehe B, Ursache 1). Sie wirkt auch auf Liquidation, Kredit und Startelf-Preis je Punkt | offen – Kickbase-Regel klären, dann E06.04 |
+| KI-27 | `lineup_upgrade` vergleicht bei einem Formationswechsel die Qualität mit einem Spieler anderer Position (siehe B, Ursache 2) | offen – E05.08 (neu), fachliche Entscheidung nötig |
+| KI-28 | `paid` > Gebot bei einem gewonnenen Gebot in Liga B | offen, beobachten |
 | KI-25 | Aus dem Audit übernommen: Backend-Abhängigkeiten nur mit Mindestversionen, PostgreSQL-Pfad ungetestet, keine Freigabe für mehrere Replikate, keine Freigabe für unbeaufsichtigten Live-Betrieb | offen (E11) |
