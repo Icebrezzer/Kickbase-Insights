@@ -294,11 +294,17 @@ def main() -> None:
         check(sold.status == "sold" and sold.profit is None and sold.details["received_known"] is False, f"unknown proceeds stay unknown {sold.details}")
         live = [*live, lost, flaky]
 
-        ### Two hours before the deadline with a negative balance: rescue sales only, no bid, starters kept
+        ### In the repay phase with a negative balance: rescue sales only, no bid, starters kept.
+        ### The repay phase starts after the last market value update (22:15 Berlin), and the demo deadline
+        ### moves with the clock: a fixed "two hours before" was sometimes still the prepare phase
+        from core import trader as core_trader
+
         coach_view = client.get("/api/coach").json()
         deadline_at = datetime.fromisoformat(coach_view["matchday"]["deadline"].replace("Z", "+00:00"))
+        rescue_at = core_trader.repay_from(deadline_at) + timedelta(minutes=1)
+        check(core_trader.phase(rescue_at, deadline_at) in ("repay", "final"), f"rescue check runs in the repay phase ({rescue_at})")
         rescue_plan, _ = state.automation.trader._plan(
-            league, state.automation.get_settings("1001", "4242"), squad_x, -3_000_000, market_x, deadline_at - timedelta(hours=2)
+            league, state.automation.get_settings("1001", "4242"), squad_x, -3_000_000, market_x, rescue_at
         )
         print("    rescue:", [(a.kind, a.purpose, a.name, a.price) for a in rescue_plan])
         check(rescue_plan and all(a.kind in ("sell", "withdraw") for a in rescue_plan), "negative balance before the deadline: no bids, rescue only")

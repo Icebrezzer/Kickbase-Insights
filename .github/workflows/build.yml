@@ -52,6 +52,8 @@ jobs:
         run: python tests/check_leader.py
       - name: Smoke test against the demo Kickbase
         run: python tests/smoke_manager_tools.py
+      - name: Export analysis tool
+        run: python -I ../tools/autotrader/check_analyze_export.py
 
   frontend:
     runs-on: ubuntu-latest
