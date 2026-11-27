@@ -40,7 +40,7 @@ Stand nach der Auswertung der realen Exporte (§9, ADR-011, ADR-012). ✅ = erle
 | ✅ | E05.08 Formationswechsel nach Punkten | 5 | 2 | 1 | 7 | W1 | **neu**: 162 von 307 Ablehnungen |
 | ✅ | E01.02 Einheitliche Ablehnungscodes | 5 | 1 | 2 | 7 | W1 | – |
 | ✅ | **E10.00 Prognose-Kalibrierung aus allen beobachteten Spielern** | 5 | 1 | 2 | 7 | **W1 (neu)** | Prognose trifft die Richtung zu 94–99 %, wurde aber nie kalibriert |
-| 3 | E01.03 Statistik abgelehnter Kandidaten | 3 | 1 | 1 | 4 | W2 | – |
+| ✅ | E01.03 Statistik abgelehnter Kandidaten | 3 | 1 | 1 | 4 | W2 | – |
 | 4 | E02.01 Schema | 4 | 1 | 2 | 5 | W2 | – |
 | 5 | E02.02 Validierung | 4 | 1 | 1 | 6 | W2 | – |
 | 6 | E02.08 Feature Flags | 5 | 2 | 1 | 7 | W2 | übernimmt `sell_ratio` und `upgrade_cross_position` |

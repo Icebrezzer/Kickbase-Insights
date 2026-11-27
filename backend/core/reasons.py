@@ -147,3 +147,49 @@ def money_limits(check: dict | None, purpose: str) -> list[str]:
     """The money limits of a purpose, largest first: what keeps the released budget below the max bid."""
     limits = ((check or {}).get("limits") or {}).get(purpose) or {}
     return [code for code, amount in sorted(limits.items(), key=lambda item: -item[1]) if amount > 0]
+
+
+### ===============================================================================
+### Statistics over the stored rounds (E01.03)
+### ===============================================================================
+
+### Rounds from before E01.02 carry only a text
+LEGACY = "LEGACY_TEXT"
+TEXT[LEGACY] = "Runde vor Einführung der Codes"
+WINDOWS = (1, 7, 21)
+
+
+def rejection_stats(rounds: list[tuple[object, dict]], now: object, day_of, windows: tuple[int, ...] = WINDOWS) -> dict:
+    """Per window of days: rounds, players checked, players with a planned bid, players without, and how
+    often each code was the primary or a secondary reason. Counted once per player, day and code, so a
+    player rejected in 200 rounds of one day counts once. `rounds` are (time, debug data) of planning
+    rounds, `day_of` turns a time into a local day number, `now` the same for the windows."""
+    today = day_of(now)
+    result: dict[str, dict] = {}
+    for window in windows:
+        start = today - window + 1
+        checked: set[str] = set()
+        bid: set[str] = set()
+        primary: dict[str, set[tuple[str, int]]] = {}
+        secondary: dict[str, set[tuple[str, int]]] = {}
+        count = 0
+        for at, data in rounds:
+            day = day_of(at)
+            if day < start or data.get("rescue"):
+                continue
+            count += 1
+            for m in data.get("market", []):
+                pid = str(m.get("id"))
+                checked.add(pid)
+                code = m.get("reason") or LEGACY
+                if code == BID_PLANNED:
+                    bid.add(pid)
+                primary.setdefault(code, set()).add((pid, day))
+                for extra in m.get("reasons") or []:
+                    secondary.setdefault(extra, set()).add((pid, day))
+        rank = lambda found: dict(sorted(((c, len(v)) for c, v in found.items()), key=lambda item: -item[1]))  # noqa: E731
+        result[f"d{window}"] = {
+            "rounds": count, "checked": len(checked), "with_bid": len(bid), "without_bid": len(checked - bid),
+            "primary": rank(primary), "secondary": rank(secondary),
+        }
+    return result

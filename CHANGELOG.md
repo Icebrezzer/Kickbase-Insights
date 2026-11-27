@@ -5,6 +5,7 @@ Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Au
 ## [Unveröffentlicht] – Auto-Trader 3.0
 
 ### Hinzugefügt
+- E01.03: Statistik der abgelehnten Kandidaten über 1, 7 und 21 Tage (`rejections` im Dashboard-API): geprüfte Spieler, Spieler mit Gebot und häufigste Haupt- und Nebengründe, je Spieler und Tag einmal gezählt.
 - E10.00: Prognosegüte auf allen beobachteten Spielern. Je Liga und Marktwert-Tag wird die Prognose jedes Kader- und Marktspielers gespeichert und später mit dem echten Wert verglichen. Trefferquote, Kalibrierung und Fehlerverteilung stehen im Dashboard-API und im Export (`forecast_quality`). Neue Tabelle `forecastobservation`, ohne Änderung der Schema-Version.
 - E01.02: Einheitliche Ablehnungscodes (`core/reasons.py`): Jeder Marktspieler einer Runde trägt im Debug-Protokoll und im Export einen primären und optional sekundäre Codes. Aus „Marge oder Budget“ werden die einzelnen Ursachen, etwa `MARGIN_BELOW_MIN` + `BUDGET` + `CREDIT_MODE`.
 - E06.00: Neue Liga-Option **Sofortverkauf bringt (% des Marktwerts)** (`sell_ratio`, 50–100, Standard 90 wie bisher). Kickbase zahlt den vollen Marktwert; mit 100 rechnen Gewinnhandel, Kredit, Rettung, Schatten und Backtest mit dem echten Erlös.

@@ -447,6 +447,14 @@ def main() -> None:
         check(all((m["reason"] in (rc.BID_PLANNED, rc.RISK_BLOCKED)) == (": Gebot " in m["decision"]) for m in market_rows),
               "a planned bid has the code BID_PLANNED (or RISK_BLOCKED)")
         check(not any("oder" in m["decision"] for m in market_rows), "no combined reason text")
+        ### E01.03: rejection statistics in the dashboard, per user and league, fast, cached until a new round
+        started_at = time.perf_counter()
+        stats = state.automation.trader.rejection_stats("1001", "4242")
+        took = (time.perf_counter() - started_at) * 1000
+        check(stats["d21"]["checked"] > 0 and stats["d21"]["primary"] and took < 200, f"rejection statistics ({took:.0f} ms, {stats['d21']['checked']} players)")
+        check(state.automation.trader.rejection_stats("1001", "4242") is stats, "cached until a new round is logged")
+        check(state.automation.trader.rejection_stats("someone-else", "4242")["d21"]["checked"] == 0, "another user's rounds are not counted")
+        check(dj.get("rejections") is not None and "d7" in dj["rejections"], "the dashboard shows the rejection statistics")
 
         ### Notifications: an eleven with gaps close to the matchday is pushed once per deadline
         from db.models import AutomationEvent

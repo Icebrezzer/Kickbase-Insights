@@ -51,7 +51,13 @@ Ziel des Epics: Für jede Liga ist ohne Codelesen erkennbar, **warum** der Trade
 - **Migration:** keine (JSON im Debug) · **Rollback:** Revert.
 
 ### E01.03 – Statistik abgelehnter Kandidaten
-- **Priorität:** P2 · **Status:** todo · **Abhängig von:** E01.02 · **Aufwand:** S
+- **Priorität:** P2 · **Status:** done · **Abhängig von:** E01.02 · **Aufwand:** S
+- **Ergebnis:**
+  - `core/reasons.py::rejection_stats` zählt über 1, 7 und 21 Tage: Runden, geprüfte Spieler, Spieler mit und ohne geplantes Gebot, sowie Haupt- und Nebengründe, jeweils einmal je Spieler, Berlin-Tag und Code. Rettungsrunden zählen nicht. Runden vor E01.02 erscheinen als `LEGACY_TEXT`.
+  - `TraderService.rejection_stats` steht im Dashboard-API unter `rejections`, getrennt je Nutzer und Liga. Der Wert wird zwischengespeichert, bis eine neue Debug-Runde vorliegt.
+  - Laufzeit: Die Runden von Liga A, auf 21 Tage hochgerechnet (600 Runden, 10,9 MB), brauchen 113 ms zum JSON-Parsen und 13 ms zum Zählen, plus Lesen aus der DB. Das fällt nur nach einer neuen Runde an.
+  - Tests: 7 neue Checks in `check_trader_reasons.py` (Deduplizierung, Fenster, Rettung, Altformat) und Smoke-Prüfungen (Isolation, Cache, Dashboard).
+  - Abnahme 1–3 erfüllt; die 200 ms gelten für die Demo, die echte Größe liegt knapp darunter (gemessen ohne DB-Lesen).
 - **Ziel:** Je Liga über 1/7/21 Tage: geprüfte Spieler, geeignete, abgelehnte, Top-Gründe (primär/sekundär), je Spieler einmal je Tag gezählt.
 - **Umfang:** Aggregation aus `traderdebug` in `sync/trader.py::_stats` oder eigener Funktion; API-Feld im Dashboard. Keine neue Tabelle (21 Tage Debug reichen; Langzeit in E03.08).
 - **Abnahmekriterien:** 1. Zählung dedupliziert je (Spieler, Tag, Code). 2. Laufzeit < 200 ms bei 21 Tagen Demo-Daten. 3. Liga-/Nutzer-Isolation getestet.

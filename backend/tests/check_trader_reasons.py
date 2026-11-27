@@ -88,6 +88,26 @@ def main() -> None:
     ok(rc.money_limits(check, "profit") == [t.LIMIT_CREDIT_MODE, t.LIMIT_RESERVE], "money limits largest first")
     ok(rc.money_limits(None, "profit") == [] and rc.money_limits(check, "lineup") == [], "no check, no limits")
 
+    ### E01.03: statistics over the stored rounds, once per player, day and code
+    market = lambda *rows: {"market": [{"id": pid, "reason": code, "reasons": extra} for pid, code, extra in rows]}  # noqa: E731
+    rounds = [
+        (10, market(("a", rc.MARGIN_BELOW_MIN, [rc.BUDGET]), ("b", rc.BID_PLANNED, []))),
+        (10, market(("a", rc.MARGIN_BELOW_MIN, [rc.BUDGET]))), # Same player, day and code: once
+        (9, market(("a", rc.MARGIN_BELOW_MIN, []), ("c", rc.NOT_FIT, []))), # Yesterday: another day
+        (2, market(("d", rc.STOP_LOSS, []))), # Older than a week
+        (10, {"rescue": True, **market(("e", rc.NOT_FIT, []))}), # Rescue rounds plan nothing to buy
+        (10, {"market": [{"id": "f", "decision": "alter Text"}]}), # From before E01.02
+    ]
+    stats = rc.rejection_stats(rounds, 10, lambda day: day)
+    d1, d7, d21 = stats["d1"], stats["d7"], stats["d21"]
+    ok(d1["rounds"] == 3 and d1["checked"] == 3 and d1["with_bid"] == 1 and d1["without_bid"] == 2, f"today ({d1})")
+    ok(d1["primary"] == {rc.MARGIN_BELOW_MIN: 1, rc.BID_PLANNED: 1, rc.LEGACY: 1}, f"once per player, day and code ({d1['primary']})")
+    ok(d1["secondary"] == {rc.BUDGET: 1}, "secondary reasons counted apart")
+    ok(d7["primary"][rc.MARGIN_BELOW_MIN] == 2 and d7["primary"][rc.NOT_FIT] == 1 and rc.STOP_LOSS not in d7["primary"], f"a week ({d7['primary']})")
+    ok(d21["primary"][rc.STOP_LOSS] == 1 and d21["checked"] == 5 and d21["rounds"] == 5, f"21 days, without the rescue round ({d21})")
+    ok(list(d7["primary"])[0] == rc.MARGIN_BELOW_MIN, "the most frequent reason first")
+    ok(rc.rejection_stats([], 10, lambda day: day)["d7"]["checked"] == 0, "no rounds, nothing claimed")
+
     print(f"All {passed} trader reason checks passed.")
 
 

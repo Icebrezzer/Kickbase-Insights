@@ -128,6 +128,8 @@ class TraderService:
         ### open ones were settled: a round only writes players not seen today (E10.00)
         self._observed: dict[tuple[str, int], set[str]] = {}
         self._observations_settled: dict[str, int] = {}
+        ### Rejection statistics per league and user, with the newest debug row they were computed from
+        self._rejections: dict[tuple[str, str], tuple[int, dict]] = {}
         self.automation = automation
         self.engine = automation.engine
         self.settings = automation.settings
@@ -1285,6 +1287,22 @@ class TraderService:
                     session.commit()
             session.commit()
 
+    def rejection_stats(self, user_id: str, league_id: str) -> dict:
+        """E01.03: why market players were not bought over 1, 7 and 21 days, once per player, day and
+        code. The stored rounds are only read again when a new one was logged."""
+        with Session(self.engine) as session:
+            newest = session.exec(select(TraderDebug.id).where(
+                TraderDebug.user_id == user_id, TraderDebug.league_id == league_id).order_by(TraderDebug.id.desc())).first()
+            cached = self._rejections.get((league_id, user_id))
+            if cached is not None and cached[0] == newest:
+                return cached[1]
+            since = utcnow() - timedelta(days=max(rc.WINDOWS))
+            rows = session.exec(select(TraderDebug.at, TraderDebug.data).where(
+                TraderDebug.user_id == user_id, TraderDebug.league_id == league_id, TraderDebug.at >= since)).all()
+        stats = rc.rejection_stats(list(rows), utcnow(), _local_day)
+        self._rejections[(league_id, user_id)] = (newest, stats)
+        return stats
+
     def dashboard(self, user_id: str, league_id: str) -> dict:
         """The trader's state now (from its latest round) and its statistics, for the dashboard."""
         latest = self._latest.get((league_id, user_id))
@@ -1330,6 +1348,7 @@ class TraderService:
             "liquidation": d.get("liquidation"),
             "money_check": d.get("money_check"),
             "forecast_quality": self.forecast_quality(league_id),
+            "rejections": self.rejection_stats(user_id, league_id),
             "worst_case": d.get("worst_case"),
             "profit_room": d.get("profit_room"),
             "gaps_confirmed": d.get("gaps_confirmed"),
@@ -1611,6 +1630,11 @@ def _price(
     if upgrade is not None and not t.worth_it(upgrade, bid, opts, ratio):
         return None
     return bid
+
+
+def _local_day(at: datetime) -> int:
+    """The Berlin calendar day of a moment, as a number, for counting once per day."""
+    return at.astimezone(analytics.MARKET_VALUE_TIMEZONE).date().toordinal()
 
 
 def _reason_fields(found: list[str] | None, upgrade_code: str | None) -> dict:
