@@ -573,6 +573,45 @@ def main() -> None:
             learned = learned_ratio(s)
         check(debug.data["sell_ratio"] == min(learned or 1.0, 1.0), f"the planning uses the league's ratio ({debug.data['sell_ratio']}, learned {learned})")
 
+        ### E10.00: every planned player's forecast once per league and market value day, settled later
+        from core.analytics import market_value_day
+        from db.models import ForecastObservation, MarketValueHistory
+
+        today = market_value_day(utcnow())
+        with Session(state.engine) as s:
+            observed = s.exec(select(ForecastObservation).where(ForecastObservation.league_id == "4242", ForecastObservation.day == today)).all()
+        check(len(observed) > 10 and all(o.value > 0 for o in observed), f"forecasts observed ({len(observed)} players today)")
+        for _ in range(3):
+            state.automation.trader._observed.clear() # As after a restart: the database must keep it unique
+            state.automation.trader._plan(league, state.automation.get_settings("1001", "4242"), squad_l, 5_000_000, market_l, utcnow())
+        with Session(state.engine) as s:
+            again = s.exec(select(ForecastObservation).where(ForecastObservation.league_id == "4242", ForecastObservation.day == today)).all()
+        check(len(again) == len(observed), f"one observation per player and day after more rounds and a restart ({len(again)})")
+        ### An observation from three days ago, settled against the stored history; another league's stays apart
+        probe = observed[0]
+        with Session(state.engine) as s:
+            points = s.get(MarketValueHistory, probe.player_id).points
+            day, value = int(points[-4][0]), int(points[-4][1])
+            s.add(ForecastObservation(league_id="4242", player_id=probe.player_id, day=day, value=value, forecast_1=1, forecast_2=2))
+            s.add(ForecastObservation(league_id="other", player_id=probe.player_id, day=day, value=value, forecast_1=1, forecast_2=2))
+            s.commit()
+        state.automation.trader._observations_settled.clear()
+        state.automation.trader._plan(league, state.automation.get_settings("1001", "4242"), squad_l, 5_000_000, market_l, utcnow())
+        with Session(state.engine) as s:
+            settled = s.get(ForecastObservation, ("4242", probe.player_id, day))
+            other = s.get(ForecastObservation, ("other", probe.player_id, day))
+        by_day = {int(d): int(v) for d, v in points}
+        check(settled.resolved and settled.actual_1 == (by_day[day + 1] - value if day + 1 in by_day else None),
+              f"an old observation is settled against the history ({settled.actual_1}, {settled.actual_2})")
+        check(not other.resolved, "another league's observations are left alone")
+        quality = state.automation.trader.forecast_quality("4242")
+        check(quality["observations"] >= 1 and quality["h1"]["n"] >= 1 and state.automation.trader.forecast_quality("other")["observations"] == 0,
+              f"forecast quality per league ({quality['observations']} observations)")
+        dash_fq = client.get("/api/automation/trader/dashboard").json().get("forecast_quality")
+        export_fq = client.get("/api/automation/trader/export?days=1").json().get("forecast_quality")
+        check(dash_fq is not None and export_fq is not None and export_fq["observations"] == quality["observations"],
+              "forecast quality in the dashboard and the export")
+
     print("\nAll manager tool checks passed.")
 
 

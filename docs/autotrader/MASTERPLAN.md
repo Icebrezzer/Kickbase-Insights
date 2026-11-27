@@ -39,7 +39,7 @@ Stand nach der Auswertung der realen Exporte (§9, ADR-011, ADR-012). ✅ = erle
 | ✅ | E06.00 Verkaufsquote als Liga-Option | 5 | 2 | 1 | 7 | W1 | **neu**: Hauptursache in Liga A |
 | ✅ | E05.08 Formationswechsel nach Punkten | 5 | 2 | 1 | 7 | W1 | **neu**: 162 von 307 Ablehnungen |
 | ✅ | E01.02 Einheitliche Ablehnungscodes | 5 | 1 | 2 | 7 | W1 | – |
-| 2 | **E10.00 Prognose-Kalibrierung aus allen beobachteten Spielern** | 5 | 1 | 2 | 7 | **W1 (neu)** | Prognose trifft die Richtung zu 94–99 %, wurde aber nie kalibriert |
+| ✅ | **E10.00 Prognose-Kalibrierung aus allen beobachteten Spielern** | 5 | 1 | 2 | 7 | **W1 (neu)** | Prognose trifft die Richtung zu 94–99 %, wurde aber nie kalibriert |
 | 3 | E01.03 Statistik abgelehnter Kandidaten | 3 | 1 | 1 | 4 | W2 | – |
 | 4 | E02.01 Schema | 4 | 1 | 2 | 5 | W2 | – |
 | 5 | E02.02 Validierung | 4 | 1 | 1 | 6 | W2 | – |
@@ -166,7 +166,7 @@ Grundlage sind zwei Exporte mit je etwa 2 Tagen Rundendaten (60 bzw. 62 Runden, 
 
 | Messung | Liga A | Liga B |
 |---|---|---|
-| Richtung des nächsten Updates richtig prognostiziert | 66 / 67 (99 %) | 33 / 35 (94 %) |
+| Richtung des nächsten Updates richtig prognostiziert | 66 / 67 (99 %) | 33 / 35 (94 %); streng gezählt, unveränderter Wert = Fehler (E10.00): 32 / 35 (91 %) |
 | Tatsächlich / prognostiziert bei steigender Prognose | 0,90 | 0,99 |
 | Mittlerer absoluter Fehler je Update | 0,32 % des Werts | 0,39 % des Werts |
 | Kalibrierte Prognosen im Trader-Modell (`gain_samples`) | **0** | **0** |

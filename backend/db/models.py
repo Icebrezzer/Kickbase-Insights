@@ -456,6 +456,22 @@ class ShadowTrade(SQLModel, table=True):
 ### Learning
 ### ===============================================================================
 
+class ForecastObservation(SQLModel, table=True):
+    """A player's market value forecast as the trader saw it on a market value day, and later what the
+    value really did (E10.00). Every squad and market player of a league once per day, so the forecast
+    is checked on all of them, not only on the trader's own buys. Added without a schema version (ADR-010)."""
+    league_id: str = Field(primary_key=True)
+    player_id: str = Field(primary_key=True)
+    day: int = Field(primary_key=True) # Market value day in force when observed (days since 1970-01-01)
+    observed_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+    value: int = _money(0)
+    forecast_1: int = _money(0) # Forecast change after the next update, unscaled
+    forecast_2: int = _money(0) # ... after two updates
+    actual_1: int | None = _money() # What the value really did after one update, None while unknown
+    actual_2: int | None = _money()
+    resolved: bool = Field(default=False, index=True) # Both horizons known, or given up
+
+
 class ModelState(SQLModel, table=True):
     """What the app learned, e.g. "expectation" weights, "bidder" model, "achievement_mode"."""
     key: str = Field(primary_key=True)

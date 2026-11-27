@@ -38,12 +38,13 @@ from typing import TYPE_CHECKING
 from sqlmodel import Session, delete, select
 
 from api.context import load_context
-from core import analytics, coach, risk
+from core import analytics, coach, learning, risk
 from core import reasons as rc
 from core import trader as t
 from db import exclusive
 from db.models import (
     AutomationEvent,
+    ForecastObservation,
     League,
     MarketValueHistory,
     ModelState,
@@ -67,6 +68,8 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 ### The instant sale ratio is the league option `sell_ratio` (t.sell_ratio): Kickbase pays the market value
+### Forecast observations (E10.00) are kept this long, then only their statistics are gone too
+FORECAST_KEEP_DAYS = 120
 ### Paper purchases started per round and league, the most promising first
 SHADOWS_PER_ROUND = 5
 SHADOW_KEEP = timedelta(days=120)
@@ -121,6 +124,10 @@ class Action:
 
 class TraderService:
     def __init__(self, automation: AutomationService):
+        ### Forecast observations already stored, per league and market value day, and the last day the
+        ### open ones were settled: a round only writes players not seen today (E10.00)
+        self._observed: dict[tuple[str, int], set[str]] = {}
+        self._observations_settled: dict[str, int] = {}
         self.automation = automation
         self.engine = automation.engine
         self.settings = automation.settings
@@ -609,12 +616,15 @@ class TraderService:
         )
         scale = state.gain_scale
         raw_gain: dict[str, int] = {}
+        predicted: dict[str, tuple[int, int, int]] = {} # Value, forecast after 1 and 2 updates, unscaled
 
         def candidate(pid: str, position: int, status: int, team_id: str | None, average: int | None, value: int) -> t.Candidate:
             e = context.expectation(pid, position, status, team_id, average)
             points = histories.get(pid) or []
             prediction = coach.forecast(points, self.automation.model, t.PROFIT_HOLD, context.match_points(pid))
             raw_gain[pid] = prediction.projection[-1] if prediction else 0
+            if prediction:
+                predicted[pid] = (value, prediction.next_change, raw_gain[pid])
             return t.Candidate(
                 player_id=pid,
                 position=position,
@@ -1017,6 +1027,7 @@ class TraderService:
                 "p_win_at_low": t.win_probability(low, c.value, t.winning_markups(shares, c.value)) if low else None,
             }
 
+        self._observe_forecasts(league.id, predicted, now)
         return finish(actions, shadows, {
             "live": row.trader_live, "profit_trading": row.trader_profit, "phase": stage, "budget": budget,
             "worst_case": budget - sum(all_open.values()), "cash_free": free, "credit": loan, "credit_mode": opts.credit_mode,
@@ -1047,6 +1058,61 @@ class TraderService:
     ### ==============================================================================================
     ### Log
     ### ==============================================================================================
+
+    def _observe_forecasts(self, league_id: str, predicted: dict[str, tuple[int, int, int]], now: datetime) -> None:
+        """E10.00: the forecast of every player of the round, once per league and market value day, and
+        once a day what the value of earlier observations really did. Reads only stored data, never
+        Kickbase. A failure here never stops a trading round."""
+        day = analytics.market_value_day(now)
+        seen = self._observed.setdefault((league_id, day), set())
+        new = {pid: v for pid, v in predicted.items() if pid not in seen}
+        settle = self._observations_settled.get(league_id) != day
+        if not new and not settle:
+            return
+        try:
+            with Session(self.engine) as session:
+                if new:
+                    stored = set(session.exec(select(ForecastObservation.player_id).where(
+                        ForecastObservation.league_id == league_id, ForecastObservation.day == day,
+                        ForecastObservation.player_id.in_(list(new)))).all())
+                    for pid, (value, f1, f2) in new.items():
+                        if pid not in stored and value > 0:
+                            session.add(ForecastObservation(league_id=league_id, player_id=pid, day=day, observed_at=now,
+                                                            value=value, forecast_1=f1, forecast_2=f2))
+                if settle:
+                    open_rows = session.exec(select(ForecastObservation).where(
+                        ForecastObservation.league_id == league_id, ForecastObservation.resolved == False,  # noqa: E712
+                        ForecastObservation.day < day)).all()
+                    ids = list({r.player_id for r in open_rows})
+                    histories = dict(session.exec(select(MarketValueHistory.player_id, MarketValueHistory.points).where(
+                        MarketValueHistory.player_id.in_(ids))).all()) if ids else {}
+                    for r in open_rows:
+                        r.actual_1, r.actual_2, r.resolved = learning.settle_observation(histories.get(r.player_id) or [], r.day, r.value)
+                        session.add(r)
+                    session.exec(delete(ForecastObservation).where(
+                        ForecastObservation.league_id == league_id, ForecastObservation.day < day - FORECAST_KEEP_DAYS))
+                session.commit()
+        except Exception:
+            log.exception("Forecast observations of league %s not stored", league_id)
+            return
+        seen.update(new)
+        if settle:
+            self._observations_settled[league_id] = day
+            ### Older days are not written again
+            for key in [k for k in self._observed if k[0] == league_id and k[1] < day]:
+                del self._observed[key]
+
+    def forecast_quality(self, league_id: str) -> dict:
+        """How good the market value forecast was on every observed player of the league (E10.00)."""
+        with Session(self.engine) as session:
+            rows = session.exec(select(
+                ForecastObservation.value, ForecastObservation.forecast_1, ForecastObservation.forecast_2,
+                ForecastObservation.actual_1, ForecastObservation.actual_2, ForecastObservation.day,
+            ).where(ForecastObservation.league_id == league_id, ForecastObservation.actual_1.is_not(None))).all()
+        quality = learning.forecast_quality([r[:5] for r in rows])
+        days = [r[5] for r in rows]
+        return {**quality, "observations": len(rows), "days": len(set(days)),
+                "from_day": min(days, default=None), "to_day": max(days, default=None)}
 
     def _trades(self, session: Session, user_id: str, league_id: str) -> list[TradeLog]:
         since = utcnow() - timedelta(days=60)
@@ -1185,6 +1251,7 @@ class TraderService:
                 "learned_effective": t.blend(learned, league_learned).dump(),
                 "learned_limits": t.LEARNED_LIMITS,
                 "constants": t.constants(),
+                "forecast_quality": self.forecast_quality(league_id),
                 "trades": dump(trades),
                 "shadows": dump(shadows),
                 "events": dump(events),
@@ -1262,6 +1329,7 @@ class TraderService:
             "credit_mode": d.get("credit_mode"),
             "liquidation": d.get("liquidation"),
             "money_check": d.get("money_check"),
+            "forecast_quality": self.forecast_quality(league_id),
             "worst_case": d.get("worst_case"),
             "profit_room": d.get("profit_room"),
             "gaps_confirmed": d.get("gaps_confirmed"),

@@ -275,3 +275,57 @@ def lost_gaps(lost: Iterable[tuple[int, int, int]]) -> dict[int, float]:
         if own > 0 and price > own:
             by_class.setdefault(coach.price_class(value), []).append(price / own - 1)
     return {c: round(median(v), 4) for c, v in by_class.items()}
+
+
+### ===============================================================================
+### Forecast quality on every observed player (E10.00)
+### ===============================================================================
+
+### Horizons checked: market value updates after the observation
+FORECAST_HORIZONS = (1, 2)
+
+
+def settle_observation(points: Sequence[Sequence[int]], day: int, value: int) -> tuple[int | None, int | None, bool]:
+    """What the value really did 1 and 2 updates after `day`, from the history (days as Kickbase sends
+    them). Only exact days count: a gap is no change. Done when both are known, or the history is past
+    them with a gap (given up)."""
+    by_day = {int(d): int(v) for d, v in points}
+    base = by_day.get(day, value)
+    actual = [by_day[day + h] - base if day + h in by_day else None for h in FORECAST_HORIZONS]
+    last = max(by_day, default=day)
+    done = all(a is not None for a in actual) or last > day + max(FORECAST_HORIZONS)
+    return actual[0], actual[1], done
+
+
+def _quantile(values: Sequence[float], share: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    return round(ordered[min(int(len(ordered) * share), len(ordered) - 1)], 3)
+
+
+def forecast_quality(rows: Iterable[tuple[int, int, int, int | None, int | None]]) -> dict:
+    """How good the market value forecast was, per horizon: rows are (value, forecast 1, forecast 2,
+    actual 1, actual 2). Direction hits count forecasts that are not zero; the ratio actual/forecast is
+    the calibration (1.0: right on average); errors are actual minus forecast in percent of the value,
+    apart for rising and falling forecasts, because a falling one can drop much further."""
+    rows = list(rows)
+    result: dict[str, dict] = {}
+    for index, horizon in enumerate(FORECAST_HORIZONS):
+        pairs = [(r[0], r[1 + index], r[3 + index]) for r in rows if r[3 + index] is not None and r[0] > 0]
+        moved = [(v, f, a) for v, f, a in pairs if f != 0]
+        stats: dict[str, object] = {"n": len(pairs), "direction_n": len(moved),
+                                    "direction_hits": sum(1 for _, f, a in moved if (f > 0) == (a > 0) and a != 0)}
+        stats["hit_rate"] = round(stats["direction_hits"] / len(moved), 3) if moved else None
+        for side, chosen in (("rising", [p for p in moved if p[1] > 0]), ("falling", [p for p in moved if p[1] < 0])):
+            forecast_sum = sum(f for _, f, _ in chosen)
+            errors = [(a - f) / v * 100 for v, f, a in chosen]
+            stats[side] = {
+                "n": len(chosen),
+                "ratio": round(sum(a for _, _, a in chosen) / forecast_sum, 3) if forecast_sum else None,
+                "error_pct_p5": _quantile(errors, 0.05), "error_pct_p50": _quantile(errors, 0.5),
+                "error_pct_p95": _quantile(errors, 0.95), "error_pct_min": round(min(errors), 3) if errors else None,
+            }
+        stats["mae_pct"] = round(sum(abs(a - f) / v * 100 for v, f, a in pairs) / len(pairs), 3) if pairs else None
+        result[f"h{horizon}"] = stats
+    return result

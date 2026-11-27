@@ -12,8 +12,9 @@
   - **E06.00** (Verkaufsquote als Liga-Option)
   - **E05.08** (Formationswechsel nach Punkten)
   - **E01.02** (einheitliche Ablehnungscodes)
+  - **E10.00** (Prognosegüte auf allen beobachteten Spielern)
 - Ohne geänderte Einstellungen handelt der Trader **wie bisher**. Die neuen Optionen `sell_ratio` (Standard 90) und `upgrade_cross_position` (Standard aus) wirken erst nach dem Einschalten je Liga.
-- **Nächstes Paket:** **E10.00** (Prognose-Kalibrierung aus allen beobachteten Spielern). Danach E02.01 → E02.02 → E02.08 → E05.02 → E04 (MASTERPLAN §3 und §9, ADR-012).
+- **Nächstes Paket:** **E01.03** (Statistik abgelehnter Kandidaten), dann der Rest von Welle 2: E02.01 → E02.02 → E02.08 → E01.05. Danach E02.01 → E02.02 → E02.08 → E05.02 → E04 (MASTERPLAN §3 und §9, ADR-012).
 - **Geklärt (27.11.2026):** Kickbase zahlt beim Sofortverkauf 100 % des Marktwerts. Formationswechsel mit mehr Punkten sind erwünscht.
 
 ## Ergebnis der Export-Analyse (Details `KNOWN_ISSUES.md` B)
@@ -32,10 +33,12 @@ In der Liga ohne Käufe gibt es drei Ursachen, und keine davon ist in erster Lin
 | `263bfa0` | E01.00 Debug-Liquidation |
 | `5a180be` | E01.04 `money_check` |
 | `6c0bc16` | E06.00 `sell_ratio`, E05.08 `upgrade_cross_position` |
+| `3ac2a78` | E01.02 Ablehnungscodes |
+| (dieser) | E10.00 Prognosegüte |
 
 ## Testlage (27.11.2026, lokal Windows/Python 3.12)
 
-Volle Backend-Suite 15/15 grün: Ruff, 12 Skripte aus der CI, Migration gegen `ebf50d3` und Export-Analyse. `check_trader_safety` hat jetzt 1494 Checks. Frontend und ui-audit wurden **nicht lokal ausgeführt** (kein Node). Die CI ist für diese Commits **noch nicht gelaufen** (nicht gepusht).
+Volle Backend-Suite 17/17 grün: Ruff, 12 Skripte aus der CI, Migration gegen `ebf50d3` und Export-Analyse. `check_trader_safety` hat jetzt 1494 Checks, neu sind `check_trader_reasons` (29) und `check_trader_forecast_quality` (16); die Suite umfasst 17 Prüfungen. Frontend und ui-audit wurden **nicht lokal ausgeführt** (kein Node). Die CI ist für diese Commits **noch nicht gelaufen** (nicht gepusht).
 
 ## Epic-Status
 

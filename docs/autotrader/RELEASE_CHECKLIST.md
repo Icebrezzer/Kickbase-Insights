@@ -43,6 +43,6 @@ Nach dem Update (TrueNAS):
 | Neue Funktion verhält sich falsch | Flag der Liga auf `off` (ab E02.08 ohne Neustart). Sofort, kein Deployment |
 | Strategie-Konfiguration falsch | Ältere Konfigurationsversion aktivieren (ab E02.07) |
 | Gelernte Werte falsch | `POST /api/automation/trader/reset` oder Rückimport der Vorher-Werte aus Ereignis `trader-import` |
-| Release fehlerhaft, ohne Schema-Migration | TrueNAS-Image auf vorherigen `sha-`Tag |
+| Release fehlerhaft, ohne Schema-Migration | TrueNAS-Image auf vorherigen `sha-`Tag. Neue Tabellen (ADR-010) bleiben ungenutzt liegen. Neue Liga-Optionen (z. B. `sell_ratio`) bleiben gespeichert, aber die alte Version kennt sie nicht und **verwirft sie beim nächsten Speichern der Einstellungen**. Nach dem Zurückwechseln also erneut setzen. |
 | Release fehlerhaft, mit Schema-Migration | Container stoppen, Backup zurückspielen, vorherigen Tag starten. Seit dem Backup getätigte echte Transfers bleiben bei Kickbase; der Abgleich (`_settle`) holt den Stand nach, Trades seit dem Backup fehlen im lokalen Log (dokumentieren) |
 | Notfall | Server-Schalter `KBI_AUTOMATION__TRADER=false` oder Liga-Schalter „Autotrader“ aus |

@@ -32,7 +32,19 @@ Voraussetzung: E03 (Snapshots, Abrechnung) und E04 (Finanzplanung als reine Funk
 Modi (Schema `learning.mode`): `observe` · `assisted` (Standard) · `bounded_auto`.
 
 ### E10.00 – Prognose-Kalibrierung aus allen beobachteten Spielern (neu, aus §9.3)
-- **Priorität:** P1 · **Status:** ready · **Abhängig von:** – · **Aufwand:** M · **Flag:** – (Messen und Anzeigen); die Nutzung der Kalibrierung in der Planung kommt später hinter ein Flag
+- **Priorität:** P1 · **Status:** done · **Abhängig von:** – · **Aufwand:** M · **Flag:** – (Messen und Anzeigen); die Nutzung der Kalibrierung in der Planung kommt später hinter ein Flag
+- **Ergebnis:**
+  - Neue Tabelle `forecastobservation` (additiv, ADR-010; Schlüssel Liga, Spieler, Marktwert-Tag). `TraderService._observe_forecasts` speichert bei jeder Planungsrunde die ungeskalierte Prognose (1 und 2 Updates) aller Kader-, Markt- und Gebotsspieler mit Prognose, einmal je Liga und Tag. Einmal täglich werden offene Beobachtungen gegen `MarketValueHistory` abgerechnet; nur exakte Tage zählen, Lücken bleiben unbekannt.
+  - Aufbewahrung 120 Tage. Ein Fehler beim Speichern bricht keine Handelsrunde ab.
+  - `core/learning.py::forecast_quality` berechnet je Horizont: Trefferquote der Richtung (ein unveränderter Wert zählt als Fehler), Kalibrierung tatsächlich/prognostiziert und Fehlerquantile p5/p50/p95/min in % des Werts, getrennt nach steigender und fallender Prognose, dazu den mittleren absoluten Fehler. Die Werte stehen in Dashboard-API und Export (`forecast_quality`).
+  - Abnahme:
+    1. Nachrechnung beider Exporte: Liga A 66/67 (98,5 %), Verhältnis 0,90, mittlerer Fehler 0,32 %; Liga B 32/35 (91 %, streng gezählt; §9.3 zählte 94 %), Verhältnis 0,99, mittlerer Fehler 0,39 %. Die Abweichung kommt allein aus der strengeren Zählung.
+    2. Eine Beobachtung je Spieler und Tag, auch nach mehreren Runden und einem simulierten Neustart (Smoke-Test).
+    3. `benchmark_audit`: Planung im Median 102,5–104,9 ms gegenüber 102,1–102,7 ms beim Ausgangsstand (≤ +2,7 %, im Rauschen), SQL-Abfragen im Median unverändert 48. Wachstum der Datenbank: etwa 30–70 Zeilen je Liga und Tag, also bei 120 Tagen höchstens etwa 8.400 Zeilen je Liga; nicht an einer echten DB gemessen.
+    4. Handelsverhalten unverändert: Die Beobachtung ändert keine Entscheidung, die Suite ist grün.
+  - Keine Kickbase-Aufrufe: `_observe_forecasts` bekommt keinen Client, nur bereits geladene Daten (S12).
+  - Ein älteres Image (`4b85715`) startet auf der neuen Datenbank (geprüft).
+  - Tests: `check_trader_forecast_quality.py` (16 Checks, in CI; Abrechnung, Lücken, Statistik, Tageswechsel 22:00 im Winter und Sommer) und Smoke-Test (Schreiben, Eindeutigkeit, Abrechnung, Liga-Trennung, Dashboard/Export).
 - **Ausgangssituation:** In beiden Ligen gilt `gain_samples` = 0. Die Prognose wird nur über eigene Käufe und Schatten kalibriert, obwohl jede Runde Prognose und späteren Marktwert für 30–70 Spieler kennt. Die Messung aus den Exporten (MASTERPLAN §9.3): Richtung 94–99 % richtig, mittlerer Fehler 0,3–0,4 % je Update, p5 −1,0 bis −1,5 %.
 - **Ziel:** Je Liga und global eine fortlaufende Prognose-Statistik je Horizont (1 und 2 Updates):
   - Trefferquote der Richtung;

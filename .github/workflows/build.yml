@@ -40,6 +40,8 @@ jobs:
         run: python tests/check_trader_intelligence.py
       - name: Autotrader learning (win probability, league models, forecast pause)
         run: python tests/check_trader_learning.py
+      - name: Autotrader forecast quality (every observed player, day boundaries)
+        run: python tests/check_trader_forecast_quality.py
       - name: Autotrader backtest (no look-ahead, real winner prices)
         run: python tests/check_trader_backtest.py
       - name: Offline audit regressions
