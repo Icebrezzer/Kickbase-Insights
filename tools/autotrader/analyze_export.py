@@ -87,7 +87,8 @@ def round_summary(data: dict) -> dict:
         "phase": data.get("phase"), "budget": budget, "team_value": team_value, "open_bids": open_bids,
         "max_bid": max_bid, "max_bid_after_open_bids": None if max_bid is None else max_bid - open_bids,
         "cash_free": free, "credit": credit, "credit_mode": data.get("credit_mode"),
-        "liquidation_logged": data.get("liquidation"), "profit_room": data.get("profit_room"),
+        "liquidation_logged": data.get("liquidation"), "liquidation_full_day": data.get("liquidation_full_day"),
+        "profit_room": data.get("profit_room"),
         "released_lineup": released_lineup, "released_profit": released_profit,
         "gap": None if max_bid is None else max_bid - open_bids - max(released_lineup, released_profit),
         "slots": data.get("slots"), "bids_left": data.get("bids_left"), "sales_left": data.get("sales_left"),
@@ -173,7 +174,8 @@ def report(result: dict) -> str:
         lines.append(f"  {code:<36} {n:>6}  ({result['players_per_reason'].get(code, 0)} Spieler)")
     lines.append(f"Gebote: {result['bids'] or 'keine'}")
     lines.append(f"Schattentransfers: {result['shadows'] or 'keine'}")
-    lines.append("Hinweis: 'liquidation_logged' rechnet mit dem vollen Tageslimit, der Kredit mit den restlichen Verkäufen (KNOWN_ISSUES KI-04).")
+    if latest and latest.get("liquidation_full_day") is None:
+        lines.append("Hinweis: Export vor E01.00 – 'liquidation_logged' rechnet mit dem vollen Tageslimit, der Kredit mit den restlichen Verkäufen (KI-04).")
     return "\n".join(lines)
 
 

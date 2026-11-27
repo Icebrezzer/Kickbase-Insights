@@ -9,6 +9,7 @@ Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Au
 - E00.08: `tools/autotrader/analyze_export.py` – Offline-Analyse eines Trader-Exports (Maximalgebot vs. freigegebenes Budget, Ablehnungsgründe als provisorische Codes, Schalter, gelernte Werte), mit Prüfskript `check_analyze_export.py` in der CI.
 
 ### Behoben
+- E01.00: Das Debug-Feld `liquidation` zeigte den Liquidationswert des ganzen Tageslimits, der Kredit rechnete aber mit den heute noch möglichen Verkäufen. Jetzt steht dort der tatsächlich verwendete Wert; der Tageswert steht zusätzlich in `liquidation_full_day`.
 - E00.03: `backend/tests/smoke_manager_tools.py` prüfte die Rettung vor dem Spieltag zu einer festen Zeit („Deadline − 2 h“), die je nach Uhrzeit der Demo-Deadline noch in der Phase `prepare` lag; der Test schlug dann fehl. Er nutzt jetzt den Beginn der Tilgungsphase.
 
 ### Verhalten

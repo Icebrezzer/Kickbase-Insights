@@ -3,7 +3,11 @@
 Ziel des Epics: Für jede Liga ist ohne Codelesen erkennbar, **warum** der Trader (nicht) handelt. Ändert kein Handelsverhalten.
 
 ### E01.00 – Debug-Liquidation = verwendete Liquidation
-- **Priorität:** P1 · **Status:** ready · **Abhängig von:** E00 · **Aufwand:** S · **Flag:** –
+- **Priorität:** P1 · **Status:** done · **Abhängig von:** E00 · **Aufwand:** S · **Flag:** –
+- **Ergebnis:** `sync/trader.py` berechnet die Liquidation nur noch einmal. Das Debug-Feld `liquidation` enthält jetzt den Wert, der den Kredit begrenzt hat; neu ist `liquidation_full_day` zum Vergleich.
+  - Tests in `smoke_manager_tools.py`: Kredit = `credit(…, liquidation)`; bei ausgeschöpftem Tageslimit ist die Liquidation 0, während `liquidation_full_day` > 0 ist. Der Test schlägt ohne die Korrektur fehl.
+  - Volle Backend-Suite grün (15/15, lokal). Frontend nicht ausgeführt; es zeigt dasselbe Feld weiter an.
+  - Abnahme 1–3 erfüllt.
 - **Ausgangssituation:** Debug-Feld `liquidation` rechnet mit `opts.daily_sales` und `own0`, der Kredit mit `sales_left` und `own` nach Ausstiegsverkauf (`sync/trader.py:792` vs. `:979`, KI-04).
 - **Ziel:** Das Protokoll zeigt den Wert, der den Kredit tatsächlich begrenzt hat.
 - **Umfang:** Liquidation einmal berechnen, in Variable halten, beides loggen: `liquidation` (verwendet) und `liquidation_full_day` (zum Vergleich).

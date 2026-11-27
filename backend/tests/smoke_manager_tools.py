@@ -332,6 +332,15 @@ def main() -> None:
         exited = [a for a in exit_plan if a.purpose == "exit"]
         check((verdict in ("SPORT", "STOP", "TRAIL", "TURN", "TAKE", "TIME")) == (len(exited) == 1), "an exit verdict on a free player is one sale")
         check(debug.data["paused"] is (debug.data["unrealized"] + debug.data["week_profit"] <= -3_000_000), "book losses count for the stop-loss")
+        ### E01.00: the logged liquidation is the one that limited the credit. Two sales today already
+        ### (daily limit 3): it covers fewer sales than the whole day's limit
+        from core import trader as core_trader
+
+        team_value = sum(p["value"] for p in debug.data["squad"])
+        check(debug.data["credit"] == core_trader.credit(5_000_000, team_value, debug.data["liquidation"]),
+              f"the logged liquidation limited the credit ({debug.data['liquidation']:,}, credit {debug.data['credit']:,})")
+        check(debug.data["liquidation"] <= debug.data["liquidation_full_day"],
+              f"sales used today count ({debug.data['liquidation']:,} <= {debug.data['liquidation_full_day']:,})")
 
         ### Dry run entries use up no live limits and block no player
         with Session(state.engine) as s:
@@ -510,6 +519,23 @@ def main() -> None:
         check(sold.json()["budget"] > before, "budget rose after the sale")
         after = client.get("/api/coach").json()
         check(sell_id not in {p["id"] for p in after["squad"]}, "sold player left the squad")
+
+        ### E01.00: the daily sale limit used up, the credit has no liquidation left, and the log says so
+        ### (it showed the whole day's liquidation before)
+        with Session(state.engine) as s:
+            for n in range(5):
+                s.add(TradeLog(user_id="1001", league_id="4242", player_id=f"liq{n}", kind="sell", purpose="room", status="sold",
+                               price=1, market_value=1))
+            s.commit()
+        state.automation.trader._last_debug.clear()
+        squad_l = client.portal.call(kb_client.manager_squad, "4242", "1001")
+        market_l = client.portal.call(kb_client.market, "4242")
+        state.automation.trader._plan(league, state.automation.get_settings("1001", "4242"), squad_l, 5_000_000, market_l, utcnow())
+        with Session(state.engine) as s:
+            debug = s.exec(select(TraderDebug).order_by(TraderDebug.id.desc())).first()
+        check(debug.data["liquidation"] == 0 and debug.data["credit"] == 0,
+              f"no sales left today: no liquidation, no credit ({debug.data['liquidation']}, {debug.data['credit']})")
+        check(debug.data["liquidation_full_day"] > 0, f"the whole day's liquidation is logged for comparison ({debug.data['liquidation_full_day']:,})")
 
     print("\nAll manager tool checks passed.")
 

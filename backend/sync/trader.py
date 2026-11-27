@@ -789,7 +789,8 @@ class TraderService:
         free = budget - opts.reserve - sum(open_bids.values())
         slots = max_squad - len(own) - len(open_bids)
         ### Credit only as far as selling sellable players (simulated one by one) pays it back
-        loan = t.credit(budget, team_value, t.liquidation_value(own, ratio, max(sales_left, 0)))
+        liquidation = t.liquidation_value(own, ratio, max(sales_left, 0))
+        loan = t.credit(budget, team_value, liquidation)
         ### Profit trades together never tie up more than `profit_share` of team value plus balance
         holdings = sum(c.value for c in own if (h := bought.get(c.player_id)) is not None and h.purpose == "profit")
         profit_room = int((team_value + budget) * opts.profit_share / 100) - holdings - sum(
@@ -976,7 +977,10 @@ class TraderService:
         return finish(actions, shadows, {
             "live": row.trader_live, "profit_trading": row.trader_profit, "phase": stage, "budget": budget,
             "worst_case": budget - sum(all_open.values()), "cash_free": free, "credit": loan, "credit_mode": opts.credit_mode,
-            "liquidation": t.liquidation_value(own0, ratio, opts.daily_sales), "profit_room": profit_room,
+            ### The liquidation that limited the credit (sales left today, after this round's exit sale), and
+            ### for comparison the one of the whole daily limit before it
+            "liquidation": liquidation, "liquidation_full_day": t.liquidation_value(own0, ratio, opts.daily_sales),
+            "profit_room": profit_room,
             "reserve": opts.reserve, "open_bids": all_open, "slots": slots, "bids_left": bids_left, "sales_left": sales_left,
             "paused": paused, "week_profit": week_profit, "unrealized": unrealized,
             "forecast_paused": bool(state.forecast_pause), "league_auctions": len(shares),
