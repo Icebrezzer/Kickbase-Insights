@@ -7,11 +7,12 @@ Options and OPTION_LIMITS, so they can never drift apart. Fixed rules of the cod
 read-only (`fixed`): they are documented and exported, and become editable one by one in own packages.
 
 A configuration is a nested dict {"schema_version": 1, "finance": {...}, ...}. This module converts it
-from and to Options; storing it (E02.03) and validating imports strictly (E02.02) come later.
+from and to Options and validates imports strictly (E02.02); storing it comes with E02.03.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, fields
 
 from core import trader as t
@@ -147,3 +148,89 @@ def schema() -> dict:
 def unmapped_options() -> set[str]:
     """Options fields without a place in the schema: must stay empty (checked by the tests)."""
     return {f.name for f in fields(t.Options)} - set(BY_OPTION)
+
+
+### ===============================================================================
+### Strict validation of imports (E02.02, ADR-004)
+### ===============================================================================
+
+
+def _check(s: Setting, value: object) -> tuple[object, str | None]:
+    """The value as stored, or an error message in German. No clamping, no guessing."""
+    if s.kind == "bool":
+        return (value, None) if isinstance(value, bool) else (None, "muss true oder false sein")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None, "muss eine Zahl sein"
+    if not math.isfinite(value):
+        return None, "muss eine endliche Zahl sein"
+    if s.kind in ("int", "choice"):
+        if value != int(value):
+            return None, "muss eine ganze Zahl sein"
+        value = int(value)
+    if s.fixed:
+        return (value, None) if value == s.default else (None, f"ist eine feste Regel ({s.default}) und nicht änderbar")
+    if s.kind == "choice":
+        return (value, None) if value in s.choices else (None, f"erlaubt sind {', '.join(map(str, s.choices))}")
+    low, high = s.bounds
+    if not low <= value <= high:
+        return None, f"muss zwischen {low:g} und {high:g} liegen"
+    return (float(value) if s.kind == "float" else value), None
+
+
+def upgrade(data: dict) -> dict:
+    """A configuration of an older format in the current one: the flat options of 2.0 (an export's
+    "options") become schema version 1. Unknown keys stay, so the validation can name them."""
+    if "schema_version" in data:
+        return data
+    nested: dict = {"schema_version": SCHEMA_VERSION}
+    for key, value in data.items():
+        setting = BY_OPTION.get(key)
+        if setting is None:
+            nested.setdefault("_unknown", {})[key] = value
+        else:
+            _put(nested, setting.path, value)
+    return nested
+
+
+def validate(data: object, base: dict | None = None) -> tuple[dict | None, list[dict]]:
+    """A complete configuration from `data` on top of `base` (default: the default configuration), or
+    None and every error with its path. Strict, for imports and the UI: nothing is taken over while any
+    error is left. Missing settings keep the value of `base`."""
+    if not isinstance(data, dict):
+        return None, [{"path": "", "message": "muss ein JSON-Objekt sein"}]
+    data = upgrade(data)
+    errors: list[dict] = []
+    version = data.get("schema_version")
+    if isinstance(version, bool) or not isinstance(version, int):
+        errors.append({"path": "schema_version", "message": "muss eine ganze Zahl sein"})
+    elif version > SCHEMA_VERSION:
+        errors.append({"path": "schema_version", "message": f"Version {version} ist neuer als diese App ({SCHEMA_VERSION})"})
+    elif version < 1:
+        errors.append({"path": "schema_version", "message": "unbekannte Version"})
+    result = {**(base or default())}
+    result = {k: dict(v) if isinstance(v, dict) else v for k, v in result.items()}
+    result["schema_version"] = SCHEMA_VERSION
+    for key in data.get("_unknown") or {}:
+        errors.append({"path": key, "message": "unbekannte Einstellung"})
+    sections = {s.path.split(".", 1)[0] for s in SETTINGS}
+    for section, part in data.items():
+        if section in ("schema_version", "_unknown"):
+            continue
+        if section not in sections:
+            errors.append({"path": section, "message": "unbekannter Bereich"})
+            continue
+        if not isinstance(part, dict):
+            errors.append({"path": section, "message": "muss ein JSON-Objekt sein"})
+            continue
+        for key, value in part.items():
+            path = f"{section}.{key}"
+            setting = BY_PATH.get(path)
+            if setting is None:
+                errors.append({"path": path, "message": "unbekannte Einstellung"})
+                continue
+            checked, error = _check(setting, value)
+            if error:
+                errors.append({"path": path, "message": error})
+            else:
+                _put(result, path, checked)
+    return (None, errors) if errors else (result, [])

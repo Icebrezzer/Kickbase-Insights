@@ -42,7 +42,7 @@ Stand nach der Auswertung der realen Exporte (§9, ADR-011, ADR-012). ✅ = erle
 | ✅ | **E10.00 Prognose-Kalibrierung aus allen beobachteten Spielern** | 5 | 1 | 2 | 7 | **W1 (neu)** | Prognose trifft die Richtung zu 94–99 %, wurde aber nie kalibriert |
 | ✅ | E01.03 Statistik abgelehnter Kandidaten | 3 | 1 | 1 | 4 | W2 | – |
 | ✅ | E02.01 Schema | 4 | 1 | 2 | 5 | W2 | – |
-| 5 | E02.02 Validierung | 4 | 1 | 1 | 6 | W2 | – |
+| ✅ | E02.02 Validierung | 4 | 1 | 1 | 6 | W2 | – |
 | 6 | E02.08 Feature Flags | 5 | 2 | 1 | 7 | W2 | übernimmt `sell_ratio` und `upgrade_cross_position` |
 | 7 | E01.05 Diagnoseansicht UI | 4 | 1 | 2 | 5 | W2 | – |
 | 8 | E02.03 / E02.04 Speicherung, Übernahme ohne Neustart | 4 | 2–3 | 2 | 4 | W3 | – |

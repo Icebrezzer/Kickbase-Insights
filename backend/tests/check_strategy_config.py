@@ -60,6 +60,47 @@ def main() -> None:
     fixed = [s for s in schema["settings"] if s["fixed"]]
     ok(len(fixed) == sum(1 for s in sc.SETTINGS if s.fixed) and all(s["option"] is None for s in fixed), "fixed rules marked")
 
+    ### E02.02: strict validation of imports. Every error has its path, nothing is taken over with an error
+    good, errors = sc.validate({"schema_version": 1, "finance": {"reserve": 1_000_000, "sell_ratio_pct": 100}})
+    ok(not errors and sc.get(good, "finance.reserve") == 1_000_000 and sc.to_options(good).sell_ratio == 100, "a valid partial import")
+    ok(sc.get(good, "limits.daily_bids") == 6, "missing settings keep the base")
+    base = sc.from_options(t.Options(daily_bids=9))
+    merged, _ = sc.validate({"schema_version": 1, "finance": {"reserve": 5}}, base)
+    ok(sc.get(merged, "limits.daily_bids") == 9 and sc.get(base, "finance.reserve") == 0, "merged on the base, the base unchanged")
+    bad_cases = {
+        "finance.reserve": ("viel", "muss eine Zahl sein"),
+        "profit.min_roi_pct": (float("nan"), "endliche"),
+        "limits.daily_bids": (999, "zwischen 0 und 30"),
+        "limits.daily_sales": (2.5, "ganze Zahl"),
+        "finance.credit_mode": (3, "erlaubt sind 0, 1, 2"),
+        "learning.shadow_enabled": ("false", "true oder false"),
+        "sport.min_play_pct": (True, "muss eine Zahl sein"),
+        "profit.hold_updates": (3, "feste Regel"),
+        "finance.nope": (1, "unbekannte Einstellung"),
+    }
+    for path, (value, message) in bad_cases.items():
+        section, key = path.split(".")
+        result, errors = sc.validate({"schema_version": 1, section: {key: value}, "finance": {"reserve": 1} if section != "finance" else {key: value}})
+        ok(result is None and any(e["path"] == path and message in e["message"] for e in errors), f"refused: {path}={value!r} ({errors})")
+    ok(sc.validate({"schema_version": 1, "profit": {"hold_updates": 2}})[1] == [], "a fixed rule at its value is fine")
+    for doc, path, message in (
+        ([1, 2], "", "JSON-Objekt"), ({"schema_version": 2}, "schema_version", "neuer"), ({"schema_version": "1"}, "schema_version", "ganze Zahl"),
+        ({"schema_version": 1, "casino": {}}, "casino", "unbekannter Bereich"), ({"schema_version": 1, "finance": 5}, "finance", "JSON-Objekt"),
+    ):
+        result, errors = sc.validate(doc)
+        ok(result is None and errors and errors[0]["path"] == path and message in errors[0]["message"], f"refused: {doc} ({errors})")
+    ### Several errors at once, all named, nothing taken over
+    result, errors = sc.validate({"schema_version": 1, "finance": {"reserve": -1, "credit_mode": 7}, "limits": {"daily_bids": 5}})
+    ok(result is None and {e["path"] for e in errors} == {"finance.reserve", "finance.credit_mode"}, "every error named, none taken over")
+    ### The flat options of a 2.0 export are recognized and checked the same way
+    old, errors = sc.validate({"min_gain": 10.0, "reserve": 2_000_000, "min_roi": 3.0})
+    ok(not errors and sc.to_options(old).min_gain == 10.0 and sc.to_options(old).reserve == 2_000_000, "2.0 options upgraded")
+    _, errors = sc.validate({"min_gain": 500, "nope": 1})
+    ok({e["path"] for e in errors} == {"sport.min_points_gain", "nope"}, f"2.0 options checked strictly ({errors})")
+    full = sc.from_options(t.profile("aggressive"))
+    again, errors = sc.validate(full)
+    ok(not errors and sc.to_options(again) == t.profile("aggressive"), "a complete configuration validates as it is")
+
     print(f"All {passed} strategy config checks passed.")
 
 

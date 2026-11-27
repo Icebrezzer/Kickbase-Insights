@@ -24,7 +24,15 @@ Reihenfolge (ADR-008): E02.01 → E02.02 → **E02.08** → E02.03 → E02.04 �
 - **Migration:** keine · **Rollback:** Revert.
 
 ### E02.02 – Validierung und Sicherheitsgrenzen
-- **Priorität:** P1 · **Status:** todo · **Abhängig von:** E02.01 · **Aufwand:** S
+- **Priorität:** P1 · **Status:** done · **Abhängig von:** E02.01 · **Aufwand:** S
+- **Ergebnis:**
+  - `strategy_config.validate(data, base)` prüft streng und liefert entweder die vollständige Konfiguration oder `None` mit allen Fehlern samt Pfad und deutschem Grund.
+  - Abgelehnt werden: unbekannter Bereich, unbekannte Einstellung, falscher Typ (Text statt Zahl, `true` als Zahl, `"false"` als Bool), NaN/∞, Kommazahl statt ganzer Zahl, Werte außerhalb der Grenzen, unzulässige Auswahl, geänderte feste Regel sowie eine neuere oder ungültige `schema_version`.
+  - Fehlende Einstellungen behalten den Wert der Basis.
+  - Die flachen Optionen eines 2.0-Exports werden über `upgrade` erkannt und genauso streng geprüft.
+  - Der tolerante Ladeweg (`to_options` / `Options.load`) bleibt für gespeicherte Daten unverändert.
+  - Tests: 22 neue Checks in `check_strategy_config.py`.
+  - Der Import-Endpunkt nutzt die Validierung noch nicht; das geschieht mit E02.05 (Vorschau und Aktivierung).
 - **Ziel:** `validate(data) -> (config | None, errors[])` streng; `load(data)` tolerant (ADR-004).
 - **Abnahmekriterien:** 1. Unbekannter Schlüssel, falscher Typ, NaN/∞, außerhalb Grenzen, Bool als Zahl → Fehler mit Pfad. 2. Kein Teil-Übernehmen bei Fehlern. 3. Alte Exporte (2.0-`options`) werden als Schema-v0 erkannt und migriert.
 - **Pflichttests:** Fuzz-ähnliche Tabelle ungültiger Werte; Altformat.
