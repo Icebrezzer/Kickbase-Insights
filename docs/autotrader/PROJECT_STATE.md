@@ -34,7 +34,7 @@ In der Liga ohne Käufe gibt es drei Ursachen, und keine davon ist in erster Lin
 | `5a180be` | E01.04 `money_check` |
 | `6c0bc16` | E06.00 `sell_ratio`, E05.08 `upgrade_cross_position` |
 | `3ac2a78` | E01.02 Ablehnungscodes |
-| (dieser) | E10.00 Prognosegüte |
+| `637244b` | E10.00 Prognosegüte |
 
 ## Testlage (27.11.2026, lokal Windows/Python 3.12)
 
