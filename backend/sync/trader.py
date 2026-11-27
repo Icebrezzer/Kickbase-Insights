@@ -61,6 +61,7 @@ from kickbase import KickbaseAuthError, KickbaseClient, KickbaseError
 from kickbase import models as kb
 from sync.learning import load_state
 from sync.learning import sell_ratio as learned_sell_ratio
+from sync.strategy import StrategyStore
 
 if TYPE_CHECKING:
     from sync.automation import AutomationService
@@ -120,6 +121,7 @@ class Action:
     forecast_gain: int = 0 # Unscaled forecast over the holding time, for the forecast check later
     cost: int | None = None # Sales: purchase price, read before the sale removes the squad entry
     for_player: str | None = None # Room sales: the auction the sale makes room for, checked again right before
+    config_version: int | None = None # The strategy configuration the round planned with (E02.04)
 
 
 class TraderService:
@@ -130,6 +132,8 @@ class TraderService:
         self._observations_settled: dict[str, int] = {}
         ### Rejection statistics per league and user, with the newest debug row they were computed from
         self._rejections: dict[tuple[str, str], tuple[int, dict]] = {}
+        ### Versioned strategy configuration per user and league (E02.03)
+        self.configs = StrategyStore(automation.engine)
         self.automation = automation
         self.engine = automation.engine
         self.settings = automation.settings
@@ -160,10 +164,12 @@ class TraderService:
         if budget.budget is None:
             return []
         saved = await self._saved_lineup(league, client)
-        opts = t.Options.load(row.trader_options)
+        ### The configuration of this round: loaded once, a change meanwhile counts from the next round
+        config = await asyncio.to_thread(self.configs.options, row.user_id, league.id)
+        opts = config[1]
         await asyncio.to_thread(self._settle, league, row.user_id, squad, market, now)
         await asyncio.to_thread(self._settle_shadows, league, market, now, opts.shadow)
-        actions, shadows = await asyncio.to_thread(self._plan, league, row, squad, budget.budget, market, now, saved)
+        actions, shadows = await asyncio.to_thread(self._plan, league, row, squad, budget.budget, market, now, saved, config)
         if opts.shadow:
             await asyncio.to_thread(self._start_shadows, league.id, shadows, row.user_id)
         pause = await asyncio.to_thread(self._error_pause, league.id, row.user_id, now) if row.trader_live else None
@@ -176,7 +182,7 @@ class TraderService:
             current = await asyncio.to_thread(self.automation.get_settings, row.user_id, league.id)
             if not (self.settings.automation.trader and current.trader and current.trader_live):
                 break
-            if not await self._revalidate(league, current, client, action):
+            if not await self._revalidate(league, current, client, action, config):
                 break
             current = await asyncio.to_thread(self.automation.get_settings, row.user_id, league.id)
             if not (self.settings.automation.trader and current.trader and current.trader_live):
@@ -202,7 +208,8 @@ class TraderService:
             await self._push(user_id, title, message, tag)
         return executed if row.trader_live and not pause else actions
 
-    async def _revalidate(self, league: League, row: UserAutomation, client: KickbaseClient, action: Action) -> bool:
+    async def _revalidate(self, league: League, row: UserAutomation, client: KickbaseClient, action: Action,
+                          config: tuple[int, t.Options] | None = None) -> bool:
         """Re-plan on fresh account state; manual bids and elapsed deadlines can invalidate a plan."""
         squad, budget, market = await asyncio.gather(
             client.manager_squad(league.id, row.user_id), client.own_budget(league.id), client.market(league.id)
@@ -210,7 +217,7 @@ class TraderService:
         if budget.budget is None:
             return False
         saved = await self._saved_lineup(league, client)
-        fresh, _ = await asyncio.to_thread(self._plan, league, row, squad, budget.budget, market, utcnow(), saved)
+        fresh, _ = await asyncio.to_thread(self._plan, league, row, squad, budget.budget, market, utcnow(), saved, config)
         if not fresh:
             return False
         first = fresh[0] # Later actions may depend on withdrawals or sales not executed yet.
@@ -562,12 +569,14 @@ class TraderService:
         market: kb.Market,
         now: datetime,
         saved: list[str] | None = None,
+        config: tuple[int, t.Options] | None = None,
     ) -> tuple[list[Action], list[ShadowTrade]]:
         from api.insights import Insights
         from api.routes import analysis_limits
 
         started = time.monotonic()
-        opts = t.Options.load(row.trader_options)
+        ### The round's configuration (E02.04); planned on its own (tests, re-planning) the active one
+        config_version, opts = config or self.configs.options(row.user_id, league.id)
         min_play = opts.min_play / 100
         user_id = row.user_id
         own_ids = [p.id for p in squad.players]
@@ -709,7 +718,8 @@ class TraderService:
                 unconfirmed=bool(unsettled),
             )
             codes = risk.validate(planned_actions, ctx)
-            approved = [a for a, code in zip(planned_actions, codes, strict=True) if code is None]
+            approved = [replace(a, config_version=config_version) for a, code in zip(planned_actions, codes, strict=True) if code is None]
+            debug["config_version"] = config_version
             debug["risk_blocked"] = [
                 {"kind": a.kind, "purpose": a.purpose, "player_id": a.player_id, "name": a.name, "price": a.price, "code": code}
                 for a, code in zip(planned_actions, codes, strict=True) if code is not None
@@ -1139,7 +1149,8 @@ class TraderService:
                     price=action.price,
                     market_value=action.market_value,
                     points_gain=action.points_gain,
-                    details={"reason": action.reason, "name": action.name, "forecast_gain": action.forecast_gain},
+                    details={"reason": action.reason, "name": action.name, "forecast_gain": action.forecast_gain,
+                             "config_version": action.config_version},
                 )
             )
             session.commit()
@@ -1151,7 +1162,7 @@ class TraderService:
                 user_id=user_id, league_id=league.id, player_id=action.player_id, kind=action.kind, purpose=action.purpose,
                 status="pending", price=action.price, market_value=action.market_value, points_gain=action.points_gain,
                 details={"reason": action.reason, "name": action.name, "forecast_gain": action.forecast_gain,
-                         "cost": action.cost, "for_player": action.for_player},
+                         "cost": action.cost, "for_player": action.for_player, "config_version": action.config_version},
             )
             session.add(entry)
             session.commit()
@@ -1249,6 +1260,8 @@ class TraderService:
                 "switches": {"trader": row.trader, "live": row.trader_live, "profit": row.trader_profit} if row else None,
                 "options": t.Options.load(row.trader_options if row else None).__dict__,
                 "flags": flags.load(row.trader_flags if row else None),
+                "config": (lambda c: {"version": c.version, "created_at": c.created_at.isoformat(), "created_by": c.created_by,
+                                      "data": c.data})(self.configs.active(user_id, league_id)),
                 "option_limits": t.OPTION_LIMITS,
                 "learned": learned.dump(),
                 "learned_league": league_learned.dump(),
@@ -1282,12 +1295,15 @@ class TraderService:
                 row = session.get(UserAutomation, (user_id, league_id)) or UserAutomation(user_id=user_id, league_id=league_id)
                 row.trader_options = t.Options.load({**t.Options.load(row.trader_options).__dict__, **options}).__dict__
                 session.add(row)
+                imported = t.Options.load(row.trader_options)
             if learned is not None:
                 with self._learning():
                     current = t.Learned.load(load_state(session, STATE_KEY)).dump()
                     self._save_state(session, t.Learned.load({**current, **learned}))
                     session.commit()
             session.commit()
+        if options is not None:
+            self.configs.follow_options(user_id, league_id, imported, "import")
 
     def flags(self, user_id: str, league_id: str) -> dict:
         """The feature flags of this league: the stage set, the stage that applies, what each one does."""

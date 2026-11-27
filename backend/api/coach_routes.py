@@ -206,6 +206,8 @@ async def put_automation(
     for name, value in body.model_dump().items():
         setattr(row, name, value)
     row = await asyncio.to_thread(automation.save_settings, row)
+    ### A changed option is a new version of the stored configuration (E02.03)
+    await asyncio.to_thread(automation.trader.configs.follow_options, viewer.user_id, league_id, Options.load(row.trader_options), "settings")
     return await asyncio.to_thread(_settings_out, state, viewer, row)
 
 

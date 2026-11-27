@@ -458,6 +458,22 @@ class ShadowTrade(SQLModel, table=True):
 ### Learning
 ### ===============================================================================
 
+class StrategyConfig(SQLModel, table=True):
+    """A version of a user's trader configuration in a league (E02.03), see core.strategy_config.
+    Append-only: every change is a new version, exactly one is active. The active one is also written
+    to UserAutomation.trader_options, so an older release keeps working. Added without a schema version
+    (ADR-010)."""
+    user_id: str = Field(primary_key=True)
+    league_id: str = Field(primary_key=True)
+    version: int = Field(primary_key=True)
+    schema_version: int = 1
+    data: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    active: bool = Field(default=False, index=True)
+    created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+    created_by: str = "" # migration, settings, import, config, rollback, learning
+    note: str = ""
+
+
 class ForecastObservation(SQLModel, table=True):
     """A player's market value forecast as the trader saw it on a market value day, and later what the
     value really did (E10.00). Every squad and market player of a league once per day, so the forecast

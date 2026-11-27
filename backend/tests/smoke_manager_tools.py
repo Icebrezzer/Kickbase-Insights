@@ -656,6 +656,36 @@ def main() -> None:
         check(client.get("/api/automation/trader/export?days=1").json()["flags"]["flexible_bench"] == "live", "the export carries the flags")
         client.put("/api/automation/trader/flags", json={"flags": dict.fromkeys(flag_list, "off")})
 
+        ### E02.03/E02.04: the stored configuration. The settings page makes a version when an option changes,
+        ### every round logs the version it planned with, a round keeps its configuration to the end
+        from core.trader import Options as TraderOptions
+
+        configs = state.automation.trader.configs
+        version_before = configs.active("1001", "4242").version
+        page = client.get("/api/automation/settings").json()
+        client.put("/api/automation/settings", json=page)
+        check(configs.active("1001", "4242").version == version_before, "saving unchanged settings makes no version")
+        page["traderOptions"]["dailyBids"] = page["traderOptions"]["dailyBids"] - 1
+        client.put("/api/automation/settings", json=page)
+        changed = configs.active("1001", "4242")
+        check(changed.version == version_before + 1 and changed.created_by == "settings", f"a changed option is a new version ({changed.version})")
+        state.automation.trader._last_debug.clear()
+        state.automation.trader._plan(league, state.automation.get_settings("1001", "4242"), squad_l, 200_000_000, market_l, utcnow())
+        with Session(state.engine) as s:
+            debug = s.exec(select(TraderDebug).order_by(TraderDebug.id.desc())).first()
+        check(debug.data["config_version"] == changed.version, "the round logs the version it planned with")
+        ### A round planned with its own configuration (as a running round keeps it): a change in the
+        ### database meanwhile does not count, the version of the round is in every action
+        pinned = (changed.version, TraderOptions.load({**TraderOptions().__dict__, "daily_bids": 0}))
+        state.automation.trader._last_debug.clear()
+        none_planned, _ = state.automation.trader._plan(league, state.automation.get_settings("1001", "4242"), squad_l, 200_000_000, market_l, utcnow(), None, pinned)
+        check(not any(a.kind == "bid" for a in none_planned), "the round's configuration counts, not the stored one")
+        some, _ = state.automation.trader._plan(league, state.automation.get_settings("1001", "4242"), squad_l, 200_000_000, market_l, utcnow())
+        check(all(a.config_version == changed.version for a in some), "every planned action carries the configuration version")
+        ### The export has the active version
+        exported = client.get("/api/automation/trader/export?days=1").json()["config"]
+        check(exported["version"] == changed.version and exported["data"]["schema_version"] == 1, "the export carries the active configuration")
+
     print("\nAll manager tool checks passed.")
 
 

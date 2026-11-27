@@ -57,14 +57,32 @@ Reihenfolge (ADR-008): E02.01 → E02.02 → **E02.08** → E02.03 → E02.04 �
 - **Sicherheit:** S14; Wechsel nach `live` erzeugt `AutomationEvent`.
 
 ### E02.03 – Ligaindividuelle Konfiguration speichern
-- **Priorität:** P1 · **Status:** todo · **Abhängig von:** E02.08 · **Aufwand:** M
+- **Priorität:** P1 · **Status:** done · **Abhängig von:** E02.08 · **Aufwand:** M
+- **Ergebnis:**
+  - Tabelle `strategyconfig` (Nutzer, Liga, Version; nur anhängend, genau eine aktiv). `sync/strategy.py::StrategyStore` legt beim ersten Zugriff Version 1 aus `trader_options` an (`created_by = migration`), ohne Startmigration und idempotent; wenn zwei Prozesse gleichzeitig anlegen, gewinnt einer.
+  - `activate` schreibt die neue Version in einer Transaktion unter der prozessübergreifenden Sperre `strategy-config`. Optional wird eine erwartete Version geprüft, sonst `ConfigConflict`. Dabei werden auch `trader_options` zurückgeschrieben, damit 2.0-Leser und ältere Images dieselben Werte sehen.
+  - `follow_options` erzeugt eine Version nur bei echter Änderung. Das betrifft die Einstellungsseite (`settings`) und den bisherigen Options-Import (`import`).
+  - Abnahme:
+    1. Jeder bestehende Wert bleibt erhalten (Test mit 2.0-Optionen inklusive `sell_ratio`).
+    2. `init_db` mehrfach ohne Duplikate.
+    3. Isolation nach Nutzer und Liga.
+    4. `trader_options` wird weiter geschrieben.
+  - Ein älteres Image (`4b85715`) startet auf der neuen Datenbank und schreibt weiter (geprüft).
+  - Tests: `check_strategy_store.py` (18 Checks, in CI; auch zwei gleichzeitige Aktivierungen, nur eine gewinnt).
 - **Ziel:** Tabelle `strategyconfig` (append-only, ADR-003); Migration der bestehenden `trader_options` als Version 1.
 - **Abnahmekriterien:** 1. Migration erhält jeden bestehenden Wert (Test mit DB des Altstands, `check_trader_migration.py` erweitert). 2. `init_db` zweimal ohne Duplikate. 3. Isolation Nutzer/Liga. 4. `trader_options` wird weiter geschrieben (Downgrade-Fähigkeit).
 - **Migration:** neue Tabelle per `create_all` (additiv, **ohne** `SCHEMA_VERSION`-Erhöhung, ADR-010) + idempotente Übernahme beim Start („für jede (Nutzer, Liga) ohne Version: Version 1 aus `trader_options`“). **Backup vor Update** (Release-Checkliste).
 - **Rollback:** Image zurück; die alte Version startet (Schema-Version unverändert), ignoriert die neue Tabelle und liest `trader_options` (weiterhin aktuell geschrieben).
 
 ### E02.04 – Dynamische Übernahme ohne Neustart
-- **Priorität:** P1 · **Status:** todo · **Abhängig von:** E02.03 · **Aufwand:** S
+- **Priorität:** P1 · **Status:** done · **Abhängig von:** E02.03 · **Aufwand:** S
+- **Ergebnis:**
+  - `TraderService.round` lädt die aktive Konfiguration einmal und gibt sie an `_plan` und an die Neuplanung vor jeder Live-Aktion (`_revalidate`) weiter. Eine Änderung während der Runde wirkt erst in der nächsten.
+  - Ohne übergebene Konfiguration (Tests, Einzelaufruf) lädt `_plan` die aktive.
+  - Die Version steht im Debug-Protokoll (`config_version`), in jeder geplanten Aktion und in den Details jedes Handelsprotokoll-Eintrags. Der Export enthält die aktive Konfiguration.
+  - Kein zusätzlicher DB-Zugriff je Aktion.
+  - Die geplanten Aktionen des Smoke-Tests sind vor und nach der Änderung identisch.
+  - Tests (Smoke): Speichern ohne Änderung erzeugt keine Version, mit Änderung schon; die Runde protokolliert ihre Version; eine festgehaltene Konfiguration hat Vorrang vor der gespeicherten; jede Aktion trägt die Version.
 - **Ziel:** Jede Runde lädt die aktive Version einmal; `config_version` in Debug, TradeLog-`details`, Snapshots.
 - **Abnahmekriterien:** 1. Änderung zwischen zwei Runden wirkt in der nächsten. 2. Änderung **während** einer Runde wirkt nicht in dieser (Test mit Haken zwischen Planung und Ausführung). 3. Kein zusätzlicher DB-Zugriff je Aktion (Cache je Runde).
 
