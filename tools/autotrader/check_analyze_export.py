@@ -52,6 +52,14 @@ def main() -> None:
     pc = result["profit_check"]
     assert pc["rising_players"] == 2 and pc["net_positive_at_min_bid"] == 1 and pc["best_net_at_min_bid"] == 250_000, pc
     assert result["options_changed"] == {"min_roi": (2.0, 3.0)}, result["options_changed"]
+    ### A round from E01.04 on carries the exact check, which wins over the estimate
+    native = {**EXPORT["rounds"][1]["data"], "money_check": {"max_bid": 40_000_000, "open_bids": 1_000_000, "max_bid_free": 39_000_000,
+              "released": {"lineup": 18_000_000, "cover": 18_000_000, "profit": -2_000_000},
+              "limits": {"profit": {"RESERVE": 2_000_000, "CREDIT_MODE": 20_000_000}}}}
+    summary = ax.round_summary(native)
+    assert summary["native_money_check"] and summary["max_bid"] == 40_000_000 and summary["released_profit"] == -2_000_000, summary
+    assert "CREDIT_MODE" in ax.report({**result, "latest": summary})
+    assert not latest["native_money_check"] and "geschätzt" in ax.report(result)
     assert ax.reason_code(None) == "NONE"
     assert "Liga 4242" in ax.report(result)
     print("All export analysis checks passed.")

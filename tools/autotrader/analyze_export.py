@@ -83,7 +83,15 @@ def round_summary(data: dict) -> dict:
     credit = data.get("credit") or 0
     released_lineup = (free or 0) + (credit if data.get("credit_mode", 1) >= 1 else 0)
     released_profit = (free or 0) + (credit if data.get("credit_mode", 1) >= 2 and data.get("phase") == "normal" else 0)
+    limits = None
+    ### Since E01.04 the round logs this itself, exactly and with the named limits; older exports are estimated
+    check = data.get("money_check")
+    if isinstance(check, dict) and check.get("released"):
+        max_bid, open_bids = check["max_bid"], check["open_bids"]
+        released_lineup, released_profit = check["released"].get("lineup"), check["released"].get("profit")
+        limits = check.get("limits")
     return {
+        "native_money_check": limits is not None, "limits": limits,
         "phase": data.get("phase"), "budget": budget, "team_value": team_value, "open_bids": open_bids,
         "max_bid": max_bid, "max_bid_after_open_bids": None if max_bid is None else max_bid - open_bids,
         "cash_free": free, "credit": credit, "credit_mode": data.get("credit_mode"),
@@ -162,6 +170,11 @@ def report(result: dict) -> str:
                     "league_auctions", "actions"):
             lines.append(f"  {key:<26} {latest[key]}")
         lines.append(f"  {'risk_blocked':<26} {dict(latest['risk_blocked'])}")
+        if latest["limits"]:
+            for purpose, parts in latest["limits"].items():
+                lines.append(f"  Abzüge {purpose:<19} " + (", ".join(f"{code} {money(v)}" for code, v in parts.items()) or "keine"))
+        else:
+            lines.append("  (Budgetvergleich geschätzt: Export vor E01.04 ohne 'money_check')")
     pc = result["profit_check"]
     lines.append(
         f"Gewinnhandel möglich? {pc['net_positive_at_min_bid']} von {pc['rising_players']} steigenden Spielern netto positiv "

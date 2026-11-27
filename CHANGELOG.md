@@ -5,6 +5,7 @@ Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Au
 ## [Unveröffentlicht] – Auto-Trader 3.0
 
 ### Hinzugefügt
+- E01.04: Jede Trader-Runde vergleicht das Kickbase-Maximalgebot mit dem intern freigegebenen Geld je Zweck. Jede Differenz wird mit Grund benannt (`RESERVE`, `DEBT`, `LIQUIDATION`, `CREDIT_MODE`, `PHASE`, `PROFIT_ROOM`): Feld `money_check` im Debug-Protokoll, im Export und im Dashboard-API.
 - E00: Projektstruktur für Auto-Trader 3.0 – `AGENTS.md`, `docs/autotrader/` (Masterplan, Architektur, Projektstatus, Entscheidungen, Konfigurationsschema-Entwurf, Sicherheitsregeln, Testmatrix, Release-Checkliste, bekannte Probleme, Arbeitspakete E00–E11).
 - E00.08: `tools/autotrader/analyze_export.py` – Offline-Analyse eines Trader-Exports (Maximalgebot vs. freigegebenes Budget, Ablehnungsgründe als provisorische Codes, Schalter, gelernte Werte), mit Prüfskript `check_analyze_export.py` in der CI.
 

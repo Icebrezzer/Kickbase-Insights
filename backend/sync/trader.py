@@ -797,6 +797,15 @@ class TraderService:
             bid for pid, bid in open_bids.items() if pid in trader_bids and trader_bids[pid].purpose == "profit"
         )
 
+        ### The max bid next to the money released per purpose (for an auction ending before the deadline),
+        ### with every limit that makes up the difference. Diagnosis only, the bids below decide on their own
+        money_check = t.money_check(
+            budget, team_value, sum(open_bids.values()), opts.reserve, loan,
+            {p: risk.credit_for(p, None, stage, deadline, loan, opts.credit_mode) for p in ("lineup", "cover", "profit")},
+            {p: risk.credit_for(p, None, "normal", None, loan, opts.credit_mode) for p in ("lineup", "cover", "profit")},
+            profit_room,
+        )
+
         def money_for(c: t.Candidate, cash: int, purpose: str) -> int:
             return cash + risk.credit_for(purpose, c.expires_at, stage, deadline, loan, opts.credit_mode)
 
@@ -980,7 +989,7 @@ class TraderService:
             ### The liquidation that limited the credit (sales left today, after this round's exit sale), and
             ### for comparison the one of the whole daily limit before it
             "liquidation": liquidation, "liquidation_full_day": t.liquidation_value(own0, ratio, opts.daily_sales),
-            "profit_room": profit_room,
+            "profit_room": profit_room, "money_check": money_check,
             "reserve": opts.reserve, "open_bids": all_open, "slots": slots, "bids_left": bids_left, "sales_left": sales_left,
             "paused": paused, "week_profit": week_profit, "unrealized": unrealized,
             "forecast_paused": bool(state.forecast_pause), "league_auctions": len(shares),
@@ -1212,6 +1221,7 @@ class TraderService:
             "credit": d.get("credit"),
             "credit_mode": d.get("credit_mode"),
             "liquidation": d.get("liquidation"),
+            "money_check": d.get("money_check"),
             "worst_case": d.get("worst_case"),
             "profit_room": d.get("profit_room"),
             "gaps_confirmed": d.get("gaps_confirmed"),

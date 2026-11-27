@@ -385,6 +385,43 @@ def credit(budget: int, team_value: int, repayable: int) -> int:
     return max(0, min(room, repayable - max(0, -budget)))
 
 
+### Why the money the trader releases is below the max bid Kickbase allows. Stable codes, for logs and the UI
+LIMIT_RESERVE = "RESERVE" # Never spent (option `reserve`)
+LIMIT_DEBT = "DEBT" # A negative balance already uses up part of the max bid
+LIMIT_LIQUIDATION = "LIQUIDATION" # Credit only as far as selling sellable players pays it back
+LIMIT_CREDIT_MODE = "CREDIT_MODE" # The credit mode gives this purpose no credit
+LIMIT_PHASE = "PHASE" # Close to the deadline this purpose gets no credit
+LIMIT_PROFIT_ROOM = "PROFIT_ROOM" # Profit positions together stay within `profit_share`
+
+
+def money_check(budget: int, team_value: int, open_bids: int, reserve: int, loan: int, credits: dict[str, int],
+                credit_anyway: dict[str, int], profit_room: int) -> dict:
+    """The max bid next to the money released per purpose, and what makes up the difference.
+
+    `credits` is the credit each purpose may use in this phase and mode, `credit_anyway` the same in the
+    normal phase (tells the credit mode from the phase). The limits add up to the difference exactly:
+    max bid after open bids − released = reserve + debt + (credit room − loan) + (loan − credit) [+ profit room].
+    Bids may still keep money back for empty slots and missing substitutes, that is per bid and not in here.
+    """
+    max_bid = analytics.max_bid(budget, team_value)
+    room = max_bid - max(budget, 0)
+    free_max = max_bid - open_bids
+    released: dict[str, int] = {}
+    limits: dict[str, dict[str, int]] = {}
+    for purpose, credit_now in credits.items():
+        raw = budget - reserve - open_bids + credit_now
+        parts = {LIMIT_RESERVE: reserve, LIMIT_DEBT: max(0, -budget), LIMIT_LIQUIDATION: room - loan}
+        parts[LIMIT_PHASE if credit_anyway.get(purpose, 0) > credit_now else LIMIT_CREDIT_MODE] = loan - credit_now
+        value = raw
+        if purpose == "profit" and raw > profit_room:
+            value = profit_room
+            parts[LIMIT_PROFIT_ROOM] = raw - profit_room
+        released[purpose] = value
+        limits[purpose] = {code: amount for code, amount in parts.items() if amount}
+    return {"max_bid": max_bid, "open_bids": open_bids, "max_bid_free": free_max, "released": released,
+            "gap": {p: free_max - v for p, v in released.items()}, "limits": limits}
+
+
 def repay_from(deadline: datetime) -> datetime:
     """When debt is paid back before a matchday: right after the last market value update before
     the deadline, as sales fetch the same from then on. At least an hour before the deadline."""

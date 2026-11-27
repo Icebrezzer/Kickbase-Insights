@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import risk  # noqa: E402
+from core import analytics, risk  # noqa: E402
 from core import trader as t  # noqa: E402
 
 OPTS = t.Options()
@@ -211,6 +211,41 @@ def main() -> None:
         ok(not approved or budget - sum(open_bids.values()) - sum(a.price for a in approved) >= c.reserve - credit, "money invariant")
         ok(len(approved) <= max(c.max_squad - len(s) - len(open_bids), 0), "squad invariant")
         ok(max([sum(1 for a in approved if market[a.player_id].team_id == team) for team in ("t0", "t1", "t2")]) <= 2, "club invariant")
+
+    ### E01.04: max bid next to the released money; the named limits add up to the difference exactly
+    def money(budget, team_value, open_bids, reserve, liquidation, mode, stage="normal", room=10**12):
+        loan = t.credit(budget, team_value, liquidation)
+        purposes = ("lineup", "cover", "profit")
+        return t.money_check(
+            budget, team_value, open_bids, reserve, loan,
+            {pp: risk.credit_for(pp, None, stage, None, loan, mode) for pp in purposes},
+            {pp: risk.credit_for(pp, None, "normal", None, loan, mode) for pp in purposes}, room,
+        )
+
+    ### The league without buys (E01.01): balance 0.46 Mio., reserve 2 Mio., credit mode 1
+    m = money(460_000, 254_250_000, 0, 2_000_000, 12_940_000, 1)
+    ok(m["max_bid"] == analytics.max_bid(460_000, 254_250_000), "max bid as Kickbase computes it")
+    ok(m["released"]["profit"] == 460_000 - 2_000_000 < 0, f"credit mode 1: profit trades get the cash alone ({m['released']['profit']})")
+    ok(m["released"]["lineup"] == 460_000 - 2_000_000 + 12_940_000, "credit mode 1: the eleven gets the credit")
+    ok(m["limits"]["profit"].get(t.LIMIT_CREDIT_MODE) == 12_940_000, "the credit mode is named as the profit limit")
+    ok(t.LIMIT_CREDIT_MODE not in m["limits"]["lineup"], "no credit mode limit for the eleven")
+    ok(m["limits"]["lineup"][t.LIMIT_RESERVE] == 2_000_000 and m["limits"]["lineup"][t.LIMIT_LIQUIDATION] > 0, "reserve and liquidation named")
+    ### Close to the deadline it is the phase, not the mode
+    m = money(5_000_000, 100_000_000, 0, 0, 20_000_000, 2, stage="final")
+    ok(m["released"]["lineup"] == 5_000_000 and m["limits"]["lineup"].get(t.LIMIT_PHASE) == 20_000_000, "final phase: the phase limits")
+    ### Negative balance and open bids above the balance
+    m = money(-3_000_000, 60_000_000, 0, 0, 30_000_000, 1)
+    ok(m["limits"]["lineup"].get(t.LIMIT_DEBT) == 3_000_000, "a negative balance is named as debt")
+    m = money(2_000_000, 60_000_000, 5_000_000, 0, 30_000_000, 1)
+    ok(m["max_bid_free"] == m["max_bid"] - 5_000_000 and m["released"]["profit"] == -3_000_000, "open bids above the balance")
+    m = money(10_000_000, 60_000_000, 0, 0, 30_000_000, 2, room=4_000_000)
+    ok(m["released"]["profit"] == 4_000_000 and m["limits"]["profit"][t.LIMIT_PROFIT_ROOM] > 0, "profit room caps profit trades")
+    rng = random.Random(11)
+    for _ in range(500):
+        args = (rng.randrange(-20_000_000, 40_000_000, 10_000), rng.randrange(0, 300_000_000, 10_000), rng.randrange(0, 30_000_000, 10_000),
+                rng.randrange(0, 5_000_000, 10_000), rng.randrange(0, 80_000_000, 10_000), rng.randrange(0, 3))
+        m = money(*args, stage=rng.choice(["normal", "prepare", "repay", "final"]), room=rng.randrange(-5_000_000, 50_000_000, 10_000))
+        ok(all(m["gap"][pp] == sum(m["limits"][pp].values()) for pp in m["released"]), f"limits add up to the gap {args}")
 
     print(f"All {passed} trader safety checks passed.")
 

@@ -48,7 +48,13 @@ Ziel des Epics: Für jede Liga ist ohne Codelesen erkennbar, **warum** der Trade
 - **Rollback:** Feld entfernen.
 
 ### E01.04 – Maximalgebot und internes Budget vergleichen
-- **Priorität:** P1 · **Status:** ready · **Abhängig von:** E01.00 · **Aufwand:** S
+- **Priorität:** P1 · **Status:** done (Backend; Anzeige im UI folgt mit E01.05) · **Abhängig von:** E01.00 · **Aufwand:** S
+- **Ergebnis:** Reine Funktion `core/trader.py::money_check` mit stabilen Codes `RESERVE`, `DEBT`, `LIQUIDATION`, `CREDIT_MODE`, `PHASE`, `PROFIT_ROOM`. Jede Planungsrunde schreibt `money_check` ins Debug-Protokoll und ins `/dashboard`: `max_bid`, `max_bid_free`, `released` und `gap` je Zweck (Startelf/Ersatz/Gewinn), `limits` je Zweck.
+  - Der Kredit gilt für eine Auktion, die vor der Deadline endet (konservativ). Pro Gebot zurückgehaltenes Geld für Lücken und Ersatz steht nicht darin; das bleibt eine Entscheidung je Gebot.
+  - Tests: 510 neue Checks in `check_trader_safety.py`. Darunter der Fall der Liga ohne Käufe (`CREDIT_MODE` begrenzt den Gewinnhandel), die Phase `final`, Schulden, offene Gebote über dem Kontostand, `profit_room` sowie 500 Zufallsfälle für die Summenidentität. Dazu prüft `smoke_manager_tools.py`, dass das Feld in jeder Planungsrunde vorhanden ist und die Summen stimmen.
+  - Aktionen unverändert: Die Funktion wird nur zusätzlich aufgerufen.
+  - `analyze_export.py` nutzt das Feld, wenn es vorhanden ist.
+  - Volle Suite 15/15 grün. Frontend nicht ausgeführt.
 - **Ziel:** Jede Runde protokolliert `max_bid` (Kickbase-Regel), `max_bid_free` (nach offenen Geboten), freigegebenes Budget je Zweck (Startelf/Ersatz/Gewinn, nach Phase und `credit_mode`), Differenz und **welche Grenze** sie verursacht (Reserve, Liquidation, Kreditmodus, Phase, Lücken-/Ersatzreserve, `profit_room`).
 - **Module:** `sync/trader.py` (Debug + Dashboard), `core/analytics.py` (nur Aufruf).
 - **Abnahmekriterien:** 1. Felder in Debug und `/dashboard`. 2. Summe der ausgewiesenen Abzüge = Differenz (Test). 3. Kein Einfluss auf Aktionen.

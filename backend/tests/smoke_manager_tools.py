@@ -429,6 +429,13 @@ def main() -> None:
         check(dash.status_code == 200 and dj["at"] and dj["gaps_confirmed"] is not None and dj["runtime_ms"] is not None, "dashboard from the latest round")
         check(isinstance(dj["candidates"], list) and all("decision" in c for c in dj["candidates"]), "candidates with their reason")
         check(dj["stats"]["unknown_profits"] >= 1 and dj["stats"]["sales"] >= dj["stats"]["unknown_profits"], "unknown profits counted apart")
+        ### E01.04: every planning round logs the max bid next to the released money, the limits add up
+        with Session(state.engine) as s:
+            rounds = [r.data for r in s.exec(select(TraderDebug)).all() if not r.data.get("rescue")]
+        mcs = [r.get("money_check") for r in rounds]
+        check(mcs and all(mc and all(mc["gap"][p] == sum(mc["limits"][p].values()) for p in mc["released"]) for mc in mcs),
+              f"max bid and released money in every round ({len(mcs)} rounds), the limits add up")
+        check("money_check" in dj and (dj["money_check"] is None or dj["money_check"]["max_bid"] >= 0), "the dashboard shows the max bid check")
 
         ### Notifications: an eleven with gaps close to the matchday is pushed once per deadline
         from db.models import AutomationEvent
