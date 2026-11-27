@@ -43,6 +43,7 @@ from api.schemas import (
     TraderOptionsIn,
     TraderOut,
 )
+from core import flags as feature_flags
 from core import strategy_config
 from core.trader import PROFILES, Learned, Options
 from core.trader import profile as profile_options
@@ -265,6 +266,26 @@ async def trader_schema(viewer: ViewerDep) -> dict:
     """The strategy configuration schema (E02.01): every setting with path, type, unit, bounds, default
     and explanation; fixed rules are marked read-only. The same for every league."""
     return strategy_config.schema()
+
+
+@router.get("/automation/trader/flags")
+async def trader_flags(state: StateDep, league_id: LeagueIdDep, viewer: ViewerDep) -> dict:
+    """The feature flags of new trading functions in this league (E02.08), all off until switched on."""
+    return await asyncio.to_thread(_automation(state).trader.flags, viewer.user_id, league_id)
+
+
+@router.put("/automation/trader/flags")
+async def put_trader_flags(state: StateDep, league_id: LeagueIdDep, viewer: ViewerDep, body: dict) -> dict:
+    """Changes flags of this league. Strict: an unknown flag or stage changes nothing. `live` needs
+    "confirm_live": true, and takes effect only while the league trades live."""
+    changes, errors = feature_flags.validate(body.get("flags"))
+    if errors:
+        raise HTTPException(422, {"errors": errors})
+    if any(stage == feature_flags.LIVE for stage in changes.values()) and body.get("confirm_live") is not True:
+        raise HTTPException(400, "Ein Feature Flag auf live braucht die Bestätigung confirm_live.")
+    automation = _automation(state)
+    async with automation._lock(viewer.user_id, league_id): # Never in the middle of a trading round
+        return await asyncio.to_thread(automation.trader.set_flags, viewer.user_id, league_id, changes)
 
 
 @router.get("/automation/trader/backtest")

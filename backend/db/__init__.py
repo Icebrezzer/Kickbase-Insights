@@ -138,6 +138,7 @@ _LATER_COLUMNS = {
         "trader_live": "BOOLEAN NOT NULL DEFAULT FALSE",
         "trader_profit": "BOOLEAN NOT NULL DEFAULT TRUE",
         "trader_options": "JSON NOT NULL DEFAULT '{}'",
+        "trader_flags": "JSON NOT NULL DEFAULT '{}'",
     },
     "shadowtrade": {
         "user_id": "VARCHAR NOT NULL DEFAULT ''",

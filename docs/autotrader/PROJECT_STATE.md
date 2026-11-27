@@ -14,7 +14,7 @@
   - **E01.02** (einheitliche Ablehnungscodes)
   - **E10.00** (Prognosegüte auf allen beobachteten Spielern)
 - Ohne geänderte Einstellungen handelt der Trader **wie bisher**. Die neuen Optionen `sell_ratio` (Standard 90) und `upgrade_cross_position` (Standard aus) wirken erst nach dem Einschalten je Liga.
-- **Welle 2 läuft:** E01.03 ✅, E02.01 ✅, E02.02 ✅; als Nächstes E02.08 → E01.05. Danach E02.01 → E02.02 → E02.08 → E05.02 → E04 (MASTERPLAN §3 und §9, ADR-012).
+- **Welle 2 läuft:** E01.03 ✅, E02.01 ✅, E02.02 ✅, E02.08 ✅; als Letztes E01.05 (Diagnoseansicht im Frontend). Danach E02.01 → E02.02 → E02.08 → E05.02 → E04 (MASTERPLAN §3 und §9, ADR-012).
 - **Geklärt (27.11.2026):** Kickbase zahlt beim Sofortverkauf 100 % des Marktwerts. Formationswechsel mit mehr Punkten sind erwünscht.
 
 ## Ergebnis der Export-Analyse (Details `KNOWN_ISSUES.md` B)

@@ -38,7 +38,19 @@ Reihenfolge (ADR-008): E02.01 → E02.02 → **E02.08** → E02.03 → E02.04 �
 - **Pflichttests:** Fuzz-ähnliche Tabelle ungültiger Werte; Altformat.
 
 ### E02.08 – Feature-Flag-System (vorgezogen)
-- **Priorität:** P1 · **Status:** todo · **Abhängig von:** E02.02 · **Aufwand:** S
+- **Priorität:** P1 · **Status:** done · **Abhängig von:** E02.02 · **Aufwand:** S
+- **Ergebnis:**
+  - `core/flags.py` kennt die Stufen `off`/`shadow`/`dry_run`/`live` und eine feste Liste von 5 Flags für die geplanten Funktionen E03.01, E05.02, E04.02, E04.04 und E04.05. Jedes Flag hat eine Erklärung und steht standardmäßig auf `off`.
+  - `load` (tolerant), `validate` (streng) und `effective`: `live` wirkt nur bei eingeschaltetem „Live handeln“, sonst höchstens als `dry_run`.
+  - Gespeichert wird in der neuen Spalte `userautomation.trader_flags` (additiv, ADR-010). Die Einstellungsseite schreibt sie nie, ein älteres Image ignoriert sie (geprüft).
+  - API: `GET` und `PUT /api/automation/trader/flags`. Ein unbekanntes Flag oder eine unbekannte Stufe ergibt 422, ohne Änderung. `live` braucht `confirm_live`, sonst 400. Die Änderung läuft unter derselben Sperre wie die Trader-Runde, also nie mitten in einer Runde.
+  - Jede Änderung wird als Ereignis `trader-flags` mit Vorher/Nachher protokolliert.
+  - Jede Runde schreibt die wirksamen Stufen ins Debug-Protokoll (`flags`), der Export enthält die gespeicherten.
+  - Tests: `check_feature_flags.py` (13 Checks, in CI) und 12 Smoke-Prüfungen.
+  - Noch wirkt kein Flag: Die Funktionen kommen mit ihren Paketen, die jeweils den Determinismus-Test bei `off` mitbringen.
+- **Abweichung (begründet):** `sell_ratio` und `upgrade_cross_position` bleiben Liga-Optionen und werden nicht zu Flags.
+  - Die Verkaufsquote ist ein Fakt über Kickbase, kein Funktionsschalter.
+  - Der Formationsschalter ist ein reiner Ein/Aus-Wert ohne Schatten- oder Probelauf-Stufe und vom Auftraggeber bereits fachlich entschieden. Ihn zu verschieben, würde gespeicherte Einstellungen umziehen, ohne Nutzen.
 - **Ziel:** `flags` im Schema; Helfer `stage(config, name) -> off|shadow|dry_run|live`, wobei `live` nur wirkt, wenn `row.trader_live` an ist (sonst höchstens `dry_run`).
 - **Umfang:** Flag-Liste als Konstante (neue Flags nur per Code); Debug-Protokoll enthält die wirksamen Stufen.
 - **Abnahmekriterien:** 1. Unbekanntes Flag im Import = Fehler. 2. Standard aller Flags `off`. 3. Test: `live`-Flag bei ausgeschaltetem Live-Handel wirkt als `dry_run`.

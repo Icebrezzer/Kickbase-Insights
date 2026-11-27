@@ -307,6 +307,8 @@ class UserAutomation(SQLModel, table=True):
     trader_profit: bool = True
     ### Thresholds and limits, see core.trader.Options. Missing keys use its defaults
     trader_options: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False, server_default="{}"))
+    ### Feature flags of new trading functions, see core.flags. Missing ones are off
+    trader_flags: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False, server_default="{}"))
     updated_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
 
 

@@ -36,6 +36,8 @@ jobs:
         run: python tests/check_trader_safety.py
       - name: Strategy configuration schema
         run: python tests/check_strategy_config.py
+      - name: Feature flags (off by default, strict, live only with live trading)
+        run: python tests/check_feature_flags.py
       - name: Autotrader reason codes (one cause per code)
         run: python tests/check_trader_reasons.py
       - name: Autotrader intelligence (lineup, priorities, exits)

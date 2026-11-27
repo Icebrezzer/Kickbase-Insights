@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING
 from sqlmodel import Session, delete, select
 
 from api.context import load_context
-from core import analytics, coach, learning, risk
+from core import analytics, coach, flags, learning, risk
 from core import reasons as rc
 from core import trader as t
 from db import exclusive
@@ -1044,6 +1044,7 @@ class TraderService:
             "priorities": "nah am Spieltag: Lücke > Ersatz > Verbesserung > Gewinn" if stage != "normal" else "normal: Lücke > Verbesserung > Gewinn > Ersatz",
             "positions": {pid: {"cost": cost, "net_now": int(c.value * ratio) - cost, "verdict": exits.get(pid)} for pid, (c, cost) in positions.items()},
             "keep_starters": keep_starters, "lineup_known": bool(saved), "sell_ratio": ratio,
+            "flags": flags.all_effective(flags.load(row.trader_flags), row.trader_live),
             "deadline": deadline.isoformat() if deadline else None,
             "repay_from": repay_from.isoformat() if repay_from else None,
             "squad": [player(c) for c in own0], "pending": [player(c) for c in pending.values()],
@@ -1247,6 +1248,7 @@ class TraderService:
                 "league_id": league_id,
                 "switches": {"trader": row.trader, "live": row.trader_live, "profit": row.trader_profit} if row else None,
                 "options": t.Options.load(row.trader_options if row else None).__dict__,
+                "flags": flags.load(row.trader_flags if row else None),
                 "option_limits": t.OPTION_LIMITS,
                 "learned": learned.dump(),
                 "learned_league": league_learned.dump(),
@@ -1286,6 +1288,35 @@ class TraderService:
                     self._save_state(session, t.Learned.load({**current, **learned}))
                     session.commit()
             session.commit()
+
+    def flags(self, user_id: str, league_id: str) -> dict:
+        """The feature flags of this league: the stage set, the stage that applies, what each one does."""
+        with Session(self.engine) as session:
+            row = session.get(UserAutomation, (user_id, league_id))
+        stored = flags.load(row.trader_flags if row else None)
+        live = bool(row and row.trader_live)
+        return {
+            name: {"stage": stored[name], "effective": flags.effective(stored, name, live), "text": text}
+            for name, text in flags.FLAGS.items()
+        }
+
+    def set_flags(self, user_id: str, league_id: str, changes: dict[str, str]) -> dict:
+        """Sets validated flags (core.flags.validate first) and logs the stages before and after."""
+        with Session(self.engine) as session:
+            row = session.get(UserAutomation, (user_id, league_id)) or UserAutomation(user_id=user_id, league_id=league_id)
+            before = flags.load(row.trader_flags)
+            after = {**before, **changes}
+            row.trader_flags = after
+            session.add(row)
+            session.commit()
+        changed = {name: [before[name], after[name]] for name in after if before[name] != after[name]}
+        if changed:
+            self.automation.record(
+                user_id, league_id, "trader-flags",
+                "Feature Flags geändert: " + ", ".join(f"{n} {a} → {b}" for n, (a, b) in changed.items()),
+                details={"before": before, "after": after},
+            )
+        return self.flags(user_id, league_id)
 
     def rejection_stats(self, user_id: str, league_id: str) -> dict:
         """E01.03: why market players were not bought over 1, 7 and 21 days, once per player, day and

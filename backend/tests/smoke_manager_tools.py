@@ -626,6 +626,33 @@ def main() -> None:
         check(schema.status_code == 200 and schema.json()["schema_version"] == 1 and len(by_option) == len(settings_page),
               f"configuration schema ({schema.status_code}, {len(by_option)} options, settings page {len(settings_page)})")
 
+        ### E02.08: feature flags per league, off by default, strict, live only confirmed and with live trading
+        flag_list = client.get("/api/automation/trader/flags").json()
+        check(flag_list and all(f["stage"] == "off" and f["effective"] == "off" for f in flag_list.values()), "every flag off by default")
+        check(client.put("/api/automation/trader/flags", json={"flags": {"casino": "live"}}).status_code == 422, "an unknown flag is refused")
+        check(client.put("/api/automation/trader/flags", json={"flags": {"flexible_bench": "on"}}).status_code == 422, "an unknown stage is refused")
+        check(client.put("/api/automation/trader/flags", json={"flags": {"flexible_bench": "live"}}).status_code == 400, "live needs a confirmation")
+        set_shadow = client.put("/api/automation/trader/flags", json={"flags": {"decision_snapshots": "shadow"}})
+        check(set_shadow.status_code == 200 and set_shadow.json()["decision_snapshots"]["stage"] == "shadow", "a flag set to shadow")
+        live_flag = client.put("/api/automation/trader/flags", json={"flags": {"flexible_bench": "live"}, "confirm_live": True}).json()
+        live_now = state.automation.get_settings("1001", "4242").trader_live
+        check(live_flag["flexible_bench"]["effective"] == ("live" if live_now else "dry_run"), f"live applies only with live trading ({live_now})")
+        with Session(state.engine) as s:
+            from db.models import AutomationEvent as Event
+
+            logged = s.exec(select(Event).where(Event.kind == "trader-flags")).all()
+        check(len(logged) == 2 and logged[-1].details["after"]["flexible_bench"] == "live", "every change is logged with before and after")
+        page = client.get("/api/automation/settings").json()
+        client.put("/api/automation/settings", json=page)
+        check(client.get("/api/automation/trader/flags").json()["decision_snapshots"]["stage"] == "shadow", "the settings page keeps the flags")
+        state.automation.trader._last_debug.clear()
+        state.automation.trader._plan(league, state.automation.get_settings("1001", "4242"), squad_l, 5_000_000, market_l, utcnow())
+        with Session(state.engine) as s:
+            debug = s.exec(select(TraderDebug).order_by(TraderDebug.id.desc())).first()
+        check(debug.data["flags"]["decision_snapshots"] == "shadow", "each round logs the stages that applied")
+        check(client.get("/api/automation/trader/export?days=1").json()["flags"]["flexible_bench"] == "live", "the export carries the flags")
+        client.put("/api/automation/trader/flags", json={"flags": dict.fromkeys(flag_list, "off")})
+
     print("\nAll manager tool checks passed.")
 
 
