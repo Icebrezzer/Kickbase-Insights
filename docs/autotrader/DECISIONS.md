@@ -56,3 +56,18 @@ Format: Kontext · Entscheidung · Folgen. Neue Einträge unten anhängen, alte 
 2. **E05.08 neu, P1**, direkt nach E02.08: Formationswechsel-Upgrade hinter Flag.
 3. E04 (Finanzierung) bleibt wichtig, kommt aber nach E05.08. Ohne korrekte Verkaufsquote würden auch Liquidation und bedingte Tilgung mit einem falschen Wert rechnen.
 4. E01.00 und E01.04 laufen unverändert als Nächstes (Diagnose ohne Verhaltensänderung).
+
+## ADR-012 – Messen vor Finanzieren (27.11.2026, angenommen)
+**Kontext:** Die Exporte zeigen dreierlei (MASTERPLAN §9):
+- Der Kredit wird durch den Kaderschutz begrenzt, nicht durch die Verkaufslimits.
+- Die Prognose ist in kurzen Zeiträumen sehr treffsicher, wurde aber nie kalibriert.
+- Schatten lernten mit einer falschen Verkaufsquote.
+
+**Entscheidung:**
+1. **E10.00** (Prognose-Kalibrierung aus allen beobachteten Spielern) kommt in Welle 1.
+2. **E05.02** (Ersatzbank) kommt vor E04.
+3. **E04.03** bekommt seine Stressparameter aus E10.00. Bis dahin gelten die Startwerte aus §9.2.
+4. **E04.02** wird auf P2 zurückgestuft.
+5. Lernparameter ändern sich erst nach mindestens 14 Tagen Daten.
+
+**Folgen:** Der kritische Pfad zur Kreditnutzung verlängert sich um E10.00 und E05.02. Dafür rechnet die Finanzierung mit gemessenen statt geschätzten Risiken. E04.02 bleibt geplant, falls spätere Exporte bindende Verkaufslimits zeigen.

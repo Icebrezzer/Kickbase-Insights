@@ -31,8 +31,32 @@ Voraussetzung: E03 (Snapshots, Abrechnung) und E04 (Finanzplanung als reine Funk
 
 Modi (Schema `learning.mode`): `observe` · `assisted` (Standard) · `bounded_auto`.
 
+### E10.00 – Prognose-Kalibrierung aus allen beobachteten Spielern (neu, aus §9.3)
+- **Priorität:** P1 · **Status:** ready · **Abhängig von:** – · **Aufwand:** M · **Flag:** – (Messen und Anzeigen); die Nutzung der Kalibrierung in der Planung kommt später hinter ein Flag
+- **Ausgangssituation:** In beiden Ligen gilt `gain_samples` = 0. Die Prognose wird nur über eigene Käufe und Schatten kalibriert, obwohl jede Runde Prognose und späteren Marktwert für 30–70 Spieler kennt. Die Messung aus den Exporten (MASTERPLAN §9.3): Richtung 94–99 % richtig, mittlerer Fehler 0,3–0,4 % je Update, p5 −1,0 bis −1,5 %.
+- **Ziel:** Je Liga und global eine fortlaufende Prognose-Statistik je Horizont (1 und 2 Updates):
+  - Trefferquote der Richtung;
+  - tatsächlich / prognostiziert (Basis für `gain_ratio`);
+  - Fehlerquantile p5, p50 und p95 in % des Werts, getrennt nach steigender und fallender Prognose sowie Preisklasse;
+  - Stichprobe und Zeitraum.
+- **Umfang:**
+  - Neue Tabelle `forecastobservation` (additiv, ADR-010) mit `league_id`, `player_id`, `market_value_day`, `value`, `forecast_1`, `forecast_2` und `model_version`. Geschrieben wird beim ersten Sehen eines Spielers je Marktwert-Tag aus bereits geladenen Daten.
+  - Die Auswertung erfolgt, sobald der Wert des Folgetags in `MarketValueHistory` steht; danach wird aggregiert.
+  - Aufbewahrung 120 Tage, danach nur Aggregate.
+  - Debug, Export und Dashboard zeigen die Statistik.
+- **Nicht enthalten:** Änderung von `gain_ratio` oder `forecast_pause` (folgt als E10.03-Vorschlag) und Nutzung in E04.03 (dort).
+- **Module:** `core/learning.py` (reine Auswertung), `sync/trader.py` oder `sync/learning.py` (Schreiben und Aggregieren), `db/models.py`, Tests.
+- **Sicherheit:** S12: Ein Zähl-Mock beweist, dass es keine zusätzlichen Kickbase-Aufrufe gibt. Kein Zukunftswissen: Nur die zum Beobachtungszeitpunkt gespeicherte Prognose wird mit dem späteren Wert verglichen (Test mit veränderter Zukunft). Liga-Isolation.
+- **Abnahmekriterien:**
+  1. Nachgerechnete Werte für die beiden Exporte stimmen mit §9.3 überein (anonymisierte Testdaten).
+  2. Eine Beobachtung je Spieler, Liga und Tag, auch bei 300 Runden.
+  3. Laufzeit je Runde höchstens 5 % mehr, Wachstum der Datenbank je Liga und Monat gemessen.
+  4. Das Handelsverhalten ist unverändert.
+- **Pflichttests:** neue `check_trader_forecast_quality.py` (in CI): Lücken in der Historie, Spieler verschwindet vom Markt, Wechsel des Marktwert-Tags um 22:00 Berlin, Sommerzeitumstellung.
+- **Migration:** neue Tabelle · **Rollback:** Schreiben abschalten (Option), Tabelle bleibt.
+
 ### E10.01 – Mindeststichproben und Lernkonfidenz
-- **Priorität:** P2 · **Abhängig von:** E03.07 · **Aufwand:** S · **Ziel:** Je gelerntem Wert: n, effektives n (gewichtet), Konfidenz; Werte unter Mindeststichprobe werden angezeigt, aber nicht angewandt.
+- **Priorität:** P2 · **Abhängig von:** E03.07, E10.00 · **Aufwand:** S · **Ziel:** Je gelerntem Wert: n, effektives n (gewichtet), Konfidenz **und Mindestdauer (14 Tage, §9.3)**. Werte unter der Mindeststichprobe werden angezeigt, aber nicht angewandt. Zusätzlich wird geprüft, ob die gelernte `min_margin` durch Schatten mit der alten Quote 0,9 verzerrt ist; falls ja, folgt ein Rücksetzvorschlag.
 
 ### E10.02 – Zeitlich getrennte Validierung
 - **Priorität:** P2 · **Abhängig von:** E10.01 · **Aufwand:** M · **Ziel:** Walk-Forward-Trennung für alle Lernverfahren (ersetzt u. a. den Holdout „jede fünfte Zeile“ der Erwartungsgewichte, Audit-Restrisiko 4).

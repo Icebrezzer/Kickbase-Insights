@@ -8,7 +8,8 @@ Flag: `flexible_bench` (E05.02/E05.06), `player_roles` (E05.01/E05.05). Bei `off
 - **Abnahmekriterien:** Jeder Kaderspieler hat ≥ 1 Rolle; ein Gewinnspieler, der in der besten Elf steht, ist `flip` + `starter`; Rollen in Debug und Export.
 
 ### E05.02 – Konfigurierbare Ersatzbank
-- **Priorität:** P1 · **Abhängig von:** E02.04 · **Aufwand:** M
+- **Priorität:** P1, **vorgezogen vor E04** (MASTERPLAN §9.2: der Ersatzschutz sperrt in Liga A ≈ 20 von 34,5 Mio. Bankwert für den Kredit) · **Abhängig von:** E02.04 · **Aufwand:** M
+- **Zusätzliches Abnahmekriterium:** In Liga A steigt die Liquidation mit `none_outside_critical` außerhalb von `prepare`/`repay`/`final` von 14,4 Mio. auf den Bankwert abzüglich der Schutzregel S10. Innerhalb dieser Phasen bleibt sie unverändert.
 - **Ziel:** `bench.strategy` ∈ `full_cover` (2.0), `minimal` (nur TW + je eine Feldposition), `none_outside_critical` (Ersatz nur in `prepare/repay/final`), `adaptive` (E05.06); `bench.max_total_budget`.
 - **Abnahmekriterien:** 1. `full_cover` = 2.0 bit-identisch. 2. Mit `minimal` geben Liquidation und Gewinn-Budget den nicht benötigten Ersatzschutz frei (Test mit Zahlen). 3. In `prepare` gilt immer mindestens die Absicherung der Positionen der besten Elf mit Verletzungsrisiko (S10).
 
