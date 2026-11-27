@@ -206,11 +206,18 @@ function SettingsCard({ initial }: { initial: AutomationSettings }) {
                 <OptionField label="Höchster Mehrpreis je zusätzlichem Punkt (€)" hint="Gebot minus Marktwert des verdrängten Spielers, geteilt durch das Punkte-Plus" value={opts.maxCostPerPoint} min={0} max={50_000_000} money onCommit={(maxCostPerPoint) => setOption({ maxCostPerPoint })} />
                 <OptionField label="Punkteschnitt mindestens besser (%)" value={opts.minAvgEdge} min={0} max={200} onCommit={(minAvgEdge) => setOption({ minAvgEdge })} />
                 <OptionField label="Mindest-Einsatzquote letzte 5 Spiele (%)" value={opts.minPlay} min={0} max={100} onCommit={(minPlay) => setOption({ minPlay })} />
+                <Switch
+                  checked={opts.upgradeCrossPosition}
+                  onChange={(upgradeCrossPosition) => setOption({ upgradeCrossPosition })}
+                  label="Formationswechsel nach Punkten bewerten"
+                  hint="Verdrängt ein Neuzugang einen Spieler anderer Position (neue Formation), zählen die erwarteten Punkte am nächsten Spieltag und in den nächsten 3 Spielen statt des Punkteschnitts des Verdrängten."
+                />
                 <OptionField label="Anteil des freien Budgets je Startelf-Gebot (%)" value={opts.lineupShare} min={10} max={100} onCommit={(lineupShare) => setOption({ lineupShare })} />
               </OptionGroup>
               <OptionGroup title="Gewinnhandel">
+                <OptionField label="Sofortverkauf bringt (% des Marktwerts)" hint="Kickbase zahlt beim Verkauf an Kickbase den vollen Marktwert (100). 90 ist die frühere vorsichtige Annahme. Gilt auch für Kredit und Rettung" value={opts.sellRatio} min={50} max={100} onCommit={(sellRatio) => setOption({ sellRatio })} />
                 <OptionField label="Höchstens gebunden in Gewinnhandel (% von Teamwert + Kontostand)" hint="Alle Gewinnkäufe und offenen Gewinn-Gebote zusammen" value={opts.profitShare} min={10} max={100} onCommit={(profitShare) => setOption({ profitShare })} />
-                <OptionField label="Mindestrendite netto (%)" hint="Nach Sofortverkauf (konservativ 90 % des Marktwerts), bezogen auf das Gebot" value={opts.minRoi} min={0} max={100} decimals onCommit={(minRoi) => setOption({ minRoi })} />
+                <OptionField label="Mindestrendite netto (%)" hint="Nach Sofortverkauf zur eingestellten Verkaufsquote, bezogen auf das Gebot" value={opts.minRoi} min={0} max={100} decimals onCommit={(minRoi) => setOption({ minRoi })} />
                 <OptionField label="Wochen-Stop-Loss (€, 0 = aus)" hint="Realisierte Verluste des Gewinnhandels plus Buchverluste offener Positionen" value={opts.stopLoss} min={0} max={100_000_000} money onCommit={(stopLoss) => setOption({ stopLoss })} />
                 <OptionField label="Verkauf bei Verlust je Position (%, 0 = aus)" hint="Netto nach Sofortverkauf, gemessen am Kaufpreis, solange die Prognose nicht steigt" value={opts.positionStop} min={0} max={100} onCommit={(positionStop) => setOption({ positionStop })} />
                 <OptionField label="Trailing-Stop unter dem Höchststand (%, 0 = aus)" hint="Sichert einen Gewinn, wenn der Marktwert vom Höchststand seit dem Kauf so weit fällt" value={opts.trailingStop} min={0} max={50} onCommit={(trailingStop) => setOption({ trailingStop })} />
@@ -359,17 +366,22 @@ const OPTION_LABELS: Record<string, string> = {
   maxHoldDays: "Halten Tage",
   shadow: "Schattentransfers",
   rescueOverride: "Notfallregel",
+  sellRatio: "Verkaufsquote %",
+  upgradeCrossPosition: "Formationswechsel nach Punkten",
 }
 
 /** A strategy profile as a starting point: shows what would change, applies only after a confirmation.
  *  The switches (shadow trades, emergency rule) stay as they are. */
+/** Profiles never change these: switches and facts about Kickbase, not strategy */
+const PROFILE_KEEPS: (keyof TraderOptions)[] = ["shadow", "rescueOverride", "sellRatio", "upgradeCrossPosition"]
+
 function ProfilePicker({ current, onApply }: { current: TraderOptions; onApply: (next: TraderOptions) => void }) {
   const profiles = useTraderProfiles()
   const [name, setName] = useState("")
   const chosen = name && profiles.data ? profiles.data[name] : null
   const changes = chosen
     ? (Object.keys(chosen) as (keyof TraderOptions)[]).filter(
-        (key) => key !== "shadow" && key !== "rescueOverride" && chosen[key] !== current[key],
+        (key) => !PROFILE_KEEPS.includes(key) && chosen[key] !== current[key],
       )
     : []
   const show = (value: unknown) => (typeof value === "number" ? value.toLocaleString("de-DE") : String(value))
@@ -402,7 +414,13 @@ function ProfilePicker({ current, onApply }: { current: TraderOptions; onApply: 
               <Button
                 size="sm"
                 onClick={() => {
-                  onApply({ ...chosen, shadow: current.shadow, rescueOverride: current.rescueOverride })
+                  onApply({
+                    ...chosen,
+                    shadow: current.shadow,
+                    rescueOverride: current.rescueOverride,
+                    sellRatio: current.sellRatio,
+                    upgradeCrossPosition: current.upgradeCrossPosition,
+                  })
                   setName("")
                 }}
               >

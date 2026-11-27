@@ -101,7 +101,7 @@ Beide Ligen nutzen dieselben, gegenüber dem Standard deutlich strengeren Einste
 | KI-22 | `AUDIT-2026-11-25.md` sagt „nicht gepusht, [skip ci]“; der Branch ist inzwischen gepusht und CI lief für `4b85715` erfolgreich (25.11., 22:43 UTC) | Hinweis, kein Handlungsbedarf |
 | KI-23 | Lokale Prüfumgebung hat kein Node → Frontend-Build/-Tests nur in CI | Hinweis |
 | KI-24 | Jeder Push auf irgendeinen Branch baut und veröffentlicht ein Image (`type=ref,event=branch`, `type=sha`). Vorschau-Images entstehen damit automatisch; `latest` nur von `main` | Hinweis für Release-Strategie |
-| KI-26 | Sofortverkaufsquote 0,9 ist unverifiziert und bestimmt allein, ob Gewinnhandel möglich ist (siehe B, Ursache 1). Sie wirkt auch auf Liquidation, Kredit und Startelf-Preis je Punkt | offen – Kickbase-Regel klären, dann E06.04 |
-| KI-27 | `lineup_upgrade` vergleicht bei einem Formationswechsel die Qualität mit einem Spieler anderer Position (siehe B, Ursache 2) | offen – E05.08 (neu), fachliche Entscheidung nötig |
+| KI-26 | Sofortverkaufsquote 0,9 ist unverifiziert und bestimmt allein, ob Gewinnhandel möglich ist (siehe B, Ursache 1). Sie wirkt auch auf Liquidation, Kredit und Startelf-Preis je Punkt | **geklärt:** Kickbase zahlt 100 % (Nutzer, 27.11.). Option `sell_ratio` je Liga, Standard 90 – zum Aktivieren 100 setzen. Auswertung echter Verkäufe weiter E06.04 |
+| KI-27 | `lineup_upgrade` vergleicht bei einem Formationswechsel die Qualität mit einem Spieler anderer Position (siehe B, Ursache 2) | **umgesetzt** (E05.08): Option `upgrade_cross_position`, Standard aus |
 | KI-28 | `paid` > Gebot bei einem gewonnenen Gebot in Liga B | offen, beobachten |
 | KI-25 | Aus dem Audit übernommen: Backend-Abhängigkeiten nur mit Mindestversionen, PostgreSQL-Pfad ungetestet, keine Freigabe für mehrere Replikate, keine Freigabe für unbeaufsichtigten Live-Betrieb | offen (E11) |

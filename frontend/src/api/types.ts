@@ -521,6 +521,8 @@ export type TraderOptions = {
   maxHoldDays: number
   shadow: boolean
   rescueOverride: boolean
+  sellRatio: number
+  upgradeCrossPosition: boolean
 }
 
 export type Shadow = {

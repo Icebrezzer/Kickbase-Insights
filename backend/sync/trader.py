@@ -65,8 +65,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-### Kickbase's instant sale price is unknown before the sale: without a learned ratio count on this share
-SAFE_SELL_RATIO = 0.9
+### The instant sale ratio is the league option `sell_ratio` (t.sell_ratio): Kickbase pays the market value
 ### Paper purchases started per round and league, the most promising first
 SHADOWS_PER_ROUND = 5
 SHADOW_KEEP = timedelta(days=120)
@@ -481,8 +480,16 @@ class TraderService:
             )
             with self._learning(): # Read, learn and write without another round in between
                 base, local = self._load_states(session, league.id)
-                ratio = min(learned_sell_ratio(session) or SAFE_SELL_RATIO, SAFE_SELL_RATIO)
+                ### Each paper trade with the sale ratio of the user whose trader started it (the default
+                ### for paper trades without an owner)
+                learned_ratio = learned_sell_ratio(session)
+                settings = {
+                    r.user_id: r.trader_options
+                    for r in session.exec(select(UserAutomation).where(UserAutomation.league_id == league.id)).all()
+                }
+                ratios = {uid: t.sell_ratio(t.Options.load(settings.get(uid)), learned_ratio) for uid in {s.user_id for s in rows}}
                 for s in rows:
+                    ratio = ratios[s.user_id]
                     points = histories.get(s.player_id) or []
                     last_day = points[-1][0] if points else None
                     if s.kind == "sell":
@@ -576,8 +583,8 @@ class TraderService:
             }
             state = t.blend(*self._load_states(session, league.id))
             shares = insight.winning_shares()
-            ### Conservative: a learned ratio only ever lowers the safe one, an unknown one counts as safe
-            ratio = min(learned_sell_ratio(session) or SAFE_SELL_RATIO, SAFE_SELL_RATIO)
+            ### The league's setting; a learned ratio only ever lowers it
+            ratio = t.sell_ratio(opts, learned_sell_ratio(session))
             history = self._trades(session, user_id, league.id)
 
         ### Only what really reached Kickbase counts: dry run entries ("planned") and failed calls
@@ -1308,7 +1315,8 @@ class TraderService:
                 session.exec(select(MarketValueHistory.player_id, MarketValueHistory.points).where(MarketValueHistory.player_id.in_(ids))).all()
             )
             context = load_context(session, league.competition_id, ids, utcnow())
-            ratio = min(learned_sell_ratio(session) or SAFE_SELL_RATIO, SAFE_SELL_RATIO)
+            row = session.get(UserAutomation, (user_id, league.id))
+            ratio = t.sell_ratio(t.Options.load(row.trader_options if row else None), learned_sell_ratio(session))
         auctions = [backtest.Auction(analytics.market_value_day(at), pid, price, value) for at, pid, price, value in history if value > 0]
         matches = {pid: context.match_points(pid) for pid in ids}
         return backtest.run(auctions, histories, matches, capital, ratio, folds)

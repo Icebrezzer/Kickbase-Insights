@@ -9,11 +9,11 @@
   - **E01.01** (Exporte analysiert)
   - **E01.00** (Debug-Liquidation)
   - **E01.04** (Maximalgebot gegen freigegebenes Budget, nur Backend)
-- Handelsentscheidungen sind **unverändert**.
+  - **E06.00** (Verkaufsquote als Liga-Option)
+  - **E05.08** (Formationswechsel nach Punkten)
+- Ohne geänderte Einstellungen handelt der Trader **wie bisher**. Die neuen Optionen `sell_ratio` (Standard 90) und `upgrade_cross_position` (Standard aus) wirken erst nach dem Einschalten je Liga.
 - **Nächstes Paket:** **E01.02** (einheitliche Ablehnungscodes). Parallel möglich: **E06.04** (Auswertung der Verkaufsquoten).
-- **Wartet auf den Auftraggeber:**
-  - die echte Sofortverkaufsquote bei Kickbase (KI-26);
-  - die fachliche Entscheidung zu E05.08 (Upgrade bei Formationswechsel, KI-27).
+- **Geklärt (27.11.2026):** Kickbase zahlt beim Sofortverkauf 100 % des Marktwerts. Formationswechsel mit mehr Punkten sind erwünscht.
 
 ## Ergebnis der Export-Analyse (Details `KNOWN_ISSUES.md` B)
 
@@ -30,6 +30,7 @@ In der Liga ohne Käufe gibt es drei Ursachen, und keine davon ist in erster Lin
 | `2e6f6ce` | E01.01 Export-Analyse |
 | `263bfa0` | E01.00 Debug-Liquidation |
 | `5a180be` | E01.04 `money_check` |
+| (dieser) | E06.00 `sell_ratio`, E05.08 `upgrade_cross_position` |
 
 ## Testlage (27.11.2026, lokal Windows/Python 3.12)
 
@@ -49,9 +50,7 @@ Volle Backend-Suite 15/15 grün: Ruff, 12 Skripte aus der CI, Migration gegen `e
 
 ## Offene Entscheidungen beim Auftraggeber
 
-1. **Sofortverkaufsquote bei Kickbase:** Wie viel Prozent des Marktwerts bringt ein Direktverkauf an Kickbase tatsächlich?
-2. **E05.08:** Darf ein Upgrade, das die Formation wechselt, statt am Qualitätswert des verdrängten Spielers anderer Position an den nächsten 3 Spielen gemessen werden?
-3. MASTERPLAN §7, weitere Punkte: Risikobereitschaft, Ersatzbank-Standard, globales Lernen, Release-Rhythmus und Tag-Pinning, SQLite oder PostgreSQL.
+1. MASTERPLAN §7, weitere Punkte: Risikobereitschaft, Ersatzbank-Standard, globales Lernen, Release-Rhythmus und Tag-Pinning, SQLite oder PostgreSQL.
 
 ## Für die nächste KI
 

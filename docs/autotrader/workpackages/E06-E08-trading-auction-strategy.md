@@ -2,6 +2,16 @@
 
 ## E06 – Trading Intelligence
 
+### E06.00 – Verkaufsquote als Liga-Option (neu, aus E01.01)
+- **Priorität:** P1 · **Status:** done · **Aufwand:** S · **Flag:** Option `sell_ratio` (Standard 90 = altes Verhalten)
+- **Ergebnis:**
+  - `core/trader.py::sell_ratio(opts, learned)` ersetzt die feste Kappung `SAFE_SELL_RATIO = 0,9`. Eine gelernte Quote senkt nur.
+  - Verwendet in Planung, Risk Engine, Liquidation/Kredit, Rettung, Ausstieg, Schattenabrechnung (Quote des Schatten-Besitzers) und Backtest.
+  - API-Schema, Typen und Automatik-Seite ergänzt; Profile ändern die Quote nicht.
+  - Nachrechnung beider Exporte: Mit 100 % bestehen 8 (A) bzw. 4 (B) Gewinnkandidaten Marge und Rendite, mit 90 % keiner.
+  - In Liga A bleibt der Gewinnhandel trotzdem ohne Geld, solange Reserve > Kontostand und `credit_mode` 1 gelten (`money_check` zeigt es).
+- **Rollback:** Option auf 90.
+
 ### E06.04 – Tatsächliche Verkaufsquoten auswerten (zuerst in E06)
 - **Priorität:** P1 · **Abhängig von:** E00 · **Aufwand:** S · **Flag:** – (nur Auswertung)
 - **Ausgangssituation:** Quote = Median aller Sofortverkäufe aller Nutzer/Ligen, ohne Mindeststichprobe, gekappt bei 0,9 (KI-12).

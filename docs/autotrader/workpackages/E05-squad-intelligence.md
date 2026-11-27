@@ -34,7 +34,15 @@ Flag: `flexible_bench` (E05.02/E05.06), `player_roles` (E05.01/E05.05). Bei `off
 - **Abnahmekriterien:** Fehlende Daten werden nicht als 0 oder als gut gewertet (Tests je Feld).
 
 ### E05.08 – Qualitätsvergleich bei Formationswechsel (neu, aus E01.01)
-- **Priorität:** P1 · **Status:** todo – **wartet auf fachliche Entscheidung** · **Abhängig von:** E02.08 (Flag) · **Aufwand:** S · **Flag:** `upgrade_cross_position`
+- **Priorität:** P1 · **Status:** done · **Abhängig von:** – (Flag vorerst als Liga-Option, wird mit E02.08 ins Flag-System übernommen) · **Aufwand:** S · **Flag:** `upgrade_cross_position`
+- **Entscheidung des Auftraggebers (27.11.2026):** „Wenn ein Formationswechsel mehr Punkte verspricht, dann ja.“
+- **Ergebnis:**
+  - Mit eingeschalteter Option entfällt bei einem Verdrängten **anderer** Position der Qualitätsvergleich.
+  - Weiter gelten: `min_gain`, Einsatzquote, eigene Qualitätsdaten (Fail-Closed) und die nächsten 3 Spiele (`ahead`) nicht schlechter. (b) aus dem Ziel ist damit über den spielerbezogenen `ahead`-Vergleich umgesetzt; auf eine Summe über die ganze Elf wurde verzichtet, weil `ahead` je Spieler vorliegt.
+  - Bei gleicher Position gilt die Qualitätsregel unverändert.
+  - Nachrechnung Liga A: 8 statt 1 Upgrade-Kandidaten (bis +48 Punkte), noch vor Preis- und Budgetprüfung.
+  - Tests in `check_trader_safety.py` (aus, an, Einmal-Effekt, fehlende Daten, gleiche Position) und `smoke_manager_tools.py` (Import, Einstellungsseite behält die Option).
+  - Frontend: Schalter unter Startelf; Profile ändern ihn nicht.
 - **Ausgangssituation:** KI-27. In Liga A waren 162 von 307 abgelehnten Elf-Verbesserungen Fälle, in denen der verdrängte Spieler auf einer anderen Position spielt. `lineup_upgrade` vergleicht dann dessen Saisonqualität mit der des Ziels.
 - **Ziel:** Bei Formationswechsel gilt nicht der Qualitätsvergleich über Positionen. Gilt stattdessen:
   - (a) Vergleich mit dem schwächsten Starter **gleicher Position** und zusätzlich

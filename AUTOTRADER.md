@@ -64,7 +64,7 @@ danach: automatische Aufstellung
 - **Live von Kickbase:** Kader, Kontostand, Transfermarkt inkl. eigener Gebote, gespeicherte Aufstellung.
 - **Gespeicherte Aufstellung nicht lesbar:** Es wird nicht die rechnerisch beste Elf angenommen. Während der Startelf-Sperre gilt jeder fitte Spieler als gesperrt.
 - **Aus der Datenbank:** Spielplan und Deadline, Marktwertverläufe, erwartete Punkte, Form, Einsatzquote, Bieter-Modell, Kader- und Vereinslimit, Trade-Historie (60 Tage), gelernter Zustand.
-- **Verkaufsquote, konservativ:** `min(gelernt, 0,9)`. Ohne gelernte Quote gilt 0,9. Ein gelernter höherer Wert wird nie verwendet.
+- **Verkaufsquote:** `min(gelernt, sell_ratio)`, je Liga einstellbar (Option `sell_ratio`, Standard 90 %). Kickbase zahlt beim Verkauf an Kickbase den vollen Marktwert (Angabe des Nutzers, 27.11.2026) → für echte Werte `sell_ratio = 100` setzen. Eine gelernte Quote senkt nur, erhöht nie.
 
 ---
 
@@ -407,6 +407,8 @@ planned (Probelauf) │ pending ─► open (Gebot) / sold (Verkauf)
 | `starter_lock` | 60 Min. | 0–1440 | Startelf-Sperre |
 | `shadow` | an | true/false | Schattentransfers |
 | `rescue_override` | aus | true/false | Notfallregel |
+| `sell_ratio` | 90 | 50–100 | Sofortverkauf in % des Marktwerts (Kickbase: 100). Gilt für Gewinn, Kredit, Rettung, Schatten, Backtest |
+| `upgrade_cross_position` | aus | true/false | Upgrade mit Formationswechsel nach Punkten bewerten statt am Punkteschnitt des Verdrängten anderer Position (E05.08) |
 
 Booleans akzeptieren nur `true/false`, `1/0` und die gleichnamigen Texte. `"false"` ist also falsch.
 
@@ -416,7 +418,7 @@ Booleans akzeptieren nur `true/false`, `1/0` und die gleichnamigen Texte. `"fals
 - Startelf wieder verkäuflich: 5 Min. nach dem Anpfiff.
 - `ROOM_EXTRA`: 0,6. Lernschwelle: 10 Verläufe. Schatten-Gewicht: 0,5.
 - Preisklassen: < 5 Mio., 5–15 Mio., ≥ 15 Mio.
-- Gebotsschritt: 10.000 €. Verkaufsquote höchstens 0,9.
+- Gebotsschritt: 10.000 €. Verkaufsquote: Option `sell_ratio`.
 - Abgleich unklarer Aufrufe: nach 10 Min. Pause: ab 3 Fehlern pro Stunde.
 - Phasen: 24 Std. / letztes Update / 60 Min.
 - Qualität: 0,6 × Schnitt + 0,4 × Form. Wenig Daten: unter 3 Einsätzen ×1,5 Mindestgewinn.
@@ -558,7 +560,7 @@ Gegen die echte Kickbase-API lässt sich das ohne Live-Zugang nicht prüfen. Die
 | Max-Gebot = Kontostand + 33 % des Mannschaftswerts, offene Gebote zählen mit | Kredit zu groß oder zu klein | **Abgeglichen (25.11.)** mit BaseXI („Max. Invest = Kontostand + 33 % Teamwert“: −3.641.743 € + 33 % von ~251,9 Mio. = 79.491.091 €) und mit Kickbases Ablehnung in einer Liga ohne Kader. Die frühere Formel (33 % von Teamwert + Kontostand) war bei positivem Kontostand zu niedrig und ist ersetzt. Der Kredit bleibt durch die Liquidation begrenzt; `credit_mode 0` schaltet ihn ganz ab |
 | Offene Gebote sind im Kontostand **nicht** abgezogen | doppelt abgezogen → zu vorsichtig | konservative Richtung |
 | Gewonnene Auktion wird erst beim Zuschlag abgebucht, mehrere Zuschläge zugleich möglich | – | Worst Case nimmt alle Zuschläge an |
-| Sofortverkauf ≈ 90 % des Marktwerts oder weniger | Erlös anders | Quote nie über 0,9, gelernt nur nach unten. Erlös wird nach dem Verkauf gemessen |
+| Sofortverkauf = 100 % des Marktwerts | Erlös anders | **Vom Nutzer bestätigt (27.11.2026).** Einstellbar je Liga (`sell_ratio`, Standard weiter 90), gelernt nur nach unten. Erlös wird nach dem Verkauf gemessen |
 | Kein Abruf des Verkaufspreises vorab | – | Schätzung, danach Messung |
 | 0 Punkte nur bei negativem Kontostand **zum Anpfiff** | anderer Prüfzeitpunkt | Rückzahlung ab Vorabend, Push-Warnung |
 | Verkauf eines Starters 5 Min. nach Anpfiff behält seine Punkte | Punktverlust | Angabe des Nutzers. Sperre einstellbar (`starter_lock`) |

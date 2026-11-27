@@ -69,6 +69,12 @@ class Options:
     max_hold_days: int = 7 # Days a profit position may be held without enough left to gain, 0 off
     shadow: bool = True # Learn from paper trades too
     rescue_override: bool = False # Rescue sales may also sell locked players (starters, fresh buys)
+    ### Percent of the market value an instant sale to Kickbase brings. Kickbase pays the full market value
+    ### (100, confirmed by the user 27.11.2026); 90 keeps the cautious assumption of before as default
+    sell_ratio: int = 90
+    ### A target that changes the formation and pushes a player of another position out is judged by the
+    ### points (next matchday, next three matches), not by that other player's season quality (E05.08)
+    upgrade_cross_position: bool = False
 
     @classmethod
     def load(cls, data: dict | None) -> Options:
@@ -94,7 +100,7 @@ class Options:
         return cls(**values)
 
 
-BOOL_OPTIONS = ("shadow", "rescue_override")
+BOOL_OPTIONS = ("shadow", "rescue_override", "upgrade_cross_position")
 
 ### Strategy profiles: starting points the user can apply and then adjust. Hard limits (risk engine,
 ### OPTION_LIMITS) hold for every profile. Values are proposals until the backtest calibrates them
@@ -158,7 +164,14 @@ OPTION_LIMITS: dict[str, tuple[float, float]] = {
     "trailing_stop": (0, 50),
     "position_stop": (0, 100),
     "max_hold_days": (0, 60),
+    "sell_ratio": (50, 100),
 }
+
+
+def sell_ratio(opts: Options, learned: float | None) -> float:
+    """The instant sale ratio the trader counts on: the league's setting, a learned one only ever lowers it."""
+    setting = opts.sell_ratio / 100
+    return min(learned or setting, setting)
 
 
 ### ===============================================================================
@@ -323,7 +336,10 @@ def lineup_upgrade(squad: Sequence[Candidate], target: Candidate, opts: Options)
         mine, theirs = quality(target), quality(replaced)
         if mine is None:
             return None
-        if theirs is not None and (mine <= theirs or mine < theirs * (1 + opts.min_avg_edge / 100)):
+        ### A new formation: the season quality of a player of another position is no fair comparison,
+        ### the points decide (the gain above and the next three matches below)
+        cross = opts.upgrade_cross_position and replaced.position != target.position
+        if not cross and theirs is not None and (mine <= theirs or mine < theirs * (1 + opts.min_avg_edge / 100)):
             return None
         if target.ahead is not None and replaced.ahead is not None and target.ahead < replaced.ahead:
             return None

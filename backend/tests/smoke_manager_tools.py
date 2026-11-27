@@ -544,6 +544,24 @@ def main() -> None:
               f"no sales left today: no liquidation, no credit ({debug.data['liquidation']}, {debug.data['credit']})")
         check(debug.data["liquidation_full_day"] > 0, f"the whole day's liquidation is logged for comparison ({debug.data['liquidation_full_day']:,})")
 
+        ### Sell ratio and formation flag per league: imported, used by the planning, kept by the settings page
+        imported = client.post("/api/automation/trader/import", json={"options": {"sell_ratio": 100, "upgrade_cross_position": True}})
+        check(imported.status_code == 200 and imported.json()["options"]["sell_ratio"] == 100 and not imported.json()["ignored"],
+              f"sell ratio and formation flag import ({imported.status_code} {imported.text[:200]})")
+        settings_now = client.get("/api/automation/settings").json()
+        check(settings_now["traderOptions"]["sellRatio"] == 100 and settings_now["traderOptions"]["upgradeCrossPosition"] is True,
+              "the settings page gets both options")
+        saved = client.put("/api/automation/settings", json=settings_now)
+        check(saved.status_code == 200 and saved.json()["traderOptions"]["sellRatio"] == 100, "saving the settings page keeps them")
+        state.automation.trader._last_debug.clear()
+        state.automation.trader._plan(league, state.automation.get_settings("1001", "4242"), squad_l, 5_000_000, market_l, utcnow())
+        with Session(state.engine) as s:
+            debug = s.exec(select(TraderDebug).order_by(TraderDebug.id.desc())).first()
+            from sync.learning import sell_ratio as learned_ratio
+
+            learned = learned_ratio(s)
+        check(debug.data["sell_ratio"] == min(learned or 1.0, 1.0), f"the planning uses the league's ratio ({debug.data['sell_ratio']}, learned {learned})")
+
     print("\nAll manager tool checks passed.")
 
 

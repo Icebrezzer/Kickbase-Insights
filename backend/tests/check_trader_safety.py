@@ -247,6 +247,38 @@ def main() -> None:
         m = money(*args, stage=rng.choice(["normal", "prepare", "repay", "final"]), room=rng.randrange(-5_000_000, 50_000_000, 10_000))
         ok(all(m["gap"][pp] == sum(m["limits"][pp].values()) for pp in m["released"]), f"limits add up to the gap {args}")
 
+    ### Instant sale ratio per league: Kickbase pays the market value. Default unchanged, a learned one only lowers
+    ok(t.Options().sell_ratio == 90 and t.Options.load({"sell_ratio": 130}).sell_ratio == 100, "sell ratio default 90, at most 100")
+    ok(t.Options.load({"sell_ratio": 10}).sell_ratio == 50 and t.Options.load({"sell_ratio": "x"}).sell_ratio == 90, "sell ratio clamped")
+    full = t.Options.load({"sell_ratio": 100})
+    ok(t.sell_ratio(full, None) == 1.0 and t.sell_ratio(full, 0.97) == 0.97 and t.sell_ratio(full, 1.2) == 1.0, "learned ratio only lowers")
+    ok(t.sell_ratio(t.Options(), None) == 0.9, "default ratio as before")
+    ok(all(t.profile(name).sell_ratio == 90 for name in t.PROFILES), "profiles leave the sell ratio")
+    ### The E01.01 case: +6 % in two updates at a bid 0.2 % above the value loses at 90 %, earns at 100 %
+    riser = p("r", 3, 50, value=10_000_000, price=10_000_000, bid_low=10_020_000, forecast=300_000, gain=600_000)
+    ok(not t.is_profit_buy(riser, 10_020_000, 150_000, 0.9, 0.03), "at 90 % no profit buy")
+    ok(t.is_profit_buy(riser, 10_020_000, 150_000, 1.0, 0.03), "at 100 % a profit buy")
+
+    ### E05.08: a target that changes the formation (3-5-2 -> 4-5-1) and pushes out a forward with a high
+    ### season average but few expected points now
+    eleven = [p("g", 1, 50), *(p(f"d{i}", 2, 60 - i * 5) for i in range(3)), *(p(f"m{i}", 3, 70 - i * 5) for i in range(5)),
+              p("f0", 4, 80), p("f1", 4, 40, average=150, form=150, ahead=30)]
+    target = p("x", 2, 90, average=90, form=90, ahead=85)
+    off, on = t.Options(), t.Options(upgrade_cross_position=True)
+    ok(t.lineup_upgrade(eleven, target, off) is None, "flag off: judged by the forward's season quality, as before")
+    up = t.lineup_upgrade(eleven, target, on)
+    ok(up is not None and up.replaced == "f1" and up.gain >= on.min_gain, f"flag on: the points decide ({up})")
+    one_off = replace(target, ahead=20)
+    ok(t.lineup_upgrade(eleven, one_off, on) is None, "flag on: worse over the next three matches is still no upgrade")
+    ok(t.lineup_upgrade(eleven, replace(target, average=None, form=None), on) is None, "flag on: no quality data is still no upgrade")
+    ### Same position: the quality rule stays, flag or not
+    strong_front = [*eleven[:-1], p("f1", 4, 75, ahead=75)]
+    weak_back = p("y", 2, 58, average=10, form=10, ahead=85)
+    ok(t.best_of([*strong_front, weak_back]).formation == t.best_of(strong_front).formation, "same formation for the next check")
+    ok(t.lineup_upgrade(strong_front, weak_back, on) is None, "same position: quality still counts")
+    ok(t.lineup_upgrade(strong_front, replace(weak_back, average=58, form=58), on) is not None, "same position: a better one is an upgrade")
+    ok(t.Options.load({"upgrade_cross_position": "true"}).upgrade_cross_position is True, "the flag loads from JSON")
+
     print(f"All {passed} trader safety checks passed.")
 
 

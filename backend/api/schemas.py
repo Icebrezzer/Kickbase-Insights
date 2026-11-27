@@ -644,6 +644,8 @@ class TraderOptionsIn(Schema):
     max_hold_days: int = Field(7, ge=0, le=60) # Days without enough left to gain, 0 off
     shadow: bool = True
     rescue_override: bool = False # Rescue sales may sell locked players
+    sell_ratio: int = Field(90, ge=50, le=100) # % of the market value an instant sale brings (Kickbase: 100)
+    upgrade_cross_position: bool = False # A formation change is judged by the points (E05.08)
 
 
 class AutomationSettingsIn(Schema):
