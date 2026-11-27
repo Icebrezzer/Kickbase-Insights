@@ -455,6 +455,9 @@ def main() -> None:
         check(state.automation.trader.rejection_stats("1001", "4242") is stats, "cached until a new round is logged")
         check(state.automation.trader.rejection_stats("someone-else", "4242")["d21"]["checked"] == 0, "another user's rounds are not counted")
         check(dj.get("rejections") is not None and "d7" in dj["rejections"], "the dashboard shows the rejection statistics")
+        texts = dj.get("reason_texts") or {}
+        check(all(code in texts for code in [*dj["rejections"]["d21"]["primary"], *dj["rejections"]["d21"]["secondary"]]),
+              "the dashboard has the German text of every reason it counts (E01.05)")
 
         ### Notifications: an eleven with gaps close to the matchday is pushed once per deadline
         from db.models import AutomationEvent

@@ -5,6 +5,7 @@ Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Au
 ## [Unveröffentlicht] – Auto-Trader 3.0
 
 ### Hinzugefügt
+- E01.05: Automatik-Seite, Karte „Autotrader jetzt“: neuer Bereich „Warum kauft der Trader – oder nicht?“ mit Maximalgebot und freigegebenem Geld samt benannten Abzügen, den häufigsten Ablehnungsgründen der letzten 7 Tage und der Prognosegüte.
 - E02.08: Feature Flags je Liga für neue Handelsfunktionen (`off`, `shadow`, `dry_run`, `live`; Standard `off`), API `GET`/`PUT /api/automation/trader/flags`. `live` nur mit Bestätigung und bei eingeschaltetem Live-Handel; jede Änderung wird protokolliert.
 - E02.02: Strenge Validierung von Strategie-Konfigurationen (`strategy_config.validate`). Unbekannte oder ungültige Werte werden mit Pfad und Grund abgelehnt, nichts wird teilweise übernommen; alte 2.0-Optionen werden erkannt.
 - E02.01: Versioniertes Strategie-Konfigurationsschema v1 (`core/strategy_config.py`, `GET /api/automation/trader/schema`): alle Liga-Optionen und die festen Regeln mit Pfad, Typ, Einheit, Grenzen, Standardwert und Erklärung.

@@ -79,7 +79,19 @@ Ziel des Epics: Für jede Liga ist ohne Codelesen erkennbar, **warum** der Trade
 - **Rollback:** Revert.
 
 ### E01.05 – Diagnoseansicht im Frontend
-- **Priorität:** P2 · **Status:** todo · **Abhängig von:** E01.03, E01.04 · **Aufwand:** M
+- **Priorität:** P2 · **Status:** review (wartet auf CI: TypeScript, Build, ui-audit) · **Abhängig von:** E01.03, E01.04 · **Aufwand:** M
+- **Ergebnis:**
+  - Die Karte „Autotrader jetzt“ hat einen aufgeklappten Bereich **„Warum kauft der Trader – oder nicht?“**. Er zeigt:
+    - das Kickbase-Maximalgebot (und den Wert nach offenen Geboten);
+    - das freigegebene Geld für Startelf/Ersatz und für Gewinnhandel, jeweils mit „weniger durch: …“ und dem Betrag jeder Grenze;
+    - die 5 häufigsten Gründe ohne Gebot der letzten 7 Tage und die 3 häufigsten Gründe dahinter;
+    - die Prognosegüte (Trefferquote, mittlerer Fehler, Beobachtungen).
+  - Die deutschen Texte kommen aus dem Backend (`reason_texts` im Dashboard-API) und werden nicht doppelt gepflegt.
+  - Ohne Runde und ohne Statistik bleibt der Bereich ausgeblendet.
+  - Das Layout nutzt nur einspaltige Zeilen mit `min-w-0` und `shrink-0`, damit auf 375 px nichts überläuft.
+  - Dateien: `frontend/src/pages/Automation.tsx` (Komponente `TraderDiagnosis`), `frontend/src/api/hooks.ts` (Typen), `backend/sync/trader.py` (`reason_texts`).
+  - **Nicht lokal geprüft:** TypeScript, Build und Darstellung (kein Node). Das Paket gilt erst nach grüner CI mit ui-audit-Screenshots als `done`.
+  - Backend-Suite 19/19 grün, dazu eine Smoke-Prüfung, dass jeder gezählte Code einen Text hat.
 - **Ziel:** Karte „Warum kauft der Trader nicht?“ auf der Automatik-Seite: Budgetvergleich (Balken Maximalgebot → freigegeben, Abzüge benannt), Top-Gründe, Phase, aktive Pausen, Kaderplätze, Vereinslimits.
 - **Module:** `frontend/src/pages/Automation.tsx` (ggf. Teilkomponente auslagern), `api/types.ts`, `api/hooks.ts`.
 - **Abnahmekriterien:** 1. 375 px ohne horizontales Scrollen (ui-audit). 2. Leerer Zustand (keine Runde) verständlich. 3. Gründe in Klartext, Code als Tooltip/Detail.

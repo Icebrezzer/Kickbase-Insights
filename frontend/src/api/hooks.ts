@@ -383,6 +383,21 @@ export type TraderDashboard = {
   blocked?: { kind: string; purpose: string; player_id: string; name: string; price: number; code: string }[]
   actions?: { kind: string; purpose: string; name: string; price: number; reason: string }[]
   runtime_ms?: number | null
+  /** E01.04: the Kickbase max bid next to the money the trader releases, with what makes up the gap */
+  money_check?: {
+    max_bid: number
+    open_bids: number
+    max_bid_free: number
+    released: Record<string, number>
+    gap: Record<string, number>
+    limits: Record<string, Record<string, number>>
+  } | null
+  /** E01.03: why market players were not bought, per window ("d1", "d7", "d21") */
+  rejections?: Record<string, { rounds: number; checked: number; with_bid: number; without_bid: number; primary: Record<string, number>; secondary: Record<string, number> }>
+  /** German text of every reason code */
+  reason_texts?: Record<string, string>
+  /** E10.00: forecast quality on every observed player */
+  forecast_quality?: { observations: number; days: number; h1?: { n: number; hit_rate: number | null; mae_pct: number | null } }
   stats: {
     realized: number
     sales: number

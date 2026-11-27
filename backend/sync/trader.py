@@ -1380,6 +1380,7 @@ class TraderService:
             "money_check": d.get("money_check"),
             "forecast_quality": self.forecast_quality(league_id),
             "rejections": self.rejection_stats(user_id, league_id),
+            "reason_texts": rc.TEXT,
             "worst_case": d.get("worst_case"),
             "profit_room": d.get("profit_room"),
             "gaps_confirmed": d.get("gaps_confirmed"),

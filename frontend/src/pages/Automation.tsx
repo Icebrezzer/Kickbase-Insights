@@ -18,6 +18,7 @@ import {
   useTraderImport,
   useTraderProfiles,
   withLeague,
+  type TraderDashboard,
 } from "@/api/hooks"
 import { useLeagueId } from "@/lib/league"
 import type { AutomationSettings, TraderOptions } from "@/api/types"
@@ -611,6 +612,84 @@ const VERDICT_LABELS: Record<string, string> = {
   halten: "halten",
 }
 
+const MONEY_PURPOSES: [string, string][] = [
+  ["lineup", "Startelf und Ersatz"],
+  ["profit", "Gewinnhandel"],
+]
+
+/** Why the trader buys or does not (E01.05): the Kickbase max bid next to the money it releases, with
+ *  every limit in between, the most frequent reasons of the last 7 days and how good the forecast is */
+function TraderDiagnosis({ d }: { d: TraderDashboard }) {
+  const check = d.money_check
+  const week = d.rejections?.d7
+  const forecast = d.forecast_quality?.h1
+  if (!check && !week) return null
+  const text = (code: string) => d.reason_texts?.[code] ?? code
+  const top = week ? Object.entries(week.primary).filter(([code]) => code !== "BID_PLANNED").slice(0, 5) : []
+  const behind = week ? Object.entries(week.secondary).slice(0, 3) : []
+  return (
+    <details open className="rounded-xl border border-line px-3 py-2">
+      <summary className="cursor-pointer text-sm font-medium">Warum kauft der Trader – oder nicht?</summary>
+      <div className="space-y-3 py-2 text-sm">
+        {check && (
+          <div>
+            <p className="text-xs text-muted">
+              Kickbase erlaubt Gebote bis {compactMoney(check.max_bid)}
+              {check.open_bids ? `, nach offenen Geboten ${compactMoney(check.max_bid_free)}` : ""}. Der Trader gibt davon frei:
+            </p>
+            <ul className="mt-1 space-y-1.5">
+              {MONEY_PURPOSES.map(([key, label]) => {
+                const released = check.released[key]
+                const limits = Object.entries(check.limits[key] ?? {}).sort((a, b) => b[1] - a[1])
+                return (
+                  <li key={key}>
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="min-w-0">{label}</span>
+                      <span className={cn("shrink-0 tabular-nums", released != null && released <= 0 && "text-down")}>{compactMoney(released)}</span>
+                    </div>
+                    {limits.length > 0 && (
+                      <p className="text-xs text-muted">weniger durch: {limits.map(([code, amount]) => `${text(code)} ${compactMoney(amount)}`).join(" · ")}</p>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        )}
+        {week && (
+          <div>
+            <p className="text-xs text-muted">
+              Letzte 7 Tage: {week.checked} Spieler geprüft, {week.with_bid} mit Gebot. Häufigste Gründe ohne Gebot (je Spieler und Tag einmal gezählt):
+            </p>
+            {top.length > 0 ? (
+              <ul className="mt-1 space-y-0.5">
+                {top.map(([code, count]) => (
+                  <li key={code} className="flex items-baseline justify-between gap-3">
+                    <span className="min-w-0">{text(code)}</span>
+                    <span className="shrink-0 tabular-nums text-muted">{count}×</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-muted">Noch keine Gründe gezählt.</p>
+            )}
+            {behind.length > 0 && (
+              <p className="mt-1 text-xs text-muted">Dahinter oft: {behind.map(([code, count]) => `${text(code)} (${count}×)`).join(" · ")}</p>
+            )}
+          </div>
+        )}
+        {forecast && forecast.n > 0 && (
+          <p className="text-xs text-muted">
+            Marktwertprognose: Richtung des nächsten Updates in {share(forecast.hit_rate)} der Fälle richtig, im Mittel{" "}
+            {forecast.mae_pct == null ? "–" : `${decimal(forecast.mae_pct)} %`} des Marktwerts daneben ({forecast.n} Beobachtungen,{" "}
+            {d.forecast_quality?.days ?? 0} Tage).
+          </p>
+        )}
+      </div>
+    </details>
+  )
+}
+
 /** The trader now: money and risk, the eleven, its positions and protections, and why it bought or
  *  passed on the market players of its latest round */
 function TraderDashboardCard() {
@@ -665,6 +744,8 @@ function TraderDashboardCard() {
             hint={`riskante Aktionen diese Woche · Spieltage gefährdet ${d.stats.matchdays_at_risk}, gerettet ${d.stats.matchdays_rescued}`}
           />
         </div>
+
+        <TraderDiagnosis d={d} />
 
         {d.protections && d.protections.length > 0 && (
           <div>
