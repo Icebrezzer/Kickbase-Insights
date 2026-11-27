@@ -474,6 +474,55 @@ class StrategyConfig(SQLModel, table=True):
     note: str = ""
 
 
+class DecisionSnapshot(SQLModel, table=True):
+    """What the trader knew and decided about one auction, when it first saw it (E03.01): the basis to
+    judge later what a rejected purchase would have brought, with nothing known that came after it.
+    One row per user and auction; later rounds only note a changed reason. Written only while the flag
+    `decision_snapshots` is not off. Added without a schema version (ADR-010)."""
+    __table_args__ = (Index("ix_snapshot_league_seen", "league_id", "first_seen"),)
+    user_id: str = Field(primary_key=True)
+    league_id: str = Field(primary_key=True)
+    player_id: str = Field(primary_key=True)
+    auction: str = Field(primary_key=True) # Listing time, else the auction end, else the market value day
+    first_seen: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+    last_changed: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+    listed_at: datetime | None = _ts()
+    expires_at: datetime | None = _ts()
+    phase: str = ""
+    ### The player
+    value: int = _money(0)
+    price: int | None = _money()
+    bid_low: int | None = _money()
+    bid_high: int | None = _money()
+    forecast_1: int | None = _money() # Forecast change after the next update, unscaled
+    forecast_2: int | None = _money() # ... after PROFIT_HOLD updates, unscaled
+    gain: int | None = _money() # Scaled by the learned forecast confidence, what the decision used
+    expected: float | None = None
+    play: float | None = None
+    samples: int | None = None
+    fit: bool = True
+    ### The account and squad
+    budget: int | None = _money()
+    open_bids: int | None = _money()
+    released: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False)) # Money per purpose (E01.04)
+    squad_size: int | None = None
+    gaps: int | None = None
+    ### The decision
+    purpose: str | None = None # lineup, profit or cover when one fit, else None
+    min_bid: int | None = _money()
+    hypothetical_bid: int | None = _money() # The learned bid height, what a bid would have been
+    p_win_at_min: float | None = None
+    net_at_min: int | None = _money()
+    reason: str = ""
+    reasons: list = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    last_reason: str = ""
+    config_version: int | None = None
+    model_version: int | None = None
+    sell_ratio: float | None = None
+    hold_updates: int | None = None
+    resolved: bool = Field(default=False, index=True) # Settled by E03.04 later
+
+
 class ForecastObservation(SQLModel, table=True):
     """A player's market value forecast as the trader saw it on a market value day, and later what the
     value really did (E10.00). Every squad and market player of a league once per day, so the forecast

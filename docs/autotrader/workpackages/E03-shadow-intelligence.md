@@ -3,7 +3,28 @@
 Ziel des Epics: Der Trader lernt auch ohne eigene Transfers – aus jeder relevanten Ablehnung, mit sauberer Trennung von echt/hypothetisch und ohne Zukunftswissen. ADR-006/007. Flag: `decision_snapshots`.
 
 ### E03.01 – Entscheidungs-Snapshots speichern
-- **Priorität:** P1 · **Status:** todo · **Abhängig von:** E01.02, E02.04 · **Aufwand:** M · **Flag:** `decision_snapshots` (`off` = keine Zeilen)
+- **Priorität:** P1 · **Status:** done · **Abhängig von:** E01.02, E02.04 · **Aufwand:** M · **Flag:** `decision_snapshots` (`off` = keine Zeilen)
+- **Ergebnis:**
+  - Neue Tabelle `decisionsnapshot` (additiv, ADR-010). Schlüssel: Nutzer, Liga, Spieler und Auktion. Die Auktion ist der Listungszeitpunkt `dt`, sonst das Auktionsende, sonst der Marktwert-Tag.
+  - `TraderService._snapshot` schreibt am Ende jeder Planungsrunde (nicht in Rettungsrunden) beim ersten Sehen einer Auktion:
+    - Phase;
+    - Marktwert, Preis und Gebotsspanne;
+    - Prognose nach 1 und 2 Updates (ungeskaliert) und Gewinn (skaliert);
+    - erwartete Punkte, Einsatzquote, Datenmenge und Fitness;
+    - Kontostand, offene Gebote, freigegebenes Geld je Zweck (E01.04), Kadergröße und Lücken;
+    - den passenden Zweck, Mindestgebot und hypothetisches Gebot (gelernte Höhe), Gewinnchance und Netto beim Mindestgebot;
+    - Haupt- und Nebengründe;
+    - Konfigurations- und Modellversion, Verkaufsquote und Prognosehorizont.
+  - Spätere Runden schreiben nur, wenn sich der Grund ändert (`last_reason`, `last_changed`); die erste Entscheidung bleibt.
+  - Aufbewahrung 120 Tage, einmal täglich bereinigt. Ein Fehler beim Speichern bricht keine Runde ab.
+  - Es gibt keinen Kickbase-Aufruf: `_plan` hat keinen Client und nutzt nur geladene Daten (S12).
+  - Abnahme:
+    1. Eine Zeile je Auktion auch nach mehreren Runden.
+    2. Keine Zeile bei Flag `off`.
+    3. `benchmark_audit` mit Flag: Median 105,5–107,7 ms gegenüber 105,1–105,7 ms ohne Flag (≤ +2,5 %), eine SQL-Abfrage mehr.
+    4. Index auf (`league_id`, `first_seen`) und `resolved`.
+  - Mit Flag sind die Entscheidungen identisch zu ohne Flag (Smoke).
+  - Ein älteres Image startet weiter auf der Datenbank (geprüft).
 - **Ziel:** Tabelle `decisionsnapshot`: eindeutig je (`user_id`, `league_id`, `player_id`, `listed_at`); Inhalt: Zeitpunkt, Marktwert, Preis/Gebotsspanne, Auktionsende, Prognose (roh + skaliert), erwartete Punkte, Einsatzdaten, Kontostand, offene Gebote (Summe), freigegebenes Budget je Zweck, Kaderzustand (Größe, Lücken, Ersatzlücken), Reason Codes, `config_version`, `model_version`, hypothetisches Gebot(e).
 - **Umfang:** Schreiben aus bereits geladenen Rundendaten; Upsert (erste Entscheidung bleibt, letzte wird zusätzlich vermerkt: `first_seen`, `last_seen`, `last_reason`).
 - **Sicherheit:** S11, S12 – Test mit zählendem Mock-Client (0 zusätzliche Aufrufe).
@@ -11,7 +32,12 @@ Ziel des Epics: Der Trader lernt auch ohne eigene Transfers – aus jeder releva
 - **Migration:** neue Tabelle (additiv). · **Rollback:** Flag `off`; Tabelle bleibt ungenutzt.
 
 ### E03.02 – Abgelehnte Kandidaten aller Zwecke erfassen
-- **Priorität:** P1 · **Abhängig von:** E03.01 · **Aufwand:** S
+- **Priorität:** P1 · **Status:** done · **Abhängig von:** E03.01 · **Aufwand:** S
+- **Ergebnis:**
+  - Snapshots entstehen für jeden Marktkandidaten mit allen Ablehnungscodes aus E01.02. Das deckt Budget, Kreditrahmen (über die Geldgrenzen), Marge, Rendite, Einsatzquote, Kaderplatz, Ersatz, Preis je Punkt, Pausen, Phase und Tageslimit ab.
+  - Zusätzlich werden übersprungene Spieler erfasst: Vereinslimit, Rückkaufsperre, unklarer Aufruf und abgelaufene Auktion.
+  - Eigene Spieler, eigene Gebote und Spieler ohne Marktdaten sind keine Kaufentscheidung und bleiben außen vor (Test).
+  - Noch nicht abgedeckt sind verlorene Auktionen sowie zu frühe oder zu späte Verkäufe. Sie entstehen nicht in der Planung, sondern bei der Abrechnung, und kommen mit E03.04/E03.05.
 - **Ziel:** Snapshots auch für Startelf-, Ersatz-, Budget-, Kader-, Vereinslimit-, Phase-, Stop-Loss-Ablehnungen und verlorene Auktionen (heute nur Gewinnhandel, KI-09).
 - **Abnahmekriterien:** Jede Kategorie aus der Übergabe §8.1 ist einem Reason Code zugeordnet und im Test vertreten.
 

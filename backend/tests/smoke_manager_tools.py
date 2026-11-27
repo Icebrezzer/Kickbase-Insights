@@ -712,6 +712,41 @@ def main() -> None:
         check(old_export["valid"] and {c["path"] for c in old_export["changes"]} == {"sport.min_points_gain", "finance.reserve"},
               f"the options of a 2.0 export can be previewed ({old_export['changes']})")
 
+        ### E03.01/E03.02: decision snapshots only with the flag, one per user and auction, same decisions
+        from db.models import DecisionSnapshot
+
+        def snapshots() -> list:
+            with Session(state.engine) as s:
+                return s.exec(select(DecisionSnapshot).where(DecisionSnapshot.league_id == "4242")).all()
+
+        ### The flag test above had it on for one round: start empty
+        from sqlmodel import delete as sql_delete
+
+        with Session(state.engine) as s:
+            s.exec(sql_delete(DecisionSnapshot))
+            s.commit()
+        settings_now = state.automation.get_settings("1001", "4242")
+        plan_off, _ = state.automation.trader._plan(league, settings_now, squad_l, 200_000_000, market_l, utcnow())
+        check(not snapshots(), "flag off: no snapshot")
+        client.put("/api/automation/trader/flags", json={"flags": {"decision_snapshots": "shadow"}})
+        settings_now = state.automation.get_settings("1001", "4242")
+        plan_on, _ = state.automation.trader._plan(league, settings_now, squad_l, 200_000_000, market_l, utcnow())
+        taken = snapshots()
+        listed_ids = {p.id for p in market_l.players if p.seller is None or p.seller.id != "1001"}
+        check(len(taken) > 5 and {r.player_id for r in taken} <= listed_ids, f"snapshots of the market decisions ({len(taken)})")
+        check([(a.kind, a.player_id, a.price) for a in plan_on] == [(a.kind, a.player_id, a.price) for a in plan_off], "the flag changes no decision")
+        full = next((r for r in taken if r.purpose), taken[0])
+        check(full.reason and full.value > 0 and full.config_version and full.model_version and full.hold_updates == 2
+              and full.budget == 200_000_000 and isinstance(full.released, dict), f"a snapshot holds the decision's state ({full.reason})")
+        check(all(r.reason != "OWN_PLAYER" and r.reason != "OWN_BID_OPEN" for r in taken), "own players and own bids are no decisions")
+        for _ in range(2):
+            state.automation.trader._plan(league, settings_now, squad_l, 200_000_000, market_l, utcnow())
+        check(len(snapshots()) == len(taken), "more rounds: still one snapshot per auction")
+        state.automation.trader._plan(league, settings_now, squad_l, 0, market_l, utcnow())
+        changed_reason = [r for r in snapshots() if r.last_reason != r.reason]
+        check(all(r.first_seen < r.last_changed for r in changed_reason), f"a changed reason is noted, the first one kept ({len(changed_reason)})")
+        client.put("/api/automation/trader/flags", json={"flags": {"decision_snapshots": "off"}})
+
     print("\nAll manager tool checks passed.")
 
 

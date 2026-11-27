@@ -44,6 +44,7 @@ from core import trader as t
 from db import exclusive
 from db.models import (
     AutomationEvent,
+    DecisionSnapshot,
     ForecastObservation,
     League,
     MarketValueHistory,
@@ -71,6 +72,8 @@ log = logging.getLogger(__name__)
 ### The instant sale ratio is the league option `sell_ratio` (t.sell_ratio): Kickbase pays the market value
 ### Forecast observations (E10.00) are kept this long, then only their statistics are gone too
 FORECAST_KEEP_DAYS = 120
+### Decision snapshots (E03.01) are kept this long
+SNAPSHOT_KEEP_DAYS = 120
 ### Paper purchases started per round and league, the most promising first
 SHADOWS_PER_ROUND = 5
 SHADOW_KEEP = timedelta(days=120)
@@ -130,6 +133,7 @@ class TraderService:
         ### open ones were settled: a round only writes players not seen today (E10.00)
         self._observed: dict[tuple[str, int], set[str]] = {}
         self._observations_settled: dict[str, int] = {}
+        self._snapshots_pruned: dict[str, int] = {}
         ### Rejection statistics per league and user, with the newest debug row they were computed from
         self._rejections: dict[tuple[str, str], tuple[int, dict]] = {}
         ### Versioned strategy configuration per user and league (E02.03)
@@ -705,6 +709,8 @@ class TraderService:
         ### Every planned action passes the risk engine against the confirmed state before it may run
         all_open, own0, bids0, sales0 = dict(open_bids), own, bids_left, sales_left
         loan = 0
+        ### Per market player what only the planning knows, for the decision snapshots (E03.01)
+        snapshot_extra: dict[str, dict] = {}
 
         def finish(planned_actions: list[Action], shadows: list[ShadowTrade], debug: dict, listings: dict[str, t.Candidate]):
             ctx = risk.Context(
@@ -735,6 +741,8 @@ class TraderService:
             debug["gaps_confirmed"] = t.best_of(own0).empty_slots if own0 else 11
             debug["gaps_projected"] = t.best_of([*own0, *pending.values(), *new]).empty_slots if own0 or pending or new else 11
             debug["runtime_ms"] = int((time.monotonic() - started) * 1000)
+            if "market" in debug:
+                self._snapshot(league.id, row, debug, listed, snapshot_extra, now)
             self._notify(league.id, user_id, debug, stage, deadline, now)
             self._log_debug(league.id, user_id, debug)
             return approved, [s for s in shadows if s.player_id not in {a.player_id for a in approved}]
@@ -1040,6 +1048,14 @@ class TraderService:
             }
 
         self._observe_forecasts(league.id, predicted, now)
+        considered: dict[str, str] = {}
+        for _, purpose, c, _ in options:
+            considered.setdefault(c.player_id, purpose)
+        for c in market_candidates:
+            snapshot_extra[c.player_id] = {
+                "forecast_2": raw_gain.get(c.player_id), "purpose": considered.get(c.player_id),
+                "hypothetical_bid": t.bid_for(c, state.extra[coach.price_class(c.value)], None),
+            }
         return finish(actions, shadows, {
             "live": row.trader_live, "profit_trading": row.trader_profit, "phase": stage, "budget": budget,
             "worst_case": budget - sum(all_open.values()), "cash_free": free, "credit": loan, "credit_mode": opts.credit_mode,
@@ -1071,6 +1087,79 @@ class TraderService:
     ### ==============================================================================================
     ### Log
     ### ==============================================================================================
+
+    ### Not decisions about buying: no snapshot
+    SNAPSHOT_SKIP = (rc.OWN_PLAYER, rc.OWN_BID_OPEN, rc.NO_MARKET_DATA)
+
+    def _snapshot(self, league_id: str, row: UserAutomation, debug: dict, listed: dict, extra: dict[str, dict],
+                  now: datetime) -> None:
+        """E03.01/E03.02: every market decision of the round, once per user and auction, from what the
+        round already holds (no Kickbase call). Later rounds only note a changed reason. Only while the
+        flag decision_snapshots is not off; a failure never stops a trading round."""
+        if flags.effective(flags.load(row.trader_flags), "decision_snapshots", row.trader_live) == flags.OFF:
+            return
+        day = analytics.market_value_day(now)
+
+        def auction_key(pid: str) -> str:
+            listing = listed.get(pid)
+            if listing is not None and listing.listed_at is not None:
+                return listing.listed_at.isoformat()
+            expires = next((m.get("expires_at") for m in debug["market"] if m["id"] == pid), None)
+            return f"end:{expires[:13]}" if expires else f"day:{day}"
+
+        common = {
+            "phase": debug.get("phase") or "", "budget": debug.get("budget"), "open_bids": sum((debug.get("open_bids") or {}).values()),
+            "released": (debug.get("money_check") or {}).get("released") or {}, "squad_size": len(debug.get("squad") or []),
+            "gaps": debug.get("gaps_projected"), "config_version": debug.get("config_version"), "model_version": t.MODEL_VERSION,
+            "sell_ratio": debug.get("sell_ratio"), "hold_updates": t.PROFIT_HOLD,
+        }
+        rows: dict[tuple[str, str], dict] = {}
+        for m in debug["market"]:
+            more = extra.get(m["id"], {})
+            listing = listed.get(m["id"])
+            rows[(m["id"], auction_key(m["id"]))] = {
+                **common, "listed_at": listing.listed_at if listing is not None else None,
+                "expires_at": datetime.fromisoformat(m["expires_at"]) if m.get("expires_at") else None,
+                "value": m["value"], "price": m.get("price"), "bid_low": m.get("bid_low"), "bid_high": m.get("bid_high"),
+                "forecast_1": m.get("forecast"), "forecast_2": more.get("forecast_2"), "gain": m.get("gain"),
+                "expected": m.get("expected"), "play": m.get("play"), "samples": m.get("samples"), "fit": bool(m.get("fit")),
+                "purpose": more.get("purpose"), "hypothetical_bid": more.get("hypothetical_bid"),
+                "min_bid": max(m.get("bid_low") or 0, m.get("price") or 0, m["value"]) or None,
+                "p_win_at_min": m.get("p_win_at_low"), "net_at_min": m.get("net_at_low"),
+                "reason": m.get("reason") or rc.NOT_CHECKED, "reasons": m.get("reasons") or [],
+            }
+        for pid, found in (debug.get("skipped_reasons") or {}).items():
+            listing = listed.get(pid)
+            if not found or found[0] in self.SNAPSHOT_SKIP or listing is None:
+                continue
+            rows[(pid, auction_key(pid))] = {
+                **common, "listed_at": listing.listed_at, "value": listing.market_value, "price": listing.price,
+                "reason": found[0], "reasons": found[1:],
+            }
+        if not rows:
+            return
+        try:
+            with Session(self.engine) as session:
+                stored = {
+                    (r.player_id, r.auction): r for r in session.exec(select(DecisionSnapshot).where(
+                        DecisionSnapshot.user_id == row.user_id, DecisionSnapshot.league_id == league_id,
+                        DecisionSnapshot.player_id.in_([pid for pid, _ in rows]))).all()
+                }
+                for (pid, auction), values in rows.items():
+                    old = stored.get((pid, auction))
+                    if old is None:
+                        session.add(DecisionSnapshot(user_id=row.user_id, league_id=league_id, player_id=pid, auction=auction,
+                                                     first_seen=now, last_changed=now, last_reason=values["reason"], **values))
+                    elif old.last_reason != values["reason"]:
+                        old.last_reason, old.last_changed = values["reason"], now
+                        session.add(old)
+                if self._snapshots_pruned.get(league_id) != day:
+                    session.exec(delete(DecisionSnapshot).where(
+                        DecisionSnapshot.league_id == league_id, DecisionSnapshot.first_seen < now - timedelta(days=SNAPSHOT_KEEP_DAYS)))
+                session.commit()
+            self._snapshots_pruned[league_id] = day
+        except Exception:
+            log.exception("Decision snapshots of league %s not stored", league_id)
 
     def _observe_forecasts(self, league_id: str, predicted: dict[str, tuple[int, int, int]], now: datetime) -> None:
         """E10.00: the forecast of every player of the round, once per league and market value day, and
