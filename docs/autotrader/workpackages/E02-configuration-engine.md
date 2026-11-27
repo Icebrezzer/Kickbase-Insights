@@ -5,7 +5,17 @@ Ziel des Epics: Strategieänderungen ohne Image-Build und Neustart, versioniert,
 Reihenfolge (ADR-008): E02.01 → E02.02 → **E02.08** → E02.03 → E02.04 → E02.05 → E02.06 → E02.07 → E02.09.
 
 ### E02.01 – Versioniertes Konfigurationsschema
-- **Priorität:** P1 · **Status:** ready · **Abhängig von:** E00 · **Aufwand:** M · **Flag:** –
+- **Priorität:** P1 · **Status:** done · **Abhängig von:** E00 · **Aufwand:** M · **Flag:** –
+- **Ergebnis:**
+  - `core/strategy_config.py` definiert Schema v1 mit 32 Einstellungen: alle 22 Liga-Optionen (bearbeitbar) und 10 feste Regeln (nur lesbar, `fixed`). Jede Einstellung hat Pfad, Typ, Einheit, Grenzen, Standardwert und eine deutsche Erklärung.
+  - Standardwerte und Grenzen der Optionen kommen direkt aus `Options`/`OPTION_LIMITS` und können nicht auseinanderlaufen.
+  - `from_options`/`to_options` wandeln verlustfrei hin und zurück (alle Profile geprüft). `to_options` ist so tolerant wie `Options.load`.
+  - `GET /api/automation/trader/schema` liefert das Schema als JSON für die Expertenoberfläche.
+  - Tests: `check_strategy_config.py` (36 Checks, in CI) und eine Smoke-Prüfung (Schema und Einstellungsseite haben gleich viele Optionen).
+  - Suite 18/18 grün. Handelsverhalten unverändert: Die Planung nutzt das Schema noch nicht, das kommt mit E02.04.
+- **Abweichung von Abnahmekriterium 2 (begründet):** Die festen Konstanten sind als **nur lesbare** Felder im Schema, nicht bearbeitbar.
+  - `PROFIT_HOLD` wirkt auf Prognosehorizont, Ranking, Schattenabrechnung, Lernen (`after_forecast` im selben Horizont) und Backtest. Ein konfigurierbarer Wert ändert dort das Verhalten und gehört hinter ein Flag.
+  - Das übernimmt das neue Paket **E02.10**, je Regel einzeln. Die Standardwerte im Schema sind dieselben wie im Code (Test).
 - **Ziel:** Eine Schema-Definition (Pfad, Typ, Einheit, Min, Max, Standard, Erklärung) als einzige Quelle; `StrategyConfig` (frozen dataclass) mit Abbildung auf das bestehende `Options`.
 - **Umfang:** `core/strategy_config.py`: Schema v1 für die 20 bestehenden Optionen + erste feste Konstanten, die ohne Verhaltensänderung konfigurierbar werden können (`hold_updates`, `min_hold_hours`, `rebuy_block_days`, `prepare_hours`, `final_minutes`, `room_bid_extra`). `to_options()` liefert das bisherige `Options`. Standardwerte = heutige Konstanten.
 - **Nicht enthalten:** Speicherung (E02.03), Import (E02.05).
@@ -51,6 +61,11 @@ Reihenfolge (ADR-008): E02.01 → E02.02 → **E02.08** → E02.03 → E02.04 �
 - **Priorität:** P2 · **Abhängig von:** E02.06 · **Aufwand:** S
 - **Ziel:** Ältere Version erneut aktivieren = neue Version mit Inhalt der alten (Historie bleibt linear).
 - **Abnahmekriterien:** Rollback einer Version mit inzwischen ungültigen Werten (Schema verschärft) wird abgelehnt mit Fehlerliste.
+
+### E02.10 – Feste Regeln einzeln konfigurierbar machen (neu, aus E02.01)
+- **Priorität:** P2 · **Status:** todo · **Abhängig von:** E02.04, E02.08 · **Aufwand:** je Regel S · **Flag:** je Regel
+- **Ziel:** Die 10 `fixed`-Felder werden nacheinander bearbeitbar. Zuerst die ohne Lernwirkung (`matchday.min_hold_hours`, `matchday.rebuy_block_days`, `matchday.prepare_hours`, `matchday.final_minutes`, `auction.room_bid_extra`), danach die mit Lernwirkung (`profit.hold_updates` nur zusammen mit einem getrennten Lernzustand je Horizont).
+- **Abnahmekriterien:** je Regel ein Determinismus-Test (Standardwert = altes Verhalten) und harte Grenzen; `final_minutes` < `prepare_hours` × 60.
 
 ### E02.09 – Expertenoberfläche (Strategy Studio, Teil 1)
 - **Priorität:** P3 · **Abhängig von:** E02.06 · **Aufwand:** M

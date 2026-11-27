@@ -619,6 +619,12 @@ def main() -> None:
         export_fq = client.get("/api/automation/trader/export?days=1").json().get("forecast_quality")
         check(dash_fq is not None and export_fq is not None and export_fq["observations"] == quality["observations"],
               "forecast quality in the dashboard and the export")
+        ### E02.01: the configuration schema for the UI, its defaults those of the settings page
+        schema = client.get("/api/automation/trader/schema")
+        settings_page = client.get("/api/automation/settings").json()["traderOptions"]
+        by_option = {s["option"]: s for s in schema.json()["settings"] if s["option"]}
+        check(schema.status_code == 200 and schema.json()["schema_version"] == 1 and len(by_option) == len(settings_page),
+              f"configuration schema ({schema.status_code}, {len(by_option)} options, settings page {len(settings_page)})")
 
     print("\nAll manager tool checks passed.")
 

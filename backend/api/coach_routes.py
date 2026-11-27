@@ -43,6 +43,7 @@ from api.schemas import (
     TraderOptionsIn,
     TraderOut,
 )
+from core import strategy_config
 from core.trader import PROFILES, Learned, Options
 from core.trader import profile as profile_options
 from db.models import utcnow
@@ -257,6 +258,13 @@ async def trader_dashboard(state: StateDep, league_id: LeagueIdDep, viewer: View
 async def trader_profiles(viewer: ViewerDep) -> dict:
     """The strategy profiles as complete options: a starting point to apply and adjust."""
     return {name: TraderOptionsIn(**profile_options(name).__dict__) for name in PROFILES}
+
+
+@router.get("/automation/trader/schema")
+async def trader_schema(viewer: ViewerDep) -> dict:
+    """The strategy configuration schema (E02.01): every setting with path, type, unit, bounds, default
+    and explanation; fixed rules are marked read-only. The same for every league."""
+    return strategy_config.schema()
 
 
 @router.get("/automation/trader/backtest")
