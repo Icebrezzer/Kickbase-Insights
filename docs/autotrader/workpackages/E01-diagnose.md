@@ -28,7 +28,18 @@ Ziel des Epics: Für jede Liga ist ohne Codelesen erkennbar, **warum** der Trade
 - **Rollback:** entfällt (Analyse).
 
 ### E01.02 – Einheitliche Ablehnungscodes
-- **Priorität:** P1 · **Status:** ready · **Abhängig von:** E00 · **Aufwand:** M · **Flag:** – (reine Zusatzinformation)
+- **Priorität:** P1 · **Status:** done · **Abhängig von:** E00 · **Aufwand:** M · **Flag:** – (reine Zusatzinformation)
+- **Ergebnis:**
+  - `core/reasons.py` enthält 40 stabile Codes mit deutschem Text; dazu kommen 5 Geldgrenzen aus E01.04 (`PROFIT_ROOM` ist beides).
+  - `core/trader.py::upgrade_check` liefert den Grund, warum ein Spieler kein Startelf-Upgrade ist; `lineup_upgrade` bleibt unverändert und ist darauf aufgebaut.
+  - `rc.price_blockers` benennt bei einem verworfenen Gebot jede Grenze einzeln, wirtschaftliche zuerst: Marge, Rendite, Preis je Punkt, Ersatzpreis, danach Gewinnhandels-Rahmen und Budget. Bei `BUDGET` folgen die Geldgrenzen (z. B. `CREDIT_MODE`, `RESERVE`) als sekundäre Codes.
+  - Debug: Jeder Marktspieler hat `reason` (primär) und `reasons` (sekundär), übersprungene Spieler haben `skipped_reasons`. Ein von der Risk Engine blockiertes Gebot heißt `RISK_BLOCKED`, mit dem Risk-Code als sekundärem Grund.
+  - Neu erfasst werden auch unklare Aufrufe (`UNCONFIRMED_ACTION`) und abgelaufene Auktionen (`AUCTION_EXPIRED`), die bisher „nicht geprüft“ hießen.
+  - Die kombinierten Texte „oder“ gibt es nicht mehr.
+  - Tests: neue `check_trader_reasons.py` (29 Checks, in CI) und Smoke-Prüfung (alle Codes bekannt, geplantes Gebot = `BID_PLANNED`, kein „oder“).
+  - Determinismus: Die geplanten Aktionen des Smoke-Tests sind vor und nach der Änderung identisch.
+  - `analyze_export.py` nutzt native Codes und zählt die sekundären mit.
+  - Suite 16/16 grün. Frontend nicht betroffen (der Entscheidungstext bleibt).
 - **Ausgangssituation:** Freitext-Gründe, teils kombiniert (KI-14).
 - **Ziel:** Jede Kandidatenentscheidung trägt genau einen primären maschinenlesbaren Code plus optional sekundäre Codes.
 - **Umfang:** `core/reasons.py` mit Konstanten (z. B. `NOT_FIT`, `NO_RISING_FORECAST`, `PROFIT_TRADING_OFF`, `STOP_LOSS`, `FORECAST_PAUSE`, `PHASE_FINAL`, `AUCTION_END_UNKNOWN`, `DAILY_BIDS`, `SLOT_TAKEN`, `ELEVEN_GAPS_FIRST`, `COVER_DONE`, `SQUAD_FULL`, `BUDGET_CASH`, `BUDGET_CREDIT_MODE`, `MARGIN_BELOW_MIN`, `ROI_BELOW_MIN`, `PROFIT_ROOM_EXHAUSTED`, `PRICE_PER_POINT`, `NO_UPGRADE`, `PLAY_RATE_LOW`, `PLAY_RATE_UNKNOWN`, `QUALITY_EDGE`, `LOOKAHEAD_WORSE`, `CLUB_LIMIT`, `REBUY_BLOCK`, `UNCONFIRMED_ACTION`, `ROOM_SALE_*`) und deutschem Text je Code. `_price` liefert neben dem Gebot den bindenden Grenzwert (welcher Cap griff), damit „Marge oder Budget“ getrennt wird. `lineup_upgrade` liefert den Ablehnungsgrund. Debug je Marktspieler: `reason`, `reasons_secondary`, `decision` (Text bleibt).

@@ -306,7 +306,11 @@ def quality(p: Candidate) -> float | None:
 
 
 def lineup_upgrade(squad: Sequence[Candidate], target: Candidate, opts: Options) -> Upgrade | None:
-    """`target` makes the eleven clearly better. Always: fit and a proven regular (`min_play`, known).
+    return upgrade_check(squad, target, opts)[0]
+
+
+def upgrade_check(squad: Sequence[Candidate], target: Candidate, opts: Options) -> tuple[Upgrade | None, str | None]:
+    """The upgrade, or None and the reason code (core.reasons) why `target` is none. `target` makes the eleven clearly better. Always: fit and a proven regular (`min_play`, known).
 
     An empty slot needs no more: a complete eleven beats a small gain (its price is judged by the
     real points). A swap also needs:
@@ -316,18 +320,22 @@ def lineup_upgrade(squad: Sequence[Candidate], target: Candidate, opts: Options)
       any average or form is no swap, missing data is no proof,
     - not worse over the next three matches (`ahead`), so one easy opponent is no reason to buy.
     """
-    if not target.fit or target.play is None or target.play < opts.min_play / 100:
-        return None
+    if not target.fit:
+        return None, "NOT_FIT"
+    if target.play is None:
+        return None, "PLAY_RATE_UNKNOWN"
+    if target.play < opts.min_play / 100:
+        return None, "PLAY_RATE_LOW"
     before = best_of(squad)
     after = best_of([*squad, target])
     if target.player_id not in after.player_ids:
-        return None
+        return None, "NO_ELEVEN_GAIN"
     fills = after.empty_slots < before.empty_slots
     ### The real points, not the empty slot penalty: price per point stays meaningful for a gap too
     gain = after.expected - before.expected
     thin = target.samples is not None and target.samples < THIN_SAMPLES
     if not fills and gain < max(opts.min_gain, 0.1) * (THIN_FACTOR if thin else 1.0):
-        return None
+        return None, "GAIN_BELOW_MIN"
     by_id = {p.player_id: p for p in squad}
     out = [by_id[pid] for pid in before.player_ids if pid not in after.player_ids and pid in by_id]
     same = [p for p in out if p.position == target.position]
@@ -335,15 +343,15 @@ def lineup_upgrade(squad: Sequence[Candidate], target: Candidate, opts: Options)
     if replaced is not None and not fills:
         mine, theirs = quality(target), quality(replaced)
         if mine is None:
-            return None
+            return None, "QUALITY_UNKNOWN"
         ### A new formation: the season quality of a player of another position is no fair comparison,
         ### the points decide (the gain above and the next three matches below)
         cross = opts.upgrade_cross_position and replaced.position != target.position
         if not cross and theirs is not None and (mine <= theirs or mine < theirs * (1 + opts.min_avg_edge / 100)):
-            return None
+            return None, "QUALITY_EDGE"
         if target.ahead is not None and replaced.ahead is not None and target.ahead < replaced.ahead:
-            return None
-    return Upgrade(round(gain, 1), replaced.player_id if replaced else None, replaced.value if replaced else 0, fills)
+            return None, "LOOKAHEAD_WORSE"
+    return Upgrade(round(gain, 1), replaced.player_id if replaced else None, replaced.value if replaced else 0, fills), None
 
 
 def cost_per_point(upgrade: Upgrade, bid: int, ratio: float = 1.0) -> float:

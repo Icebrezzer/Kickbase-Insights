@@ -11,8 +11,9 @@
   - **E01.04** (Maximalgebot gegen freigegebenes Budget, nur Backend)
   - **E06.00** (Verkaufsquote als Liga-Option)
   - **E05.08** (Formationswechsel nach Punkten)
+  - **E01.02** (einheitliche Ablehnungscodes)
 - Ohne geänderte Einstellungen handelt der Trader **wie bisher**. Die neuen Optionen `sell_ratio` (Standard 90) und `upgrade_cross_position` (Standard aus) wirken erst nach dem Einschalten je Liga.
-- **Nächste Pakete:** **E01.02** (einheitliche Ablehnungscodes) und **E10.00** (Prognose-Kalibrierung aus allen beobachteten Spielern); beide sind unabhängig. Danach E02.01 → E02.02 → E02.08 → E05.02 → E04 (MASTERPLAN §3 und §9, ADR-012).
+- **Nächstes Paket:** **E10.00** (Prognose-Kalibrierung aus allen beobachteten Spielern). Danach E02.01 → E02.02 → E02.08 → E05.02 → E04 (MASTERPLAN §3 und §9, ADR-012).
 - **Geklärt (27.11.2026):** Kickbase zahlt beim Sofortverkauf 100 % des Marktwerts. Formationswechsel mit mehr Punkten sind erwünscht.
 
 ## Ergebnis der Export-Analyse (Details `KNOWN_ISSUES.md` B)

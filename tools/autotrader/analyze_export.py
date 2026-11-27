@@ -112,14 +112,23 @@ def analyze(export: dict) -> dict:
     rounds = [r.get("data") or {} for r in export.get("rounds", [])]
     normal = [d for d in rounds if not d.get("rescue")]
     reasons: Counter[str] = Counter()
+    secondary: Counter[str] = Counter()
+    native_rounds = 0
     reasons_by_player: dict[str, set[str]] = {}
     for d in normal:
         for m in d.get("market", []):
-            code = reason_code(m.get("decision"))
+            ### Since E01.02 the round logs codes itself; older exports are mapped from the text
+            native = m.get("reason")
+            code = native or reason_code(m.get("decision"))
+            if native:
+                native_rounds += 1
+                for extra in m.get("reasons") or []:
+                    secondary[extra] += 1
             reasons[code] += 1
             reasons_by_player.setdefault(code, set()).add(str(m.get("id")))
-        for text in (d.get("skipped") or {}).values():
-            reasons[reason_code(text)] += 1
+        skipped_codes = d.get("skipped_reasons") or {}
+        for pid, text in (d.get("skipped") or {}).items():
+            reasons[(skipped_codes.get(pid) or [reason_code(text)])[0]] += 1
     ### Profit trading at all possible? Best net result at the minimum bid of every rising, fit player
     rising = {m.get("id"): m for d in normal for m in d.get("market", []) if m.get("fit") and (m.get("forecast") or 0) > 0}
     nets = [m["net_at_low"] for m in rising.values() if isinstance(m.get("net_at_low"), (int, float))]
@@ -148,6 +157,8 @@ def analyze(export: dict) -> dict:
         "latest": round_summary(normal[-1]) if normal else None,
         "profit_check": profit_check,
         "reasons": dict(reasons.most_common()),
+        "secondary_reasons": dict(secondary.most_common()),
+        "native_reason_codes": native_rounds > 0,
         "players_per_reason": {k: len(v) for k, v in reasons_by_player.items()},
         "bids": {f"{p}/{s}": n for (p, s), n in bids.items()},
         "shadows": {f"{p}/{s}": n for (p, s), n in shadows.items()},
@@ -182,9 +193,13 @@ def report(result: dict) -> str:
         f"{pc['median_gain_pct']} %, max. {pc['max_gain_pct']} %; Verkaufsquote {pc['sell_ratio']} "
         f"(Gewinnschwelle ≈ {round((1 / pc['sell_ratio'] - 1) * 100, 1) if pc['sell_ratio'] else '–'} % + Aufschlag)"
     )
-    lines.append("Gründe ohne Kauf (alle Runden, Marktspieler-Runden):")
+    lines.append("Gründe ohne Kauf (alle Runden, Marktspieler-Runden)" + (":" if result["native_reason_codes"] else ", aus dem Text zugeordnet (Export vor E01.02):"))
     for code, n in result["reasons"].items():
         lines.append(f"  {code:<36} {n:>6}  ({result['players_per_reason'].get(code, 0)} Spieler)")
+    if result["secondary_reasons"]:
+        lines.append("Weitere Gründe (sekundär):")
+        for code, n in result["secondary_reasons"].items():
+            lines.append(f"  {code:<36} {n:>6}")
     lines.append(f"Gebote: {result['bids'] or 'keine'}")
     lines.append(f"Schattentransfers: {result['shadows'] or 'keine'}")
     if latest and latest.get("liquidation_full_day") is None:

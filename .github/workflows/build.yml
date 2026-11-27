@@ -34,6 +34,8 @@ jobs:
         run: python tests/check_trader.py
       - name: Autotrader safety (net profit, risk engine, credit, phases, invariants)
         run: python tests/check_trader_safety.py
+      - name: Autotrader reason codes (one cause per code)
+        run: python tests/check_trader_reasons.py
       - name: Autotrader intelligence (lineup, priorities, exits)
         run: python tests/check_trader_intelligence.py
       - name: Autotrader learning (win probability, league models, forecast pause)

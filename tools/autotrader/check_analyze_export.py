@@ -60,6 +60,15 @@ def main() -> None:
     assert summary["native_money_check"] and summary["max_bid"] == 40_000_000 and summary["released_profit"] == -2_000_000, summary
     assert "CREDIT_MODE" in ax.report({**result, "latest": summary})
     assert not latest["native_money_check"] and "geschätzt" in ax.report(result)
+    ### Native reason codes (E01.02) win over the text, secondary ones are counted
+    coded = {**EXPORT, "rounds": [{"data": {**EXPORT["rounds"][1]["data"], "market": [
+        {"id": "1", "decision": "Gewinnhandel: Netto-Gewinn unter der Mindestmarge und Budget zu knapp",
+         "reason": "MARGIN_BELOW_MIN", "reasons": ["BUDGET", "CREDIT_MODE"]}], "skipped": {"5": "Vereinslimit"},
+        "skipped_reasons": {"5": ["CLUB_LIMIT"]}}}]}
+    native = ax.analyze(coded)
+    assert native["native_reason_codes"] and native["reasons"] == {"MARGIN_BELOW_MIN": 1, "CLUB_LIMIT": 1}, native["reasons"]
+    assert native["secondary_reasons"] == {"BUDGET": 1, "CREDIT_MODE": 1}, native["secondary_reasons"]
+    assert "Weitere Gründe" in ax.report(native) and "aus dem Text zugeordnet" in ax.report(result)
     assert ax.reason_code(None) == "NONE"
     assert "Liga 4242" in ax.report(result)
     print("All export analysis checks passed.")

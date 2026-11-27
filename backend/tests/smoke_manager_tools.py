@@ -436,6 +436,17 @@ def main() -> None:
         check(mcs and all(mc and all(mc["gap"][p] == sum(mc["limits"][p].values()) for p in mc["released"]) for mc in mcs),
               f"max bid and released money in every round ({len(mcs)} rounds), the limits add up")
         check("money_check" in dj and (dj["money_check"] is None or dj["money_check"]["max_bid"] >= 0), "the dashboard shows the max bid check")
+        ### E01.02: every market player of every planning round has known reason codes, a planned bid says so
+        from core import reasons as rc
+
+        market_rows = [m for r in rounds for m in r.get("market", [])]
+        skipped = [c for r in rounds for cs in (r.get("skipped_reasons") or {}).values() for c in cs]
+        check(market_rows and all(m.get("reason") in rc.TEXT and all(x in rc.TEXT for x in m.get("reasons", [])) for m in market_rows)
+              and all(c in rc.TEXT for c in skipped),
+              f"reason codes for {len(market_rows)} market rows and {len(skipped)} skipped ones")
+        check(all((m["reason"] in (rc.BID_PLANNED, rc.RISK_BLOCKED)) == (": Gebot " in m["decision"]) for m in market_rows),
+              "a planned bid has the code BID_PLANNED (or RISK_BLOCKED)")
+        check(not any("oder" in m["decision"] for m in market_rows), "no combined reason text")
 
         ### Notifications: an eleven with gaps close to the matchday is pushed once per deadline
         from db.models import AutomationEvent

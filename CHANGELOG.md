@@ -5,6 +5,7 @@ Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Au
 ## [Unveröffentlicht] – Auto-Trader 3.0
 
 ### Hinzugefügt
+- E01.02: Einheitliche Ablehnungscodes (`core/reasons.py`): Jeder Marktspieler einer Runde trägt im Debug-Protokoll und im Export einen primären und optional sekundäre Codes. Aus „Marge oder Budget“ werden die einzelnen Ursachen, etwa `MARGIN_BELOW_MIN` + `BUDGET` + `CREDIT_MODE`.
 - E06.00: Neue Liga-Option **Sofortverkauf bringt (% des Marktwerts)** (`sell_ratio`, 50–100, Standard 90 wie bisher). Kickbase zahlt den vollen Marktwert; mit 100 rechnen Gewinnhandel, Kredit, Rettung, Schatten und Backtest mit dem echten Erlös.
 - E05.08: Neue Liga-Option **Formationswechsel nach Punkten bewerten** (`upgrade_cross_position`, Standard aus). Ein Neuzugang, der die Formation ändert und einen Spieler anderer Position verdrängt, wird nach erwarteten Punkten (nächster Spieltag und nächste 3 Spiele) bewertet.
 - E01.04: Jede Trader-Runde vergleicht das Kickbase-Maximalgebot mit dem intern freigegebenen Geld je Zweck. Jede Differenz wird mit Grund benannt (`RESERVE`, `DEBT`, `LIQUIDATION`, `CREDIT_MODE`, `PHASE`, `PROFIT_ROOM`): Feld `money_check` im Debug-Protokoll, im Export und im Dashboard-API.

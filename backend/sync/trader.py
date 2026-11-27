@@ -39,6 +39,7 @@ from sqlmodel import Session, delete, select
 
 from api.context import load_context
 from core import analytics, coach, risk
+from core import reasons as rc
 from core import trader as t
 from db import exclusive
 from db.models import (
@@ -706,6 +707,7 @@ class TraderService:
                 code = next((b["code"] for b in debug["risk_blocked"] if b["player_id"] == m["id"]), None)
                 if code:
                     m["decision"] += f" – blockiert: {code}"
+                    m["reason"], m["reasons"] = rc.RISK_BLOCKED, [code, *(r for r in m.get("reasons", []) if r != code)]
             ### The eleven: what is there for sure, and with every open and new bid won
             new = [listings[a.player_id] for a in approved if a.kind == "bid" and a.player_id in listings]
             debug["gaps_confirmed"] = t.best_of(own0).empty_slots if own0 else 11
@@ -830,25 +832,43 @@ class TraderService:
             )
         free_agents = {pid for pid, p in listed.items() if p.seller is None}
 
-        ### Why each market player was or was not bought, for the debug log
+        ### Why each market player was or was not bought, for the debug log: a text, and reason codes
+        ### (core.reasons, primary first) that a log, export or the UI can count
         why: dict[str, str] = {}
+        codes: dict[str, list[str]] = {}
+        upgrade_codes: dict[str, str] = {}
+
+        def mark(pid: str, text: str, *found: str) -> None:
+            why[pid] = text
+            codes[pid] = [code for code in found if code]
+
+        def add(pid: str, text: str, code: str) -> None:
+            why[pid] += text
+            codes.setdefault(pid, []).append(code)
+
         for pid, p in listed.items():
             if pid in pending:
-                why[pid] = "eigenes Gebot offen"
+                mark(pid, "eigenes Gebot offen", rc.OWN_BID_OPEN)
             elif p.seller is not None and p.seller.id == user_id:
-                why[pid] = "eigener Spieler"
+                mark(pid, "eigener Spieler", rc.OWN_PLAYER)
             elif pid in sold_recently:
-                why[pid] = "vor kurzem verkauft"
+                mark(pid, "vor kurzem verkauft", rc.REBUY_BLOCK)
+            elif pid in unsettled:
+                mark(pid, rc.TEXT[rc.UNCONFIRMED_ACTION], rc.UNCONFIRMED_ACTION)
             elif pid in offers and offers[pid].own_club_full:
-                why[pid] = "Vereinslimit"
+                mark(pid, "Vereinslimit", rc.CLUB_LIMIT)
             elif pid not in offers:
-                why[pid] = "keine Marktdaten"
+                mark(pid, "keine Marktdaten", rc.NO_MARKET_DATA)
+            elif expiries[pid] is not None and expiries[pid] <= now:
+                mark(pid, rc.TEXT[rc.AUCTION_EXPIRED], rc.AUCTION_EXPIRED)
 
         options: list[tuple[tuple[int, float], str, t.Candidate, t.Upgrade | None]] = []
         ### Order by phase (t.priority): normally fill the eleven, improve it, profit, substitutes;
         ### close to the matchday fill, substitutes, improve, profit last
         for c in market_candidates:
-            upgrade = t.lineup_upgrade(planned, c, opts)
+            upgrade, upgrade_code = t.upgrade_check(planned, c, opts)
+            if upgrade_code:
+                upgrade_codes[c.player_id] = upgrade_code
             if upgrade is not None:
                 options.append((t.priority("lineup", upgrade.fills, stage, upgrade.gain), "lineup", c, upgrade))
             elif row.trader_profit and not paused and not state.forecast_pause and c.fit and c.forecast > 0 and c.expires_at is not None and stage != "final":
@@ -856,15 +876,17 @@ class TraderService:
                 low = t.bid_for(c, 0.0, None)
                 options.append((t.priority("profit", False, stage, t.profit_rank(c, low, ratio) if low else -1.0), "profit", c, None))
             else:
-                why[c.player_id] = (
-                    "verletzt/fraglich" if not c.fit
-                    else "kein Startelf-Upgrade, Gewinnhandel aus" if not row.trader_profit
-                    else "kein Startelf-Upgrade, Gewinnhandel pausiert (Stop-Loss)" if paused
-                    else "kein Startelf-Upgrade, Gewinnhandel pausiert (Prognose zuletzt unzuverlässig)" if state.forecast_pause
-                    else "kein Startelf-Upgrade, letzte Stunde vor dem Spieltag" if stage == "final"
-                    else "kein Startelf-Upgrade, Auktionsende unbekannt" if c.expires_at is None and c.forecast > 0
-                    else "kein Startelf-Upgrade, keine steigende Prognose"
+                code = (
+                    rc.NOT_FIT if not c.fit
+                    else rc.PROFIT_TRADING_OFF if not row.trader_profit
+                    else rc.STOP_LOSS if paused
+                    else rc.FORECAST_PAUSE if state.forecast_pause
+                    else rc.PHASE_FINAL if stage == "final"
+                    else rc.AUCTION_END_UNKNOWN if c.expires_at is None and c.forecast > 0
+                    else rc.NO_RISING_FORECAST
                 )
+                mark(c.player_id, rc.TEXT[code] if code == rc.NOT_FIT else f"kein Startelf-Upgrade, {rc.TEXT[code]}",
+                     code, upgrade_codes.get(c.player_id) if code != rc.NOT_FIT else None)
         cover_pool = [c for c in market_candidates if not any(o[2] is c for o in options if o[1] == "lineup")]
         for c in cover_pool:
             if c is t.cover_target(planned, [c], opts):
@@ -901,17 +923,20 @@ class TraderService:
                     )
             label = {"lineup": "Startelf", "profit": "Gewinnhandel", "cover": "Ersatz"}[purpose]
             if bids_left <= 0:
-                why[c.player_id] = f"{label}: Tageslimit Gebote erreicht"
+                mark(c.player_id, f"{label}: Tageslimit Gebote erreicht", rc.DAILY_BIDS)
                 continue
             ### Needs change with every bid of this round
             gaps = t.best_of(planned).empty_slots
             if purpose == "lineup":
-                upgrade = t.lineup_upgrade(planned, c, opts)
+                upgrade, upgrade_code = t.upgrade_check(planned, c, opts)
                 if upgrade is None:
-                    why[c.player_id] = "Startelf: Platz schon durch ein Gebot dieser Runde besetzt"
+                    mark(c.player_id, "Startelf: Platz schon durch ein Gebot dieser Runde besetzt", rc.SLOT_TAKEN, upgrade_code)
                     continue
             elif gaps > 0 or (purpose == "cover" and c.position not in t.missing_cover(planned)):
-                why[c.player_id] = f"{label}: erst die Startelf füllen" if gaps > 0 else "Ersatz: Position schon abgedeckt"
+                if gaps > 0:
+                    mark(c.player_id, f"{label}: erst die Startelf füllen", rc.ELEVEN_GAPS_FIRST)
+                else:
+                    mark(c.player_id, "Ersatz: Position schon abgedeckt", rc.COVER_DONE)
                 continue # The eleven comes first, profit and substitutes wait for it
             ### Keep enough to fill the other empty slots cheaply, and a profit trade leaves the money for
             ### every missing substitute, so profit never crowds out the bench for good
@@ -922,27 +947,29 @@ class TraderService:
             bid = _price(c, purpose, upgrade, extra, money_seen[c.player_id], opts, state, ratio, profit_room, shares) if slots > 0 else None
             sale = None
             if bid is None:
-                why[c.player_id] = f"{label}: " + (
-                    "kein Kaderplatz frei" if slots <= 0
-                    else "Marge unter der Mindestmarge oder Budget zu knapp" if purpose == "profit"
-                    else "Budget oder Preis je Punkt passt nicht"
+                ### Each limit on its own: what does not pay first, then what money or room is missing
+                found = [rc.SQUAD_FULL] if slots <= 0 else rc.price_blockers(
+                    c, purpose, upgrade, money_seen[c.player_id], opts, state.min_margin, ratio, profit_room
                 )
+                ### Why the money is short: the limits of the max bid check, largest first
+                limits = rc.money_limits(money_check, purpose) if rc.BUDGET in found else []
+                mark(c.player_id, f"{label}: " + " und ".join(rc.TEXT[code] for code in found), *found, *limits)
                 ### Room or money is only made right before the auction ends, one sale per round
                 if purpose == "cover" or sold_now or sales_left <= 0 or c.expires_at is None:
                     continue
                 if c.expires_at - now > timedelta(minutes=opts.sell_window):
-                    why[c.player_id] += ", Verkauf erst im Verkaufsfenster"
+                    add(c.player_id, ", Verkauf erst im Verkaufsfenster", rc.ROOM_SALE_WINDOW)
                     continue
                 ### Only the confirmed squad: the target may still be lost, the team has to be fine without him
                 sale = t.pick_sale(own, c, min_play, state.swap_edge)
                 if sale is None:
-                    why[c.player_id] += ", kein Spieler, der auch ohne den Neuzugang verzichtbar ist"
+                    add(c.player_id, ", kein Spieler, der auch ohne den Neuzugang verzichtbar ist", rc.ROOM_SALE_NONE)
                     continue
                 proceeds = int(sale.value * ratio)
                 ### A player is given up for this one: bid high enough to have a good chance
                 bid = _price(c, purpose, upgrade, max(extra, t.ROOM_EXTRA), money_for(c, free + proceeds, purpose) - keep, opts, state, ratio, profit_room, shares, use_ev=False)
                 if bid is None:
-                    why[c.player_id] += ", auch mit Verkauf nicht"
+                    add(c.player_id, ", auch mit Verkauf nicht", rc.ROOM_SALE_NOT_ENOUGH)
                     continue
                 reason = (
                     "verletzt/fällt aus" if not sale.fit
@@ -970,7 +997,7 @@ class TraderService:
                 Action("bid", purpose, c.player_id, names.get(c.player_id, c.player_id), bid, c.value,
                        upgrade.gain if upgrade else 0, reason, raw_gain.get(c.player_id, 0))
             )
-            why[c.player_id] = f"{label}: Gebot {bid:,} € ({reason})"
+            mark(c.player_id, f"{label}: Gebot {bid:,} € ({reason})", rc.BID_PLANNED)
             bid_on.add(c.player_id)
             planned = _with_best([*planned, replace(c, locked=True)])
             free -= bid
@@ -1007,8 +1034,14 @@ class TraderService:
             "deadline": deadline.isoformat() if deadline else None,
             "repay_from": repay_from.isoformat() if repay_from else None,
             "squad": [player(c) for c in own0], "pending": [player(c) for c in pending.values()],
-            "market": [{**player(c), "money": money_seen.get(c.player_id), "decision": why.get(c.player_id, "nicht geprüft")} for c in market_candidates],
+            "market": [
+                {**player(c), "money": money_seen.get(c.player_id), "decision": why.get(c.player_id, "nicht geprüft"),
+                 **_reason_fields(codes.get(c.player_id), upgrade_codes.get(c.player_id))}
+                for c in market_candidates
+            ],
             "skipped": {pid: why[pid] for pid in listed if pid in why and pid not in {c.player_id for c in market_candidates}},
+            "skipped_reasons": {pid: codes.get(pid, [rc.NOT_CHECKED]) for pid in listed
+                                if pid in why and pid not in {c.player_id for c in market_candidates}},
         }, {c.player_id: c for c in market_candidates})
 
     ### ==============================================================================================
@@ -1510,6 +1543,15 @@ def _price(
     if upgrade is not None and not t.worth_it(upgrade, bid, opts, ratio):
         return None
     return bid
+
+
+def _reason_fields(found: list[str] | None, upgrade_code: str | None) -> dict:
+    """Primary and secondary reason codes of a market player for the debug log. Why he is no lineup
+    upgrade is always among the secondary ones, unless a bid is planned."""
+    found = list(found or [rc.NOT_CHECKED])
+    if upgrade_code and upgrade_code not in found and found[0] != rc.BID_PLANNED:
+        found.append(upgrade_code)
+    return {"reason": found[0], "reasons": found[1:]}
 
 
 def _auction(base: t.Learned, local: t.Learned, value: int, won: bool, own: int, winner: int | None,

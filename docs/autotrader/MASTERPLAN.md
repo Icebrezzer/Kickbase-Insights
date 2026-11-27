@@ -38,7 +38,7 @@ Stand nach der Auswertung der realen Exporte (§9, ADR-011, ADR-012). ✅ = erle
 | ✅ | E01.04 Maximalgebot vs. internes Budget | 5 | 1 | 1 | 8 | W1 | – |
 | ✅ | E06.00 Verkaufsquote als Liga-Option | 5 | 2 | 1 | 7 | W1 | **neu**: Hauptursache in Liga A |
 | ✅ | E05.08 Formationswechsel nach Punkten | 5 | 2 | 1 | 7 | W1 | **neu**: 162 von 307 Ablehnungen |
-| 1 | E01.02 Einheitliche Ablehnungscodes | 5 | 1 | 2 | 7 | W1 | – |
+| ✅ | E01.02 Einheitliche Ablehnungscodes | 5 | 1 | 2 | 7 | W1 | – |
 | 2 | **E10.00 Prognose-Kalibrierung aus allen beobachteten Spielern** | 5 | 1 | 2 | 7 | **W1 (neu)** | Prognose trifft die Richtung zu 94–99 %, wurde aber nie kalibriert |
 | 3 | E01.03 Statistik abgelehnter Kandidaten | 3 | 1 | 1 | 4 | W2 | – |
 | 4 | E02.01 Schema | 4 | 1 | 2 | 5 | W2 | – |
