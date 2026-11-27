@@ -110,11 +110,19 @@ jobs:
           KBI_FRONTEND_DIR: ${{ github.workspace }}/frontend/dist
           KBI_PUSH__SUBJECT: mailto:test@example.org
           KBI_ALLOW__BALANCES_USERS: "1001"
+          ### A trader round every minute, so the screenshots show its dashboard (demo only, dry run)
+          KBI_AUTOMATION__INTERVAL_MINUTES: "1"
         run: |
           cd backend && nohup python main.py start > /tmp/kbi.log 2>&1 &
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:8000/api/health && break; sleep 2; done
           curl -s -c /tmp/c -H 'Content-Type: application/json' -d '{"email":"demo@demo.de","password":"demo"}' http://127.0.0.1:8000/api/auth/login > /dev/null
           for i in $(seq 1 90); do curl -s -b /tmp/c http://127.0.0.1:8000/api/status | grep -q '"syncedAt":"' && break; sleep 2; done
+          ### Autotrader on in the demo league (a dry run: "Live handeln" stays off), then wait for its first round
+          curl -s -b /tmp/c http://127.0.0.1:8000/api/automation/settings \
+            | python -c "import json, sys; s = json.load(sys.stdin); s['trader'] = True; s['traderLive'] = False; print(json.dumps(s))" \
+            | curl -s -b /tmp/c -X PUT -H 'Content-Type: application/json' -d @- http://127.0.0.1:8000/api/automation/settings > /dev/null
+          for i in $(seq 1 60); do curl -s -b /tmp/c http://127.0.0.1:8000/api/automation/trader/dashboard | grep -q '"at":"' && break; sleep 5; done
+          curl -s -b /tmp/c http://127.0.0.1:8000/api/automation/trader/dashboard | grep -q '"money_check"' && echo "trader dashboard ready" || echo "no trader round yet"
       - name: Screenshots
         working-directory: tools/ui-audit
         run: |
