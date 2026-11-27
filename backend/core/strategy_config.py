@@ -234,3 +234,11 @@ def validate(data: object, base: dict | None = None) -> tuple[dict | None, list[
             else:
                 _put(result, path, checked)
     return (None, errors) if errors else (result, [])
+
+
+def diff(before: dict, after: dict) -> list[dict]:
+    """Every setting whose value differs, with its text: the preview of a change (E02.05)."""
+    return [
+        {"path": s.path, "text": s.text, "unit": s.unit, "before": get(before, s.path), "after": get(after, s.path)}
+        for s in SETTINGS if get(before, s.path) != get(after, s.path)
+    ]

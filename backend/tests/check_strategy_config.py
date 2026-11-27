@@ -101,6 +101,14 @@ def main() -> None:
     again, errors = sc.validate(full)
     ok(not errors and sc.to_options(again) == t.profile("aggressive"), "a complete configuration validates as it is")
 
+    ### E02.05: the preview names every changed setting with before and after, nothing else
+    base = sc.default()
+    after, _ = sc.validate({"schema_version": 1, "finance": {"reserve": 1_000_000}, "limits": {"daily_bids": 6}}, base)
+    changes = sc.diff(base, after)
+    ok(changes == [{"path": "finance.reserve", "text": sc.BY_PATH["finance.reserve"].text, "unit": "€", "before": 0, "after": 1_000_000}],
+       f"only the changed setting ({changes})")
+    ok(sc.diff(base, base) == [], "no change, no diff")
+
     print(f"All {passed} strategy config checks passed.")
 
 

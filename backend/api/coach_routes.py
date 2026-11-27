@@ -49,6 +49,7 @@ from core.trader import PROFILES, Learned, Options
 from core.trader import profile as profile_options
 from db.models import utcnow
 from kickbase import KickbaseClient
+from sync.strategy import ConfigConflict
 
 router = APIRouter(prefix="/api")
 
@@ -288,6 +289,59 @@ async def put_trader_flags(state: StateDep, league_id: LeagueIdDep, viewer: View
     automation = _automation(state)
     async with automation._lock(viewer.user_id, league_id): # Never in the middle of a trading round
         return await asyncio.to_thread(automation.trader.set_flags, viewer.user_id, league_id, changes)
+
+
+def _config_out(row) -> dict:
+    return {"version": row.version, "active": row.active, "created_at": row.created_at.isoformat(), "created_by": row.created_by,
+            "note": row.note, "schema_version": row.schema_version}
+
+
+@router.get("/automation/trader/config")
+async def trader_config(state: StateDep, league_id: LeagueIdDep, viewer: ViewerDep) -> dict:
+    """The active strategy configuration of this league and its history, newest first (E02.05/E02.06)."""
+    configs = _automation(state).trader.configs
+    active = await asyncio.to_thread(configs.active, viewer.user_id, league_id)
+    history = await asyncio.to_thread(configs.history, viewer.user_id, league_id)
+    return {"active": {**_config_out(active), "data": active.data}, "history": [_config_out(r) for r in history]}
+
+
+@router.post("/automation/trader/config/preview")
+async def trader_config_preview(state: StateDep, league_id: LeagueIdDep, viewer: ViewerDep, body: dict) -> dict:
+    """What a configuration would change, checked strictly against the active one. Writes nothing.
+    Accepts a complete or partial configuration, or the flat options of a 2.0 export."""
+    active = await asyncio.to_thread(_automation(state).trader.configs.active, viewer.user_id, league_id)
+    result, errors = strategy_config.validate(body.get("config"), active.data)
+    return {"base_version": active.version, "valid": not errors, "errors": errors,
+            "changes": strategy_config.diff(active.data, result) if result else []}
+
+
+@router.post("/automation/trader/config/activate")
+async def trader_config_activate(state: StateDep, league_id: LeagueIdDep, viewer: ViewerDep, body: dict) -> dict:
+    """Takes a configuration over as the new active version: only valid (422 otherwise, nothing
+    changes) and only on top of `expected_version`, the version the preview was made against (409 if
+    another change came first). Effective from the next trader round, logged with every change."""
+    automation = _automation(state)
+    configs = automation.trader.configs
+    expected = body.get("expected_version")
+    if isinstance(expected, bool) or not isinstance(expected, int):
+        raise HTTPException(422, "expected_version fehlt: erst die Vorschau abrufen")
+    active = await asyncio.to_thread(configs.active, viewer.user_id, league_id)
+    result, errors = strategy_config.validate(body.get("config"), active.data)
+    if errors:
+        raise HTTPException(422, {"errors": errors})
+    note = str(body.get("note") or "")[:200]
+    async with automation._lock(viewer.user_id, league_id): # Never in the middle of a trading round
+        try:
+            row = await asyncio.to_thread(configs.activate, viewer.user_id, league_id, result, "config", note, expected)
+        except ConfigConflict as e:
+            raise HTTPException(409, str(e)) from e
+    changes = strategy_config.diff(active.data, result)
+    await asyncio.to_thread(
+        automation.record, viewer.user_id, league_id, "trader-config",
+        f"Konfiguration Version {row.version} aktiviert: {len(changes)} Änderung(en)" + (f" – {note}" if note else ""),
+        details={"version": row.version, "previous": expected, "changes": changes},
+    )
+    return {**_config_out(row), "data": row.data, "changes": changes}
 
 
 @router.get("/automation/trader/backtest")

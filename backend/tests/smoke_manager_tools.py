@@ -686,6 +686,32 @@ def main() -> None:
         exported = client.get("/api/automation/trader/export?days=1").json()["config"]
         check(exported["version"] == changed.version and exported["data"]["schema_version"] == 1, "the export carries the active configuration")
 
+        ### E02.05: preview writes nothing, invalid changes nothing, activation only on the previewed version
+        current = client.get("/api/automation/trader/config").json()
+        check(current["active"]["version"] == changed.version and current["history"][0]["active"], "active configuration and history")
+        bad = client.post("/api/automation/trader/config/preview", json={"config": {"schema_version": 1, "finance": {"reserve": -5}, "casino": {}}}).json()
+        check(not bad["valid"] and {e["path"] for e in bad["errors"]} == {"finance.reserve", "casino"} and bad["changes"] == [], "invalid: every error, no changes")
+        proposal = {"schema_version": 1, "finance": {"sell_ratio_pct": 100, "reserve": 1_000_000}}
+        preview = client.post("/api/automation/trader/config/preview", json={"config": proposal}).json()
+        check(preview["valid"] and preview["base_version"] == changed.version and {c["path"] for c in preview["changes"]} >= {"finance.reserve"},
+              f"preview names the changes ({preview['changes']})")
+        check(configs.active("1001", "4242").version == changed.version, "the preview wrote nothing")
+        refused = client.post("/api/automation/trader/config/activate", json={"config": {"limits": {"daily_bids": 99}}, "expected_version": changed.version})
+        check(refused.status_code == 422 and configs.active("1001", "4242").version == changed.version, "an invalid activation changes nothing")
+        check(client.post("/api/automation/trader/config/activate", json={"config": proposal}).status_code == 422, "activation needs the previewed version")
+        done = client.post("/api/automation/trader/config/activate", json={"config": proposal, "expected_version": preview["base_version"], "note": "Test"})
+        check(done.status_code == 200 and done.json()["version"] == changed.version + 1 and done.json()["changes"], f"activated ({done.status_code})")
+        stale = client.post("/api/automation/trader/config/activate", json={"config": proposal, "expected_version": preview["base_version"]})
+        check(stale.status_code == 409, f"a second activation on the old version is a conflict ({stale.status_code})")
+        page = client.get("/api/automation/settings").json()["traderOptions"]
+        check(page["reserve"] == 1_000_000 and page["sellRatio"] == 100, "the settings page shows the activated values")
+        with Session(state.engine) as s:
+            config_events = s.exec(select(AutomationEvent).where(AutomationEvent.kind == "trader-config")).all()
+        check(len(config_events) == 1 and config_events[0].details["previous"] == changed.version, "the activation is logged with its changes")
+        old_export = client.post("/api/automation/trader/config/preview", json={"config": {"min_gain": 10.0, "reserve": 2_000_000}}).json()
+        check(old_export["valid"] and {c["path"] for c in old_export["changes"]} == {"sport.min_points_gain", "finance.reserve"},
+              f"the options of a 2.0 export can be previewed ({old_export['changes']})")
+
     print("\nAll manager tool checks passed.")
 
 

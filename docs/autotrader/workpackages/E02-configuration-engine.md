@@ -87,7 +87,16 @@ Reihenfolge (ADR-008): E02.01 → E02.02 → **E02.08** → E02.03 → E02.04 �
 - **Abnahmekriterien:** 1. Änderung zwischen zwei Runden wirkt in der nächsten. 2. Änderung **während** einer Runde wirkt nicht in dieser (Test mit Haken zwischen Planung und Ausführung). 3. Kein zusätzlicher DB-Zugriff je Aktion (Cache je Runde).
 
 ### E02.05 – JSON-Import mit Änderungsvorschau
-- **Priorität:** P2 · **Status:** todo · **Abhängig von:** E02.04 · **Aufwand:** M
+- **Priorität:** P2 · **Status:** done · **Abhängig von:** E02.04 · **Aufwand:** M
+- **Ergebnis:**
+  - Neue Endpunkte:
+    - `GET /api/automation/trader/config`: aktive Version mit Daten und Historie.
+    - `POST …/config/preview`: streng gegen die aktive Version geprüft, liefert alle Fehler mit Pfad und alle Änderungen alt → neu mit Erklärung; schreibt nichts.
+    - `POST …/config/activate`: nur gültig (sonst 422, keine Änderung), nur mit der `expected_version` aus der Vorschau (sonst 422, bei zwischenzeitlicher Änderung 409). Läuft unter der Rundensperre, wirkt ab der nächsten Runde und wird als Ereignis `trader-config` mit allen Änderungen protokolliert.
+  - Akzeptiert vollständige oder teilweise Konfigurationen und die flachen Optionen eines 2.0-Exports.
+  - Der bisherige `POST …/trader/import` bleibt unverändert kompatibel (tolerant, klemmt Werte) und erzeugt über E02.03 eine Version.
+  - Tests: Smoke (Vorschau schreibt nichts, ungültig ändert nichts, Konflikt 409, Einstellungsseite zeigt die Werte, Ereignis, 2.0-Optionen) und `diff`-Checks in `check_strategy_config.py`.
+  - Die Historienliste von E02.06 ist damit teilweise vorhanden; der Vergleich zweier beliebiger Versionen fehlt noch.
 - **Ziel:** `POST …/config/preview` (Diff alt→neu, Validierungsfehler, betroffene Flags) und `POST …/config/activate` (nur nach Vorschau, mit Notiz). Bestehender Import bleibt kompatibel und läuft über denselben Pfad.
 - **Abnahmekriterien:** 1. Vorschau schreibt nichts. 2. Aktivierung atomar (eine Transaktion). 3. Gleichzeitige Aktivierung zweier Versionen: genau eine gewinnt, die andere erhält Konfliktfehler (optimistische Sperre über erwartete Vorgängerversion).
 
