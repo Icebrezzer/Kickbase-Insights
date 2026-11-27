@@ -44,7 +44,7 @@ Stand nach der Auswertung der realen Exporte (§9, ADR-011, ADR-012). ✅ = erle
 | ✅ | E02.01 Schema | 4 | 1 | 2 | 5 | W2 | – |
 | ✅ | E02.02 Validierung | 4 | 1 | 1 | 6 | W2 | – |
 | ✅ | E02.08 Feature Flags | 5 | 2 | 1 | 7 | W2 | `sell_ratio` und `upgrade_cross_position` bleiben Optionen (begründet in E02.08) |
-| 🔎 | E01.05 Diagnoseansicht UI (Review, wartet auf CI) | 4 | 1 | 2 | 5 | W2 | – |
+| ✅ | E01.05 Diagnoseansicht UI | 4 | 1 | 2 | 5 | W2 | – |
 | 8 | E02.03 / E02.04 Speicherung, Übernahme ohne Neustart | 4 | 2–3 | 2 | 4 | W3 | – |
 | 9 | E03.01 / E03.02 Snapshots, alle Ablehnungen | 5 | 2 | 2 | 6 | W3 | – |
 | 10 | **E05.02 Konfigurierbare Ersatzbank** | 5 | 3 | 2 | 5 | **W4 (vorgezogen)** | Ersatzschutz bindet in Liga A ≈ 20 von 34,5 Mio. Bankwert |

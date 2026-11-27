@@ -79,7 +79,7 @@ Ziel des Epics: Für jede Liga ist ohne Codelesen erkennbar, **warum** der Trade
 - **Rollback:** Revert.
 
 ### E01.05 – Diagnoseansicht im Frontend
-- **Priorität:** P2 · **Status:** review (wartet auf CI: TypeScript, Build, ui-audit) · **Abhängig von:** E01.03, E01.04 · **Aufwand:** M
+- **Priorität:** P2 · **Status:** done · **Abhängig von:** E01.03, E01.04 · **Aufwand:** M
 - **Ergebnis:**
   - Die Karte „Autotrader jetzt“ hat einen aufgeklappten Bereich **„Warum kauft der Trader – oder nicht?“**. Er zeigt:
     - das Kickbase-Maximalgebot (und den Wert nach offenen Geboten);
@@ -90,7 +90,11 @@ Ziel des Epics: Für jede Liga ist ohne Codelesen erkennbar, **warum** der Trade
   - Ohne Runde und ohne Statistik bleibt der Bereich ausgeblendet.
   - Das Layout nutzt nur einspaltige Zeilen mit `min-w-0` und `shrink-0`, damit auf 375 px nichts überläuft.
   - Dateien: `frontend/src/pages/Automation.tsx` (Komponente `TraderDiagnosis`), `frontend/src/api/hooks.ts` (Typen), `backend/sync/trader.py` (`reason_texts`).
-  - **Nicht lokal geprüft:** TypeScript, Build und Darstellung (kein Node). Das Paket gilt erst nach grüner CI mit ui-audit-Screenshots als `done`.
+  - **Abnahme über die CI** (lokal kein Node): [Lauf 46074078513](https://github.com/Icebrezzer/Kickbase-Insights/actions/runs/46074078513) für `cedcdab` ist grün (TypeScript, Build, Frontend-Tests, ui-audit).
+    - Auf allen 7 Geräteprofilen kein Seitenüberlauf, keine JavaScript-Fehler und kein abgeschnittener Text im neuen Bereich.
+    - Desktop-Screenshot gesichtet: Maximalgebot 39,6 Mio., nach offenen Geboten 11,9 Mio.; Startelf/Ersatz −16,7 Mio. (Kreditgrenze 28,6 Mio.), Gewinnhandel −24,3 Mio. (dazu Kreditmodus 7,5 Mio.); Gründe der letzten 7 Tage. Die Summen stimmen.
+    - Dafür schaltet der ui-audit-Job in der Demo jetzt den Autotrader (Probelauf) mit einer Runde pro Minute ein (`cedcdab`). Vorher war die Karte „Autotrader jetzt“ nie auf einem Screenshot.
+    - Die Prognosezeile ist in einer frischen Demo korrekt ausgeblendet (noch keine abgerechneten Beobachtungen); mit Daten ist sie nicht per Screenshot belegt.
   - Backend-Suite 19/19 grün, dazu eine Smoke-Prüfung, dass jeder gezählte Code einen Text hat.
 - **Ziel:** Karte „Warum kauft der Trader nicht?“ auf der Automatik-Seite: Budgetvergleich (Balken Maximalgebot → freigegeben, Abzüge benannt), Top-Gründe, Phase, aktive Pausen, Kaderplätze, Vereinslimits.
 - **Module:** `frontend/src/pages/Automation.tsx` (ggf. Teilkomponente auslagern), `api/types.ts`, `api/hooks.ts`.
