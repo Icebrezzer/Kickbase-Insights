@@ -102,8 +102,20 @@ Ziel des Epics: Für jede Liga ist ohne Codelesen erkennbar, **warum** der Trade
 - **Pflichttests:** `npm run build`, ui-audit-Screenshots Desktop + Mobil.
 
 ### E01.06 – Was-wäre-wenn-Analyse
-- **Priorität:** P2 · **Status:** todo · **Abhängig von:** E01.02, E02.02 (Validierung der geänderten Werte) · **Aufwand:** M
+- **Priorität:** P2 · **Status:** done · **Abhängig von:** E01.02, E02.02 (Validierung der geänderten Werte) · **Aufwand:** M
 - **Ziel:** `POST /api/automation/trader/whatif` plant die **letzte gespeicherte Runde** mit geänderten Optionen neu und zeigt die Differenz (zusätzliche/entfallene Aktionen, geänderte Gründe), ohne etwas zu speichern oder zu senden.
 - **Umfang:** `_plan` mit gespeicherten Eingaben (Kader, Markt, Budget aus dem Debug) als reine Simulation; keine Kickbase-Aufrufe (S12); kein Debug-Log, keine Schatten, kein Push.
 - **Abnahmekriterien:** 1. Gleiche Optionen → gleiche Aktionen wie protokolliert (Determinismus-Test). 2. Aufrufzähler des Mock-Clients = 0. 3. Keine DB-Schreibvorgänge (Test über Zeilenzahlen).
-- **Offenes Risiko:** Der Debug enthält nicht alle Eingaben (z. B. Historien); ggf. E03.01-Snapshot als Grundlage → dann Abhängigkeit E03.01.
+- **Ergebnis:**
+  - Jede Runde merkt sich ihre Eingaben (Kader, Kontostand, Markt, gespeicherte Aufstellung, Zeitpunkt) im Speicher.
+  - `POST /api/automation/trader/whatif` prüft die vorgeschlagene Konfiguration streng auf Basis der aktiven und plant dieselbe Runde zweimal: mit der aktiven und mit der vorgeschlagenen.
+  - Zurück kommen geplante Aktionen vorher und nachher, Marktspieler mit geändertem Grund, der Budgetvergleich vorher und nachher sowie die Konfigurationsänderungen.
+  - `_plan(simulate=True)` schreibt nichts: kein Debug, keine Snapshots, keine Prognose-Beobachtungen, keine Pushes, keine Minus-Warnung. Es gibt keinen Kickbase-Aufruf.
+  - Abnahme:
+    1. Gleiche Konfiguration ergibt gleiche Aktionen.
+    2. Kein Client und damit kein Aufruf.
+    3. Zeilenzahlen von TraderDebug, TradeLog, AutomationEvent, DecisionSnapshot und ForecastObservation sind vorher und nachher gleich, die Push-Warteschlange auch.
+    4. Mit „0 Gebote pro Tag“ fällt das geplante Gebot weg, Grund `DAILY_BIDS`.
+  - Ohne Runde seit dem Serverstart antwortet der Endpunkt mit 409.
+  - Eine Oberfläche dafür kommt mit E02.09.
+- **Ursprüngliches Risiko (gelöst über gespeicherte Eingaben statt Debug):** Der Debug enthält nicht alle Eingaben (z. B. Historien); ggf. E03.01-Snapshot als Grundlage → dann Abhängigkeit E03.01.

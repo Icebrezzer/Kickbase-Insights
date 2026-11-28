@@ -344,6 +344,21 @@ async def trader_config_activate(state: StateDep, league_id: LeagueIdDep, viewer
     return {**_config_out(row), "data": row.data, "changes": changes}
 
 
+@router.post("/automation/trader/whatif")
+async def trader_whatif(state: StateDep, league: LeagueDep, viewer: ViewerDep, body: dict) -> dict:
+    """E01.06: what the latest round would have done with another configuration (checked strictly, on top
+    of the active one), next to what it does with the active one. Nothing is stored, sent or pushed."""
+    automation = _automation(state)
+    active = await asyncio.to_thread(automation.trader.configs.active, viewer.user_id, league.id)
+    result, errors = strategy_config.validate(body.get("config"), active.data)
+    if errors:
+        raise HTTPException(422, {"errors": errors})
+    answer = await asyncio.to_thread(automation.trader.whatif, league, viewer.user_id, strategy_config.to_options(result))
+    if answer is None:
+        raise HTTPException(409, "Seit dem Start lief noch keine Trader-Runde in dieser Liga – bitte die nächste Runde abwarten")
+    return {**answer, "changes": strategy_config.diff(active.data, result)}
+
+
 @router.get("/automation/trader/config/diff")
 async def trader_config_diff(state: StateDep, league_id: LeagueIdDep, viewer: ViewerDep,
                              from_version: Annotated[int, Query(ge=1)], to_version: Annotated[int, Query(ge=1)]) -> dict:

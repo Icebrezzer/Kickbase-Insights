@@ -135,6 +135,9 @@ class TraderService:
         self._observed: dict[tuple[str, int], set[str]] = {}
         self._observations_settled: dict[str, int] = {}
         self._snapshots_pruned: dict[str, int] = {}
+        ### E01.06: the inputs of the latest round per league and user, and the debug of simulated plans
+        self._last_inputs: dict[tuple[str, str], tuple] = {}
+        self._simulated: dict[int, dict] = {}
         ### Rejection statistics per league and user, with the newest debug row they were computed from
         self._rejections: dict[tuple[str, str], tuple[int, dict]] = {}
         ### Versioned strategy configuration per user and league (E02.03)
@@ -169,6 +172,7 @@ class TraderService:
         if budget.budget is None:
             return []
         saved = await self._saved_lineup(league, client)
+        self._last_inputs[(league.id, row.user_id)] = (squad, budget.budget, market, saved, now)
         ### The configuration of this round: loaded once, a change meanwhile counts from the next round
         config = await asyncio.to_thread(self.configs.options, row.user_id, league.id)
         opts = config[1]
@@ -575,6 +579,7 @@ class TraderService:
         now: datetime,
         saved: list[str] | None = None,
         config: tuple[int, t.Options] | None = None,
+        simulate: bool = False,
     ) -> tuple[list[Action], list[ShadowTrade]]:
         from api.insights import Insights
         from api.routes import analysis_limits
@@ -763,6 +768,9 @@ class TraderService:
             debug["gaps_confirmed"] = t.best_of(own0).empty_slots if own0 else 11
             debug["gaps_projected"] = t.best_of([*own0, *pending.values(), *new]).empty_slots if own0 or pending or new else 11
             debug["runtime_ms"] = int((time.monotonic() - started) * 1000)
+            if simulate:
+                self._simulated[id(approved)] = debug
+                return approved, []
             if "market" in debug:
                 self._snapshot(league.id, row, debug, listed, snapshot_extra, now)
             self._notify(league.id, user_id, debug, stage, deadline, now)
@@ -800,7 +808,7 @@ class TraderService:
                 ]
             if budget < 0 or worst < 0:
                 after = budget + sum(a.price for a in actions if a.kind == "sell")
-                if after < 0 or worst < 0:
+                if (after < 0 or worst < 0) and not simulate:
                     self._warn_debt(league, user_id, min(after, worst), deadline)
                 return finish(actions, [], {
                     "live": row.trader_live, "phase": stage, "budget": budget, "worst_case": worst, "rescue": True,
@@ -1107,7 +1115,8 @@ class TraderService:
                 "p_win_at_low": t.win_probability(low, c.value, t.winning_markups(shares, c.value)) if low else None,
             }
 
-        self._observe_forecasts(league.id, predicted, now)
+        if not simulate:
+            self._observe_forecasts(league.id, predicted, now)
         ### E04.08: the balance at kick-off, worst, expected and after the sales still possible before the
         ### repay phase (pessimistic, with the bench the repay phase keeps). Diagnosis and warning only
         due = {pid: bid for pid, bid in all_open.items()
@@ -1507,6 +1516,36 @@ class TraderService:
                 details={"before": before, "after": after},
             )
         return self.flags(user_id, league_id)
+
+    def whatif(self, league: League, user_id: str, options: t.Options) -> dict | None:
+        """E01.06: the latest round planned again with other options, next to the same round with the
+        active ones. Uses the inputs that round fetched, so no Kickbase call; writes nothing, pushes
+        nothing. None when no round ran since the start of the server."""
+        inputs = self._last_inputs.get((league.id, user_id))
+        if inputs is None:
+            return None
+        squad, budget, market, saved, at = inputs
+        row = self.automation.get_settings(user_id, league.id)
+        active = self.configs.options(user_id, league.id)
+        results = {}
+        for name, config in (("before", active), ("after", (active[0], options))):
+            planned, _ = self._plan(league, row, squad, budget, market, at, saved, config, simulate=True)
+            results[name] = (planned, self._simulated.pop(id(planned), {}))
+        (before, debug_before), (after, debug_after) = results["before"], results["after"]
+        reasons_before = {m["id"]: m for m in debug_before.get("market", [])}
+        changed = [
+            {"id": m["id"], "name": m.get("name"), "before": reasons_before[m["id"]].get("reason"), "after": m.get("reason"),
+             "decision_before": reasons_before[m["id"]].get("decision"), "decision_after": m.get("decision")}
+            for m in debug_after.get("market", [])
+            if m["id"] in reasons_before and reasons_before[m["id"]].get("reason") != m.get("reason")
+        ]
+        action = lambda a: {"kind": a.kind, "purpose": a.purpose, "player_id": a.player_id, "name": a.name, "price": a.price, "reason": a.reason}  # noqa: E731
+        return {
+            "inputs_at": at.isoformat(), "base_version": active[0],
+            "actions_before": [action(a) for a in before], "actions_after": [action(a) for a in after],
+            "changed_decisions": changed,
+            "money_before": debug_before.get("money_check"), "money_after": debug_after.get("money_check"),
+        }
 
     def rejection_stats(self, user_id: str, league_id: str) -> dict:
         """E01.03: why market players were not bought over 1, 7 and 21 days, once per player, day and

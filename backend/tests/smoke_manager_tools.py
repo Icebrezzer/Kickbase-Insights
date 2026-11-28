@@ -745,6 +745,38 @@ def main() -> None:
             s.commit()
         invalid = client.post("/api/automation/trader/config/rollback", json={"version": newest + 50, "expected_version": newest + 1})
         check(invalid.status_code == 422 and configs.active("1001", "4242").version == newest + 1, "a version the rules refuse today is not taken")
+        ### E01.06: what-if on the inputs of the latest round, nothing stored, sent or pushed
+        from db.models import DecisionSnapshot as Snap
+        from db.models import ForecastObservation as Observation
+
+        def row_counts() -> tuple:
+            with Session(state.engine) as s:
+                return tuple(len(s.exec(select(model)).all()) for model in (TraderDebug, TradeLog, AutomationEvent, Snap, Observation))
+
+        client.portal.call(state.automation.trader.round, league, state.automation.get_settings("1001", "4242"), kb_client, utcnow())
+        before_rows, pushes_before = row_counts(), len(state.automation.trader._pushes)
+        same = client.post("/api/automation/trader/whatif", json={"config": {"schema_version": 1}})
+        check(same.status_code == 200 and same.json()["actions_before"] == same.json()["actions_after"] and not same.json()["changed_decisions"],
+              f"what-if with the active configuration changes nothing ({same.status_code})")
+        no_bids = client.post("/api/automation/trader/whatif", json={"config": {"schema_version": 1, "limits": {"daily_bids": 0}}}).json()
+        check(not any(a["kind"] == "bid" for a in no_bids["actions_after"]) and any(c["path"] == "limits.daily_bids" for c in no_bids["changes"]),
+              f"what-if without bids: no bid, the change named ({len(no_bids['actions_before'])} -> {len(no_bids['actions_after'])} actions)")
+        check(all(c["after"] in (rc.DAILY_BIDS, rc.NOT_CHECKED) or c["after"] != c["before"] for c in no_bids["changed_decisions"]), "changed reasons listed")
+        check(row_counts() == before_rows and len(state.automation.trader._pushes) == pushes_before, f"what-if wrote nothing ({before_rows} -> {row_counts()})")
+        check(client.post("/api/automation/trader/whatif", json={"config": {"limits": {"daily_bids": 99}}}).status_code == 422, "an invalid what-if: 422")
+        ### With money (and the trader switched on, else the kill switch blocks every bid, as it should) the
+        ### round bids; without daily bids the same round would not
+        page = client.get("/api/automation/settings").json()
+        client.put("/api/automation/settings", json={**page, "trader": True, "traderLive": False})
+        before_rows = row_counts()
+        state.automation.trader._last_inputs[("4242", "1001")] = (squad_l, 200_000_000, market_l, None, utcnow())
+        rich_whatif = client.post("/api/automation/trader/whatif", json={"config": {"schema_version": 1, "limits": {"daily_bids": 0}}}).json()
+        check(any(a["kind"] == "bid" for a in rich_whatif["actions_before"]) and not any(a["kind"] == "bid" for a in rich_whatif["actions_after"])
+              and any(c["after"] == rc.DAILY_BIDS for c in rich_whatif["changed_decisions"]),
+              f"what-if: the bids of the round fall away, the reason is the daily limit ({len(rich_whatif['actions_before'])} -> {len(rich_whatif['actions_after'])})")
+        check(row_counts() == before_rows, "still nothing written")
+        state.automation.trader._last_inputs.clear()
+        check(client.post("/api/automation/trader/whatif", json={"config": {"schema_version": 1}}).status_code == 409, "no round since the start: 409")
         old_export = client.post("/api/automation/trader/config/preview", json={"config": {"min_gain": 10.0, "reserve": 2_000_000}}).json()
         check(old_export["valid"] and {c["path"] for c in old_export["changes"]} == {"sport.min_points_gain", "finance.reserve"},
               f"the options of a 2.0 export can be previewed ({old_export['changes']})")
