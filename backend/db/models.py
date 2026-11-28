@@ -600,3 +600,13 @@ class ShadowAnalysis(SQLModel, table=True):
     next_check: datetime | None = _ts()
     inputs: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
     result: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+
+
+class ShadowDaily(SQLModel, table=True):
+    user_id: str = Field(primary_key=True)
+    league_id: str = Field(primary_key=True)
+    day: int = Field(primary_key=True)
+    reason: str = Field(primary_key=True)
+    price_class: int = Field(primary_key=True)
+    count: int = 0
+    categories: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))

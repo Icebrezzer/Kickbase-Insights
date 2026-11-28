@@ -79,3 +79,5 @@ Volle Backend-Suite 17/17 grün: Ruff, 12 Skripte aus der CI, Migration gegen `e
 - E03.06 (W6): Je Auktion ein Standardgebot mit zwei Updates als feste Referenz. Gruppierung nach Grund, Ausgang und Finanzierbarkeit mit Anzahl, Summe und Median. Bestätigte Verkäufe separat. 30 Tage, neueste 500 Entscheidungen.
 
 - E03.07 (W6): Separates diagnostisches Lernmodell für belegte Zuschläge und finanzierbare Standardgebote. Ein Schlüssel je Auktion, reale Evidenz zuerst, Halbwertszeit 30 Tage, volle Stützung ab zehn Auktionen. Keine Übernahme in Handelsparameter.
+
+- E03.08 (W6): Aufbewahrung je Liga 7–365 Tage (Standard 120). Atomare Verdichtung je Nutzer, Liga, Berliner Marktwerttag, Grund und Preisklasse. Pro Runde höchstens 256 Löschungen je Detailtabelle. SQLite-Test: 100.000 Alt-Snapshots, 15,5 ms inklusive Commit für einen Batch. Größenordnung bei angenommenen 40 neuen Auktionen je Liga/Tag: 87.600 pro Jahr, 28.800 gleichzeitig bei 120 Tagen. Bei angenommenen 1–3 KiB je vollständiger Entscheidung ca. 28–84 MiB Detailbestand zuzüglich Tagesaggregate, WAL und freier Seiten.

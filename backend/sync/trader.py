@@ -64,7 +64,7 @@ from kickbase import KickbaseAuthError, KickbaseClient, KickbaseError
 from kickbase import models as kb
 from sync.learning import load_state
 from sync.learning import sell_ratio as learned_sell_ratio
-from sync import shadow_analysis
+from sync import shadow_analysis, shadow_retention
 from sync.strategy import StrategyStore
 
 if TYPE_CHECKING:
@@ -137,7 +137,7 @@ class TraderService:
         ### open ones were settled: a round only writes players not seen today (E10.00)
         self._observed: dict[tuple[str, int], set[str]] = {}
         self._observations_settled: dict[str, int] = {}
-        self._snapshots_pruned: dict[str, int] = {}
+        self._snapshots_pruned: dict[tuple[str, str], int] = {}
         ### Rejection statistics per league and user, with the newest debug row they were computed from
         self._rejections: dict[tuple[str, str], tuple[int, dict]] = {}
         ### Versioned strategy configuration per user and league (E02.03)
@@ -1241,11 +1241,14 @@ class TraderService:
                     elif old.last_reason != values["reason"]:
                         old.last_reason, old.last_changed = values["reason"], now
                         session.add(old)
-                if self._snapshots_pruned.get(league_id) != day:
-                    session.exec(delete(DecisionSnapshot).where(
-                        DecisionSnapshot.user_id == row.user_id, DecisionSnapshot.league_id == league_id, DecisionSnapshot.first_seen < now - timedelta(days=SNAPSHOT_KEEP_DAYS)))
+                scope = (row.user_id, league_id)
+                removed = 0
+                if self._snapshots_pruned.get(scope) != day:
+                    cutoff = now - timedelta(days=t.Options.load(row.trader_options).snapshot_days)
+                    removed = shadow_retention.archive_batch(session, *scope, cutoff)
                 session.commit()
-            self._snapshots_pruned[league_id] = day
+            if removed < shadow_retention.BATCH:
+                self._snapshots_pruned[scope] = day
         except Exception:
             log.exception("Decision snapshots of league %s not stored", league_id)
 

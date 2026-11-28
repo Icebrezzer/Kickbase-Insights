@@ -57,6 +57,7 @@ class Options:
     profit_share: int = 60 # ... a profit bid
     reserve: int = 0 # Money that is never spent
     cover_max_price: int = 3_000_000 # Most a substitute for an uncovered position may cost
+    snapshot_days: int = 120
     snapshot_limit: int = 32
     daily_bids: int = 6
     daily_sales: int = 3
@@ -157,6 +158,7 @@ OPTION_LIMITS: dict[str, tuple[float, float]] = {
     "profit_share": (10, 100),
     "reserve": (0, 500_000_000),
     "cover_max_price": (0, 50_000_000),
+    "snapshot_days": (7, 365),
     "snapshot_limit": (1, 200),
     "daily_bids": (0, 30),
     "daily_sales": (0, 30),

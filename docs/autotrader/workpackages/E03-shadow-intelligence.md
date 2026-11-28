@@ -71,6 +71,7 @@ Ziel des Epics: Der Trader lernt auch ohne eigene Transfers – aus jeder releva
 - **Ziel:** Gewicht nach Alter, Echtheit (echt 1,0, Schatten ≤ 0,5), Stichprobe; je Auktion höchstens einmal in Lernverfahren.
 
 ### E03.08 – Aufbewahrung und Performance
+- **Umsetzung im W6-Branch:** Aufbewahrung je Liga 7–365 Tage (Standard 120). Atomare Verdichtung je Nutzer, Liga, Berliner Marktwerttag, Grund und Preisklasse. Pro Runde höchstens 256 Löschungen je Detailtabelle. SQLite-Test: 100.000 Alt-Snapshots, 15,5 ms inklusive Commit für einen Batch. Größenordnung bei angenommenen 40 neuen Auktionen je Liga/Tag: 87.600 pro Jahr, 28.800 gleichzeitig bei 120 Tagen. Bei angenommenen 1–3 KiB je vollständiger Entscheidung ca. 28–84 MiB Detailbestand zuzüglich Tagesaggregate, WAL und freier Seiten.
 - **Priorität:** P2 · **Abhängig von:** E03.01 · **Aufwand:** S
 - **Ziel:** Konfigurierbare Aufbewahrung (Standard 120 Tage wie heute), danach Verdichtung in Tagesaggregate je Liga × Code × Preisklasse; Löschlauf in Batches.
 - **Abnahmekriterien:** DB-Wachstum bei 6 Ligen × 1 Jahr geschätzt und dokumentiert; Löschlauf < 1 s auf 100.000 Zeilen (SQLite).
