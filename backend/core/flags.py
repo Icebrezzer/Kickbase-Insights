@@ -20,6 +20,7 @@ FLAGS: dict[str, str] = {
     "decision_snapshots": "Entscheidungs-Snapshots aller Kandidaten speichern (E03.01)",
     "flexible_bench": "Konfigurierbare Ersatzbank statt voller Positionsabsicherung (E05.02)",
     "multi_day_liquidation": "Kredit mit allen Verkaufsmöglichkeiten bis zur Deadline (E04.02)",
+    "scenario_credit": "Kredit nur auf den pessimistisch bewerteten Verkaufserlösen (E04.03)",
     "conditional_repayment": "Gewinnspieler sichern ihre eigene Finanzierung ab (E04.04)",
     "upgrade_financing": "Startelf-Upgrade über den Verkauf des Verdrängten finanzieren (E04.05)",
 }

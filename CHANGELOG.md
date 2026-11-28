@@ -5,6 +5,11 @@ Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Au
 ## [Unveröffentlicht] – Auto-Trader 3.0
 
 ### Hinzugefügt
+- E04.01/03/04/05/06/10: Finanzierung (`core/finance.py`) hinter Flags, alle Standard aus.
+  - Verkaufserlöse in drei Szenarien; mit `scenario_credit` gilt der Kredit nur auf dem pessimistischen Erlös.
+  - Mit `conditional_repayment` sichert ein Gewinnziel sein Gebot selbst ab.
+  - Mit `upgrade_financing` sichert der verdrängte Starter ein Startelf-Gebot ab.
+  - Jeder Spieler sichert höchstens ein Gebot ab, auch über Runden hinweg. Die Risk Engine rechnet jede Sicherheit selbst nach (`FINANCE_COLLATERAL_TAKEN`, `FINANCE_PLAN_INVALID`).
 - E05.02: Konfigurierbare Ersatzbank (Option „Ersatzbank“: volle Absicherung, minimal oder keine Bank zwischen den Spieltagen) hinter dem Flag `flexible_bench`. Mit „keine Bank“ steigt der Kredit in den beiden ausgewerteten Ligen von 14,4 auf 34,5 Mio. bzw. von 0 auf 20,7 Mio. Ab 24 Std. vor dem Spieltag gilt wieder volle Absicherung.
 - E03.01/E03.02: Entscheidungs-Snapshots hinter dem Flag `decision_snapshots` (Standard aus). Bei eingeschaltetem Flag hält jede Runde für jede Auktion fest, was der Trader wusste und warum er (nicht) geboten hat, einmal je Auktion und ohne Kickbase-Aufruf. Grundlage für das Lernen aus verpassten Chancen.
 - E02.05: Strategie-Konfiguration per API mit Vorschau importieren: `GET /api/automation/trader/config`, `POST …/config/preview` (strenge Prüfung und alle Änderungen, schreibt nichts) und `POST …/config/activate` (nur gültig und nur auf der geprüften Version, protokolliert).

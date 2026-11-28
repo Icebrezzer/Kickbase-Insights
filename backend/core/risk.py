@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol
 
-from core import coach
+from core import coach, finance
 from core import trader as t
 
 ### Reason codes, stable for logs, exports and tests
@@ -40,6 +40,8 @@ MANUAL_BID = "MANUAL_BID" # Never touched
 NOT_OPEN = "NOT_OPEN"
 ACTION_INVALID = "ACTION_INVALID"
 UNCONFIRMED_ACTION = "UNCONFIRMED_ACTION"
+FINANCE_COLLATERAL_TAKEN = "FINANCE_COLLATERAL_TAKEN" # The sale is already counted for another bid (E04.06)
+FINANCE_PLAN_INVALID = "FINANCE_PLAN_INVALID" # The claimed sale does not hold when checked again (E04.10)
 
 
 class Planned(Protocol):
@@ -74,6 +76,11 @@ class Context:
     rescue_override: bool = False
     unconfirmed: bool = False
     bench: int = t.BENCH_FULL # The bench the planning keeps (E05.02), full unless the flag allows less
+    ### E04.04/E04.05: sales a bid counts on once it is won, by the player bid on; players already
+    ### counted for open bids of earlier rounds; the start of the repay phase they have to be sold by
+    collateral: dict[str, list[finance.Collateral]] = field(default_factory=dict)
+    used_collateral: set[str] = field(default_factory=set)
+    repay_from: datetime | None = None
 
 
 def credit_for(purpose: str, expires_at: datetime | None, ctx_phase: str, deadline: datetime | None, credit: int, mode: int) -> int:
@@ -98,13 +105,22 @@ def validate(actions: Sequence[Planned], ctx: Context) -> list[str | None]:
     clubs.update(ctx.club_of.get(pid) for pid in open_bids)
     bids_left, sales_left = ctx.bids_left, ctx.sales_left
     results: list[str | None] = []
+    ### Approved conditional financing so far: money it adds, players it uses (each at most once)
+    extra = 0
+    used = set(ctx.used_collateral)
 
     for action in actions:
         reason = None if ctx.switches_on else KILL_SWITCH
         if reason is None and ctx.unconfirmed and (action.kind == "bid" or action.purpose == "room"):
             reason = UNCONFIRMED_ACTION
         if reason is None and action.kind == "bid":
-            reason = _bid(action, ctx, phase, squad, open_bids, new_bids, clubs, bids_left)
+            claims = ctx.collateral.get(action.player_id, [])
+            reason = _bid(action, ctx, phase, squad, open_bids, new_bids, clubs, bids_left, extra + sum(c.value for c in claims))
+            if reason is None and claims:
+                reason = _collateral(claims, ctx, squad, used)
+            if reason is None and claims:
+                extra += sum(c.value for c in claims)
+                used.update(c.player_id for c in claims)
             if reason is None:
                 new_bids[action.player_id] = action.price
                 clubs[ctx.club_of.get(action.player_id)] += 1
@@ -129,8 +145,19 @@ def validate(actions: Sequence[Planned], ctx: Context) -> list[str | None]:
     return results
 
 
+def _collateral(claims: list[finance.Collateral], ctx: Context, squad: list[t.Candidate], used: set[str]) -> str | None:
+    """Each claimed sale on its own: not counted twice, and it holds when rebuilt from the confirmed squad."""
+    for c in claims:
+        if c.player_id in used or sum(1 for o in claims if o.player_id == c.player_id) > 1:
+            return FINANCE_COLLATERAL_TAKEN
+        error = finance.check_collateral(c, squad, ctx.listings.get(c.bid_for), ctx.ratio, ctx.bench, ctx.now, ctx.repay_from)
+        if error:
+            return error
+    return None
+
+
 def _bid(action: Planned, ctx: Context, phase: str, squad: list[t.Candidate], open_bids: dict[str, int],
-         new_bids: dict[str, int], clubs: Counter, bids_left: int) -> str | None:
+         new_bids: dict[str, int], clubs: Counter, bids_left: int, conditional: int = 0) -> str | None:
     target = ctx.listings.get(action.player_id)
     if target is None:
         return NOT_LISTED
@@ -152,7 +179,7 @@ def _bid(action: Planned, ctx: Context, phase: str, squad: list[t.Candidate], op
     if clubs[ctx.club_of.get(action.player_id)] + 1 > ctx.max_club and ctx.club_of.get(action.player_id) is not None:
         return CLUB_FULL
     ### Worst case: every open and new bid is won. Planned sales bring nothing yet
-    allowed = credit_for(action.purpose, target.expires_at, phase, ctx.deadline, ctx.credit, ctx.credit_mode)
+    allowed = credit_for(action.purpose, target.expires_at, phase, ctx.deadline, ctx.credit, ctx.credit_mode) + conditional
     worst = ctx.budget - sum(open_bids.values()) - sum(new_bids.values()) - action.price
     if worst < ctx.reserve - allowed:
         return OVER_BUDGET

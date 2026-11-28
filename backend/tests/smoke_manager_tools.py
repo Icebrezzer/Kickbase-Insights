@@ -772,6 +772,25 @@ def main() -> None:
         check(debug_live["bench"]["applied"] == debug_live["bench"]["wanted"] and debug_live["bench"]["missing_cover"] == debug_live["bench"]["missing_cover_wanted"],
               f"live flag: the strategy applies ({debug_live['bench']}, live trading {live_now})")
         client.put("/api/automation/trader/flags", json={"flags": {"flexible_bench": "off"}})
+
+        ### E04: financing. Scenarios logged always; shadow flags change no decision; the pessimistic credit
+        ### never releases more than the one of 2.0
+        plan_fin_off, debug_fin_off = bench_round()
+        scenarios = debug_fin_off["finance"]["scenarios"]
+        check(scenarios["pessimistic"] <= scenarios["realistic"] or scenarios["pessimistic"] <= debug_fin_off["liquidation"],
+              f"scenarios logged ({scenarios})")
+        check(debug_fin_off["finance"]["credit_from"] == "current", "flag off: credit as in 2.0")
+        client.put("/api/automation/trader/flags", json={"flags": {"conditional_repayment": "shadow", "upgrade_financing": "shadow", "scenario_credit": "shadow"}})
+        plan_fin_shadow, debug_fin_shadow = bench_round()
+        check([(a.kind, a.player_id, a.price) for a in plan_fin_shadow] == [(a.kind, a.player_id, a.price) for a in plan_fin_off]
+              and all(not a.collateral for a in plan_fin_shadow), "financing flags in shadow change no decision")
+        check(all(not c["applied"] for c in debug_fin_shadow["finance"]["conditional"].values()),
+              f"shadow: possible conditional financing only logged ({len(debug_fin_shadow['finance']['conditional'])})")
+        client.put("/api/automation/trader/flags", json={"flags": {"scenario_credit": "live"}, "confirm_live": True})
+        _, debug_fin_live = bench_round()
+        check(debug_fin_live["finance"]["credit_from"] == "pessimistic" and debug_fin_live["credit"] <= debug_fin_off["credit"],
+              f"pessimistic credit never above 2.0 ({debug_fin_live['credit']:,} <= {debug_fin_off['credit']:,})")
+        client.put("/api/automation/trader/flags", json={"flags": {"conditional_repayment": "off", "upgrade_financing": "off", "scenario_credit": "off"}})
         client.post("/api/automation/trader/config/activate",
                     json={"config": {"schema_version": 1, "bench": {"strategy": 0}}, "expected_version": configs.active("1001", "4242").version})
 

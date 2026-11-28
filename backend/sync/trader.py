@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING
 from sqlmodel import Session, delete, select
 
 from api.context import load_context
-from core import analytics, coach, flags, learning, risk
+from core import analytics, coach, finance, flags, learning, risk
 from core import reasons as rc
 from core import trader as t
 from db import exclusive
@@ -125,6 +125,7 @@ class Action:
     cost: int | None = None # Sales: purchase price, read before the sale removes the squad entry
     for_player: str | None = None # Room sales: the auction the sale makes room for, checked again right before
     config_version: int | None = None # The strategy configuration the round planned with (E02.04)
+    collateral: tuple = () # finance.Collateral: sales that pay this bid back once it is won (E04.04/E04.05)
 
 
 class TraderService:
@@ -684,10 +685,18 @@ class TraderService:
         ### The bench this round keeps (E05.02). The league's strategy counts only with the flag
         ### flexible_bench, and only where nothing it changes reaches Kickbase or the flag is live;
         ### otherwise the full bench of 2.0, and the alternative is only logged (shadow)
-        bench_flag = flags.effective(flags.load(row.trader_flags), "flexible_bench", row.trader_live)
+        stored_flags = flags.load(row.trader_flags)
+
+        def applies(name: str) -> bool:
+            stage_now = flags.effective(stored_flags, name, row.trader_live)
+            return stage_now == flags.LIVE or (stage_now == flags.DRY_RUN and not row.trader_live)
+
+        def watched(name: str) -> bool:
+            return stored_flags[name] != flags.OFF
+
+        bench_flag = flags.effective(stored_flags, "flexible_bench", row.trader_live)
         bench_wanted = t.bench_mode(opts.bench_strategy, stage)
-        bench_applies = bench_flag == flags.LIVE or (bench_flag == flags.DRY_RUN and not row.trader_live)
-        bench = bench_wanted if bench_applies else t.BENCH_FULL
+        bench = bench_wanted if applies("flexible_bench") else t.BENCH_FULL
         team_value = sum(p.market_value or 0 for p in squad.players)
 
         ### Open profit positions: bought by the trader for profit, still owned. Their purchase price is
@@ -713,6 +722,10 @@ class TraderService:
             for pid, p in listed.items() if pid in open_bids
         }
 
+        ### Sales already counted for open trader bids of earlier rounds: never counted twice (E04.06)
+        claimed_before = {
+            c["player_id"] for h in trader_bids.values() for c in (h.details or {}).get("collateral") or [] if c.get("player_id")
+        }
         ### Every planned action passes the risk engine against the confirmed state before it may run
         all_open, own0, bids0, sales0 = dict(open_bids), own, bids_left, sales_left
         loan = 0
@@ -729,6 +742,8 @@ class TraderService:
                 max_squad=max_squad, max_club=max_club, bids_left=bids0, sales_left=sales0, blocked=unsettled | sold_recently,
                 ratio=ratio, min_margin=state.min_margin, min_roi=opts.min_roi / 100, rescue_override=opts.rescue_override,
                 unconfirmed=bool(unsettled), bench=bench,
+                collateral={a.player_id: list(a.collateral) for a in planned_actions if a.kind == "bid" and a.collateral},
+                used_collateral=claimed_before, repay_from=repay_from,
             )
             codes = risk.validate(planned_actions, ctx)
             approved = [replace(a, config_version=config_version) for a, code in zip(planned_actions, codes, strict=True) if code is None]
@@ -836,6 +851,11 @@ class TraderService:
         slots = max_squad - len(own) - len(open_bids)
         ### Credit only as far as selling sellable players (simulated one by one) pays it back
         liquidation = t.liquidation_value(own, ratio, max(sales_left, 0), bench)
+        scenario_liquidation = {
+            name: finance.liquidation(own, ratio, max(sales_left, 0), bench, name, 0, scale) for name in finance.SCENARIOS
+        }
+        if applies("scenario_credit"):
+            liquidation = scenario_liquidation["pessimistic"]
         loan = t.credit(budget, team_value, liquidation)
         ### Profit trades together never tie up more than `profit_share` of team value plus balance
         holdings = sum(c.value for c in own if (h := bought.get(c.player_id)) is not None and h.purpose == "profit")
@@ -854,6 +874,27 @@ class TraderService:
 
         def money_for(c: t.Candidate, cash: int, purpose: str) -> int:
             return cash + risk.credit_for(purpose, c.expires_at, stage, deadline, loan, opts.credit_mode)
+
+        ### Conditional financing (E04.04 profit target, E04.05 the starter pushed out): a sale that only
+        ### becomes possible once the bid is won. Each player backs one bid at most; "final" plans none
+        claimed = set(claimed_before)
+        conditional_log: dict[str, dict] = {}
+
+        def collateral_for(c: t.Candidate, purpose: str, upgrade: t.Upgrade | None) -> finance.Collateral | None:
+            if stage == "final":
+                return None
+            if purpose == "profit" and watched("conditional_repayment"):
+                found, flag = finance.self_collateral(c, ratio, now, repay_from), "conditional_repayment"
+            elif purpose == "lineup" and upgrade is not None and not upgrade.fills and watched("upgrade_financing"):
+                found, flag = finance.replaced_collateral(own, c, upgrade.replaced, ratio, bench, now, repay_from), "upgrade_financing"
+            else:
+                return None
+            if found is None or found.player_id in claimed:
+                return None
+            used = applies(flag)
+            conditional_log[c.player_id] = {"kind": found.kind, "player_id": found.player_id, "value": found.value,
+                                            "sell_until": found.sell_until.isoformat(), "applied": used}
+            return found if used else None
 
         market_candidates: list[t.Candidate] = []
         for pid, p in listed.items():
@@ -980,7 +1021,8 @@ class TraderService:
             keep = max(t.best_of([*planned, c]).empty_slots, 0) * opts.cover_max_price
             if purpose == "profit":
                 keep += len(t.missing_cover(planned, bench)) * opts.cover_max_price
-            money_seen[c.player_id] = money_for(c, free, purpose) - keep
+            backing = collateral_for(c, purpose, upgrade)
+            money_seen[c.player_id] = money_for(c, free, purpose) - keep + (backing.value if backing else 0)
             bid = _price(c, purpose, upgrade, extra, money_seen[c.player_id], opts, state, ratio, profit_room, shares) if slots > 0 else None
             sale = None
             if bid is None:
@@ -1004,7 +1046,8 @@ class TraderService:
                     continue
                 proceeds = int(sale.value * ratio)
                 ### A player is given up for this one: bid high enough to have a good chance
-                bid = _price(c, purpose, upgrade, max(extra, t.ROOM_EXTRA), money_for(c, free + proceeds, purpose) - keep, opts, state, ratio, profit_room, shares, use_ev=False)
+                bid = _price(c, purpose, upgrade, max(extra, t.ROOM_EXTRA), money_for(c, free + proceeds, purpose) - keep + (backing.value if backing else 0),
+                             opts, state, ratio, profit_room, shares, use_ev=False)
                 if bid is None:
                     add(c.player_id, ", auch mit Verkauf nicht", rc.ROOM_SALE_NOT_ENOUGH)
                     continue
@@ -1030,9 +1073,13 @@ class TraderService:
                 reason = f"Ersatz für Position {c.position}"
             else:
                 reason = f"Prognose {c.gain / 1e3:+.0f} Tsd. in {t.PROFIT_HOLD} Tagen"
+            if backing is not None:
+                reason += f", finanziert über den späteren Verkauf von {names.get(backing.player_id, backing.player_id)} (≥ {backing.value / 1e6:.1f} Mio.)"
+                claimed.add(backing.player_id)
             actions.append(
                 Action("bid", purpose, c.player_id, names.get(c.player_id, c.player_id), bid, c.value,
-                       upgrade.gain if upgrade else 0, reason, raw_gain.get(c.player_id, 0))
+                       upgrade.gain if upgrade else 0, reason, raw_gain.get(c.player_id, 0),
+                       collateral=(backing,) if backing is not None else ())
             )
             mark(c.player_id, f"{label}: Gebot {bid:,} € ({reason})", rc.BID_PLANNED)
             bid_on.add(c.player_id)
@@ -1069,6 +1116,10 @@ class TraderService:
             ### The liquidation that limited the credit (sales left today, after this round's exit sale), and
             ### for comparison the one of the whole daily limit before it
             "liquidation": liquidation, "liquidation_full_day": t.liquidation_value(own0, ratio, opts.daily_sales, bench),
+            "finance": {
+                "scenarios": scenario_liquidation, "credit_from": "pessimistic" if applies("scenario_credit") else "current",
+                "conditional": conditional_log, "claimed_before": sorted(claimed_before),
+            },
             "bench": {
                 "strategy": opts.bench_strategy, "flag": bench_flag, "wanted": bench_wanted, "applied": bench,
                 "missing_cover": t.missing_cover(own0, bench),
@@ -1253,7 +1304,7 @@ class TraderService:
                     market_value=action.market_value,
                     points_gain=action.points_gain,
                     details={"reason": action.reason, "name": action.name, "forecast_gain": action.forecast_gain,
-                             "config_version": action.config_version},
+                             "config_version": action.config_version, "collateral": _collateral_log(action)},
                 )
             )
             session.commit()
@@ -1265,7 +1316,8 @@ class TraderService:
                 user_id=user_id, league_id=league.id, player_id=action.player_id, kind=action.kind, purpose=action.purpose,
                 status="pending", price=action.price, market_value=action.market_value, points_gain=action.points_gain,
                 details={"reason": action.reason, "name": action.name, "forecast_gain": action.forecast_gain,
-                         "cost": action.cost, "for_player": action.for_player, "config_version": action.config_version},
+                         "cost": action.cost, "for_player": action.for_player, "config_version": action.config_version,
+                         "collateral": _collateral_log(action)},
             )
             session.add(entry)
             session.commit()
@@ -1781,6 +1833,11 @@ def _price(
     if upgrade is not None and not t.worth_it(upgrade, bid, opts, ratio):
         return None
     return bid
+
+
+def _collateral_log(action: Action) -> list[dict]:
+    """The sales a bid counts on, for the trade log: later rounds read them so none is counted twice."""
+    return [{"player_id": c.player_id, "kind": c.kind, "value": c.value, "sell_until": c.sell_until.isoformat()} for c in action.collateral]
 
 
 def _local_day(at: datetime) -> int:

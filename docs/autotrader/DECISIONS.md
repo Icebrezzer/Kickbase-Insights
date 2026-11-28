@@ -71,3 +71,9 @@ Format: Kontext · Entscheidung · Folgen. Neue Einträge unten anhängen, alte 
 5. Lernparameter ändern sich erst nach mindestens 14 Tagen Daten.
 
 **Folgen:** Der kritische Pfad zur Kreditnutzung verlängert sich um E10.00 und E05.02. Dafür rechnet die Finanzierung mit gemessenen statt geschätzten Risiken. E04.02 bleibt geplant, falls spätere Exporte bindende Verkaufslimits zeigen.
+
+## ADR-013 – Regeln der Finanzierung (28.11.2026, angenommen)
+1. **Wann ein Flag wirkt:** Eine Funktion ändert die Planung, wenn ihr Flag `live` ist oder wenn es `dry_run` ist und die Liga ohnehin im Probelauf handelt. Dann erreicht nichts davon Kickbase. Bei `shadow` (und bei `dry_run` in einer Live-Liga) wird nur protokolliert. Das gilt für `flexible_bench`, `scenario_credit`, `conditional_repayment` und `upgrade_financing`.
+2. **Stresswerte** (2 % bzw. 4 % je Update, ein Update Puffer, 6 h Sicherheitsabstand vor der Tilgungsphase) sind feste Konstanten in `core/finance.py`. Sie werden mit E10.00 kalibriert und erst danach konfigurierbar (E02.10).
+3. **Bedingte Sicherheiten** (E04.04/E04.05) zählen unabhängig vom `credit_mode`. Der Kreditmodus regelt nur den Grundkredit aus vorhandenen Bankspielern; die bedingte Sicherheit ist ein eigener, ausdrücklich per Flag freigegebener Plan. In der Phase `final` gibt es keine.
+4. **Kein eigener Abhängigkeitszustand für E04.05:** Bis zum Zuschlag schützt die Startelf-Regel den Verdrängten, danach verkaufen ihn die bestehenden Regeln (Liquidation, Rettung). Ein gespeicherter Plan „Verkauf X nach Zuschlag Y“ würde einen zweiten Weg zum Verkauf schaffen; das wird bewusst vermieden.

@@ -48,11 +48,11 @@ Stand nach der Auswertung der realen Exporte (§9, ADR-011, ADR-012). ✅ = erle
 | ✅ | E02.03 / E02.04 Speicherung, Übernahme ohne Neustart | 4 | 2–3 | 2 | 4 | W3 | – |
 | ✅ | E03.01 / E03.02 Snapshots, alle Ablehnungen | 5 | 2 | 2 | 6 | W3 | – |
 | ✅ | **E05.02 Konfigurierbare Ersatzbank** | 5 | 3 | 2 | 5 | **W4 (vorgezogen)** | Ersatzschutz bindet in Liga A ≈ 20 von 34,5 Mio. Bankwert |
-| 11 | E04.01 Finanzmodul (identisch) | 3 | 2 | 1 | 3 | W4 | – |
-| 12 | E04.03 Szenarien | 5 | 2 | 2 | 6 | W4 | Stressparameter aus E10.00 statt geschätzt |
-| 13 | E04.05 Upgrade-Finanzierung (verdrängter Starter) | 5 | 4 | 2 | 4 | W4 | Hebel bei kleiner Bank |
-| 14 | E04.04 Gewinnspieler als bedingte Tilgung | 5 | 4 | 2 | 4 | W4 | einziger Kredithebel in Liga B |
-| 15 | E04.06 + E04.10 Gemeinsame Finanzierung, Risk Engine | 5 | 3 | 2 | 5 | W4 | – |
+| ✅ | E04.01 Finanzmodul (identisch) | 3 | 2 | 1 | 3 | W4 | – |
+| ✅ | E04.03 Szenarien | 5 | 2 | 2 | 6 | W4 | Stressparameter aus E10.00 statt geschätzt |
+| ✅ | E04.05 Upgrade-Finanzierung (verdrängter Starter) | 5 | 4 | 2 | 4 | W4 | Hebel bei kleiner Bank |
+| ✅ | E04.04 Gewinnspieler als bedingte Tilgung | 5 | 4 | 2 | 4 | W4 | einziger Kredithebel in Liga B |
+| ✅ | E04.06 + E04.10 Gemeinsame Finanzierung, Risk Engine | 5 | 3 | 2 | 5 | W4 | – |
 | 16 | E04.02 Mehrtägige Liquidation | **3** | 3 | 2 | **1** | **W5 (zurückgestuft)** | bringt in beiden Ligen 0 €: Kaderschutz bindet, nicht die Verkaufslimits |
 | 17 | E01.06 Was-wäre-wenn | 4 | 1 | 2 | 5 | W5 | – |
 | – | E06.04 Verkaufsquoten auswerten | 2 | 1 | 1 | 2 | W6 | nur noch Kontrolle, Quote ist bekannt (100 %) |

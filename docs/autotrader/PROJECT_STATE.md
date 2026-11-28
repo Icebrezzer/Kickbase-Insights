@@ -15,7 +15,11 @@
   - **E10.00** (Prognosegüte auf allen beobachteten Spielern)
 - Ohne geänderte Einstellungen handelt der Trader **wie bisher**. Die neuen Optionen `sell_ratio` (Standard 90) und `upgrade_cross_position` (Standard aus) wirken erst nach dem Einschalten je Liga.
 - **Welle 2 abgeschlossen:** E01.03 ✅, E02.01 ✅, E02.02 ✅, E02.08 ✅, E01.05 ✅.
-- **Welle 3 abgeschlossen:** E02.03 ✅, E02.04 ✅, E02.05 ✅, E03.01 ✅, E03.02 ✅. Nächste Welle 4: E05.02 (Ersatzbank) → E04.01 → E04.03 → E04.05/E04.04 → E04.06/E04.10.
+- **Welle 3 abgeschlossen:** E02.03 ✅, E02.04 ✅, E02.05 ✅, E03.01 ✅, E03.02 ✅.
+- **Welle 4 umgesetzt:** E05.02 ✅, E04.01 ✅, E04.03 ✅, E04.04 ✅, E04.05 ✅, E04.06 ✅, E04.10 ✅. Alles steht hinter den Flags `flexible_bench`, `scenario_credit`, `conditional_repayment` und `upgrade_financing`, Standard aus.
+  - Empfohlene Freigabe: erst `shadow` (≥ 2 Spieltage beobachten), dann `dry_run` in einer Probelauf-Liga, dann `live` in einer Liga.
+  - Upgrade-Finanzierung braucht die automatische Aufstellung.
+  - Offen in E04: E04.02 (P2), E04.07–E04.09, E04.11 (UI).
 - **Tipp:** Flag `decision_snapshots` je Liga auf `shadow` stellen, dann sammelt der Trader ab sofort Daten für E03.04–E03.06 (verpasste Chancen). Danach Welle 3: E02.03/E02.04 (Konfiguration speichern, Übernahme ohne Neustart), E03.01/E03.02 (Entscheidungs-Snapshots).
 - **CI:** `6250f20` (Welle 1), `d4066f0` (Welle 2), `cedcdab` (ui-audit mit Trader-Runde) und `4709dae` (Welle 3, Lauf 46078231360) vollständig grün: Backend, Frontend, ui-audit, Image. Vorschau-Image `ghcr.io/icebrezzer/kickbase-insights:codex-autotrader-3`. Danach E02.01 → E02.02 → E02.08 → E05.02 → E04 (MASTERPLAN §3 und §9, ADR-012).
 - **Geklärt (27.11.2026):** Kickbase zahlt beim Sofortverkauf 100 % des Marktwerts. Formationswechsel mit mehr Punkten sind erwünscht.
