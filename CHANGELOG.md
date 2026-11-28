@@ -5,6 +5,7 @@ Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Au
 ## [Unveröffentlicht] – Auto-Trader 3.0
 
 ### Hinzugefügt
+- E05.02: Konfigurierbare Ersatzbank (Option „Ersatzbank“: volle Absicherung, minimal oder keine Bank zwischen den Spieltagen) hinter dem Flag `flexible_bench`. Mit „keine Bank“ steigt der Kredit in den beiden ausgewerteten Ligen von 14,4 auf 34,5 Mio. bzw. von 0 auf 20,7 Mio. Ab 24 Std. vor dem Spieltag gilt wieder volle Absicherung.
 - E03.01/E03.02: Entscheidungs-Snapshots hinter dem Flag `decision_snapshots` (Standard aus). Bei eingeschaltetem Flag hält jede Runde für jede Auktion fest, was der Trader wusste und warum er (nicht) geboten hat, einmal je Auktion und ohne Kickbase-Aufruf. Grundlage für das Lernen aus verpassten Chancen.
 - E02.05: Strategie-Konfiguration per API mit Vorschau importieren: `GET /api/automation/trader/config`, `POST …/config/preview` (strenge Prüfung und alle Änderungen, schreibt nichts) und `POST …/config/activate` (nur gültig und nur auf der geprüften Version, protokolliert).
 - E02.03/E02.04: Die Trader-Einstellungen jeder Liga werden versioniert gespeichert (Tabelle `strategyconfig`, Version 1 aus den bisherigen Einstellungen). Jede Änderung über die Seite oder den Import ist eine neue Version. Eine Runde plant mit genau einer Version, die in Debug-Protokoll, Aktionen, Handelsprotokoll und Export steht.

@@ -523,6 +523,7 @@ export type TraderOptions = {
   rescueOverride: boolean
   sellRatio: number
   upgradeCrossPosition: boolean
+  benchStrategy: number
 }
 
 export type Shadow = {

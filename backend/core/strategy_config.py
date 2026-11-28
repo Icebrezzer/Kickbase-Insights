@@ -75,6 +75,7 @@ SETTINGS: tuple[Setting, ...] = (
     _o("sport.upgrade_cross_position", "upgrade_cross_position", "bool", "", "Formationswechsel nach Punkten statt nach dem Schnitt des Verdrängten bewerten"),
     ### Bench
     _o("bench.max_price", "cover_max_price", "int", "€", "Höchstpreis für einen Ersatzspieler, Rücklage je Lücke"),
+    _o("bench.strategy", "bench_strategy", "choice", "", "Ersatzbank: 0 volle Absicherung, 1 minimal (Ersatztorwart + ein Feldspieler), 2 keine außerhalb der Spieltagsnähe; wirkt nur mit dem Flag flexible_bench", (0, 1, 2)),
     ### Auctions
     _o("auction.room_sale_window_min", "sell_window", "int", "Min.", "Verkauf für einen Kaderplatz erst so kurz vor Auktionsende"),
     _fixed("auction.room_bid_extra", t.ROOM_EXTRA, "float", "", "Gebotshöhe nach einem Verkauf für einen Platz (0–1 zwischen Mindest- und Höchstgebot)"),

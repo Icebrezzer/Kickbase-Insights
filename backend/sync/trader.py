@@ -681,6 +681,13 @@ class TraderService:
         deadline = upcoming.deadline if upcoming is not None else None
         repay_from = t.repay_from(deadline) if deadline is not None else None
         stage = t.phase(now, deadline)
+        ### The bench this round keeps (E05.02). The league's strategy counts only with the flag
+        ### flexible_bench, and only where nothing it changes reaches Kickbase or the flag is live;
+        ### otherwise the full bench of 2.0, and the alternative is only logged (shadow)
+        bench_flag = flags.effective(flags.load(row.trader_flags), "flexible_bench", row.trader_live)
+        bench_wanted = t.bench_mode(opts.bench_strategy, stage)
+        bench_applies = bench_flag == flags.LIVE or (bench_flag == flags.DRY_RUN and not row.trader_live)
+        bench = bench_wanted if bench_applies else t.BENCH_FULL
         team_value = sum(p.market_value or 0 for p in squad.players)
 
         ### Open profit positions: bought by the trader for profit, still owned. Their purchase price is
@@ -721,7 +728,7 @@ class TraderService:
                          **{pid: c.team_id for pid, c in listings.items()}},
                 max_squad=max_squad, max_club=max_club, bids_left=bids0, sales_left=sales0, blocked=unsettled | sold_recently,
                 ratio=ratio, min_margin=state.min_margin, min_roi=opts.min_roi / 100, rescue_override=opts.rescue_override,
-                unconfirmed=bool(unsettled),
+                unconfirmed=bool(unsettled), bench=bench,
             )
             codes = risk.validate(planned_actions, ctx)
             approved = [replace(a, config_version=config_version) for a, code in zip(planned_actions, codes, strict=True) if code is None]
@@ -793,7 +800,7 @@ class TraderService:
             verdict = t.exit_reason(c, cost, peak, (now - (held.resolved_at or held.at)).days, ratio, state.min_margin, opts)
             if verdict is None:
                 exits[pid] = "halten"
-            elif c.locked or c.in_best or not t.keeps_cover(own, c):
+            elif c.locked or c.in_best or not t.keeps_cover(own, c, bench):
                 exits[pid] = f"{verdict[0]}, aber geschützt (gesperrt, Startelf oder letzter Ersatz)"
             else:
                 exits[pid] = verdict[0]
@@ -814,7 +821,7 @@ class TraderService:
             purpose = trader_bids[c.player_id].purpose
             needed = (
                 t.lineup_upgrade(planned, c, opts) is not None if purpose == "lineup"
-                else c.position in t.missing_cover(planned) if purpose == "cover"
+                else c.position in t.missing_cover(planned, bench) if purpose == "cover"
                 else True
             )
             if needed:
@@ -828,7 +835,7 @@ class TraderService:
         free = budget - opts.reserve - sum(open_bids.values())
         slots = max_squad - len(own) - len(open_bids)
         ### Credit only as far as selling sellable players (simulated one by one) pays it back
-        liquidation = t.liquidation_value(own, ratio, max(sales_left, 0))
+        liquidation = t.liquidation_value(own, ratio, max(sales_left, 0), bench)
         loan = t.credit(budget, team_value, liquidation)
         ### Profit trades together never tie up more than `profit_share` of team value plus balance
         holdings = sum(c.value for c in own if (h := bought.get(c.player_id)) is not None and h.purpose == "profit")
@@ -919,7 +926,7 @@ class TraderService:
                      code, upgrade_codes.get(c.player_id) if code != rc.NOT_FIT else None)
         cover_pool = [c for c in market_candidates if not any(o[2] is c for o in options if o[1] == "lineup")]
         for c in cover_pool:
-            if c is t.cover_target(planned, [c], opts):
+            if c is t.cover_target(planned, [c], opts, bench):
                 options.append((t.priority("cover", False, stage, -max(c.bid_low, c.price, c.value)), "cover", c, None))
         options.sort(key=lambda o: o[0], reverse=True)
         ### Paper trades: the best profit candidate of each price class first, then the next best, so
@@ -962,7 +969,7 @@ class TraderService:
                 if upgrade is None:
                     mark(c.player_id, "Startelf: Platz schon durch ein Gebot dieser Runde besetzt", rc.SLOT_TAKEN, upgrade_code)
                     continue
-            elif gaps > 0 or (purpose == "cover" and c.position not in t.missing_cover(planned)):
+            elif gaps > 0 or (purpose == "cover" and c.position not in t.missing_cover(planned, bench)):
                 if gaps > 0:
                     mark(c.player_id, f"{label}: erst die Startelf füllen", rc.ELEVEN_GAPS_FIRST)
                 else:
@@ -972,7 +979,7 @@ class TraderService:
             ### every missing substitute, so profit never crowds out the bench for good
             keep = max(t.best_of([*planned, c]).empty_slots, 0) * opts.cover_max_price
             if purpose == "profit":
-                keep += len(t.missing_cover(planned)) * opts.cover_max_price
+                keep += len(t.missing_cover(planned, bench)) * opts.cover_max_price
             money_seen[c.player_id] = money_for(c, free, purpose) - keep
             bid = _price(c, purpose, upgrade, extra, money_seen[c.player_id], opts, state, ratio, profit_room, shares) if slots > 0 else None
             sale = None
@@ -991,7 +998,7 @@ class TraderService:
                     add(c.player_id, ", Verkauf erst im Verkaufsfenster", rc.ROOM_SALE_WINDOW)
                     continue
                 ### Only the confirmed squad: the target may still be lost, the team has to be fine without him
-                sale = t.pick_sale(own, c, min_play, state.swap_edge)
+                sale = t.pick_sale(own, c, min_play, state.swap_edge, bench)
                 if sale is None:
                     add(c.player_id, ", kein Spieler, der auch ohne den Neuzugang verzichtbar ist", rc.ROOM_SALE_NONE)
                     continue
@@ -1061,7 +1068,14 @@ class TraderService:
             "worst_case": budget - sum(all_open.values()), "cash_free": free, "credit": loan, "credit_mode": opts.credit_mode,
             ### The liquidation that limited the credit (sales left today, after this round's exit sale), and
             ### for comparison the one of the whole daily limit before it
-            "liquidation": liquidation, "liquidation_full_day": t.liquidation_value(own0, ratio, opts.daily_sales),
+            "liquidation": liquidation, "liquidation_full_day": t.liquidation_value(own0, ratio, opts.daily_sales, bench),
+            "bench": {
+                "strategy": opts.bench_strategy, "flag": bench_flag, "wanted": bench_wanted, "applied": bench,
+                "missing_cover": t.missing_cover(own0, bench),
+                ### What the league's strategy would free, also while only the full bench applies
+                "liquidation_wanted": t.liquidation_value(own0, ratio, max(sales0, 0), bench_wanted),
+                "missing_cover_wanted": t.missing_cover(own0, bench_wanted),
+            },
             "profit_room": profit_room, "money_check": money_check,
             "reserve": opts.reserve, "open_bids": all_open, "slots": slots, "bids_left": bids_left, "sales_left": sales_left,
             "paused": paused, "week_profit": week_profit, "unrealized": unrealized,

@@ -747,6 +747,34 @@ def main() -> None:
         check(all(r.first_seen < r.last_changed for r in changed_reason), f"a changed reason is noted, the first one kept ({len(changed_reason)})")
         client.put("/api/automation/trader/flags", json={"flags": {"decision_snapshots": "off"}})
 
+        ### E05.02: the bench strategy counts only with the flag; shadow logs it, the decisions stay
+        base_version = configs.active("1001", "4242").version
+        client.post("/api/automation/trader/config/activate",
+                    json={"config": {"schema_version": 1, "bench": {"strategy": 2}}, "expected_version": base_version})
+        far = utcnow() # Between matchdays in the demo: strategy 2 wants no bench
+
+        def bench_round() -> tuple[list, dict]:
+            state.automation.trader._last_debug.clear()
+            planned_now, _ = state.automation.trader._plan(league, state.automation.get_settings("1001", "4242"), squad_l, 200_000_000, market_l, far)
+            with Session(state.engine) as s:
+                return planned_now, s.exec(select(TraderDebug).order_by(TraderDebug.id.desc())).first().data
+
+        plan_flag_off, debug_off = bench_round()
+        check(debug_off["bench"]["applied"] == 0 and debug_off["bench"]["strategy"] == 2, "flag off: the full bench, whatever the strategy")
+        client.put("/api/automation/trader/flags", json={"flags": {"flexible_bench": "shadow"}})
+        plan_shadow, debug_shadow = bench_round()
+        check(debug_shadow["bench"]["applied"] == 0 and debug_shadow["bench"]["flag"] == "shadow", "shadow: still the full bench")
+        check(debug_shadow["bench"]["liquidation_wanted"] >= debug_shadow["liquidation"], "shadow: what the strategy would free is logged")
+        check([(a.kind, a.player_id, a.price) for a in plan_shadow] == [(a.kind, a.player_id, a.price) for a in plan_flag_off], "shadow changes no decision")
+        live_now = state.automation.get_settings("1001", "4242").trader_live
+        client.put("/api/automation/trader/flags", json={"flags": {"flexible_bench": "live"}, "confirm_live": True})
+        _, debug_live = bench_round()
+        check(debug_live["bench"]["applied"] == debug_live["bench"]["wanted"] and debug_live["bench"]["missing_cover"] == debug_live["bench"]["missing_cover_wanted"],
+              f"live flag: the strategy applies ({debug_live['bench']}, live trading {live_now})")
+        client.put("/api/automation/trader/flags", json={"flags": {"flexible_bench": "off"}})
+        client.post("/api/automation/trader/config/activate",
+                    json={"config": {"schema_version": 1, "bench": {"strategy": 0}}, "expected_version": configs.active("1001", "4242").version})
+
     print("\nAll manager tool checks passed.")
 
 

@@ -279,6 +279,49 @@ def main() -> None:
     ok(t.lineup_upgrade(strong_front, replace(weak_back, average=58, form=58), on) is not None, "same position: a better one is an upgrade")
     ok(t.Options.load({"upgrade_cross_position": "true"}).upgrade_cross_position is True, "the flag loads from JSON")
 
+    ### E05.02: bench modes. FULL is exactly the rule of 2.0 (checked against a copy of it)
+    from core import coach
+
+    def old_keeps_cover(squad_, sold):
+        if not sold.fit:
+            return True
+        rest = [x for x in squad_ if x.player_id != sold.player_id]
+        rows = coach.row_sizes(t.best_of(rest).formation)
+        return sum(1 for x in rest if x.fit and x.position == sold.position) >= rows[sold.position] + 1
+
+    def old_missing_cover(squad_):
+        rows = coach.row_sizes(t.best_of(squad_).formation)
+        return [pos for pos in (1, 2, 3, 4) if sum(1 for x in squad_ if x.fit and x.position == pos) < rows[pos] + 1]
+
+    rng = random.Random(23)
+    for _ in range(300):
+        team = [p(f"r{i}", rng.choice((1, 2, 2, 3, 3, 3, 4, 4)), rng.randrange(0, 120), fit=rng.random() > 0.15) for i in range(rng.randrange(8, 18))]
+        ok(t.missing_cover(team) == old_missing_cover(team), "full bench: missing cover as in 2.0")
+        ok(all(t.keeps_cover(team, x) == old_keeps_cover(team, x) for x in team), "full bench: keeps cover as in 2.0")
+    ok(t.bench_mode(0, "normal") == t.BENCH_FULL and t.bench_mode(1, "final") == t.BENCH_MINIMAL, "strategy 0 full, 1 minimal")
+    ok(t.bench_mode(2, "normal") == t.BENCH_NONE and all(t.bench_mode(2, stage) == t.BENCH_FULL for stage in ("prepare", "repay", "final")),
+       "strategy 2: no bench between matchdays, the full one close to it")
+    ### A squad with one spare goalkeeper and one spare midfielder beyond a 4-4-2
+    bench_team = [p("g1", 1, 50), p("g2", 1, 10), *(p(f"d{i}", 2, 60) for i in range(4)), *(p(f"m{i}", 3, 60 if i < 4 else 20) for i in range(5)),
+                  p("f1", 4, 70), p("f2", 4, 70)]
+    bench_team = [replace(x, in_best=x.player_id in set(t.best_of(bench_team).player_ids)) for x in bench_team]
+    spare_mid = next(x for x in bench_team if x.position == 3 and not x.in_best)
+    ok(t.missing_cover(bench_team) == [2, 4] and t.missing_cover(bench_team, t.BENCH_MINIMAL) == [], "minimal: goalkeeper and one field player are enough")
+    ok(t.missing_cover(bench_team, t.BENCH_NONE) == [], "none: nothing missing")
+    ok(not t.keeps_cover(bench_team, spare_mid, t.BENCH_MINIMAL) and t.keeps_cover(bench_team, spare_mid, t.BENCH_NONE), "the last field spare is kept only by minimal")
+    ok(not t.keeps_cover(bench_team, next(x for x in bench_team if x.player_id == "g2"), t.BENCH_MINIMAL), "minimal keeps the second goalkeeper")
+    full_liq = t.liquidation_value(bench_team, 1.0, 5)
+    min_liq = t.liquidation_value(bench_team, 1.0, 5, t.BENCH_MINIMAL)
+    none_liq = t.liquidation_value(bench_team, 1.0, 5, t.BENCH_NONE)
+    ok(full_liq <= min_liq <= none_liq and none_liq == 2 * 5_000_000, f"less bench, more liquidation ({full_liq}, {min_liq}, {none_liq})")
+    ok(t.liquidation_value([replace(x, locked=True) for x in bench_team], 1.0, 5, t.BENCH_NONE) == 0, "locked players stay out in every mode")
+    ### The risk engine follows the bench of the round: full blocks the last spare, none lets it go
+    sale = A("sell", "room", spare_mid.player_id, 0)
+    ok(risk.validate([sale], ctx(squad=bench_team, listings={}, club_of={}))[0] == risk.BREAKS_COVER, "full bench: last spare blocked")
+    ok(risk.validate([sale], ctx(squad=bench_team, listings={}, club_of={}, bench=t.BENCH_NONE))[0] is None, "no bench: the spare may go")
+    ok(risk.validate([A("sell", "room", "m0", 0)], ctx(squad=bench_team, listings={}, club_of={}, bench=t.BENCH_NONE))[0] == risk.STARTER,
+       "no bench: starters stay protected")
+
     print(f"All {passed} trader safety checks passed.")
 
 

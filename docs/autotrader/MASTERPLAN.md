@@ -47,7 +47,7 @@ Stand nach der Auswertung der realen Exporte (§9, ADR-011, ADR-012). ✅ = erle
 | ✅ | E01.05 Diagnoseansicht UI | 4 | 1 | 2 | 5 | W2 | – |
 | ✅ | E02.03 / E02.04 Speicherung, Übernahme ohne Neustart | 4 | 2–3 | 2 | 4 | W3 | – |
 | ✅ | E03.01 / E03.02 Snapshots, alle Ablehnungen | 5 | 2 | 2 | 6 | W3 | – |
-| 10 | **E05.02 Konfigurierbare Ersatzbank** | 5 | 3 | 2 | 5 | **W4 (vorgezogen)** | Ersatzschutz bindet in Liga A ≈ 20 von 34,5 Mio. Bankwert |
+| ✅ | **E05.02 Konfigurierbare Ersatzbank** | 5 | 3 | 2 | 5 | **W4 (vorgezogen)** | Ersatzschutz bindet in Liga A ≈ 20 von 34,5 Mio. Bankwert |
 | 11 | E04.01 Finanzmodul (identisch) | 3 | 2 | 1 | 3 | W4 | – |
 | 12 | E04.03 Szenarien | 5 | 2 | 2 | 6 | W4 | Stressparameter aus E10.00 statt geschätzt |
 | 13 | E04.05 Upgrade-Finanzierung (verdrängter Starter) | 5 | 4 | 2 | 4 | W4 | Hebel bei kleiner Bank |

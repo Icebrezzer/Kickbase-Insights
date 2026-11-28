@@ -73,6 +73,7 @@ class Context:
     min_roi: float = 0.0
     rescue_override: bool = False
     unconfirmed: bool = False
+    bench: int = t.BENCH_FULL # The bench the planning keeps (E05.02), full unless the flag allows less
 
 
 def credit_for(purpose: str, expires_at: datetime | None, ctx_phase: str, deadline: datetime | None, credit: int, mode: int) -> int:
@@ -175,7 +176,7 @@ def _sell(action: Planned, ctx: Context, squad: list[t.Candidate], sales_left: i
         return DAILY_SALES
     if player.fit and player.in_best:
         return STARTER
-    if not t.keeps_cover(squad, player):
+    if not t.keeps_cover(squad, player, ctx.bench):
         return BREAKS_COVER
     rest = [p for p in squad if p is not player]
     if t.best_of(rest).empty_slots > t.best_of(squad).empty_slots:

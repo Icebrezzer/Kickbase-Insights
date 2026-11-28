@@ -8,10 +8,30 @@ Flag: `flexible_bench` (E05.02/E05.06), `player_roles` (E05.01/E05.05). Bei `off
 - **Abnahmekriterien:** Jeder Kaderspieler hat ≥ 1 Rolle; ein Gewinnspieler, der in der besten Elf steht, ist `flip` + `starter`; Rollen in Debug und Export.
 
 ### E05.02 – Konfigurierbare Ersatzbank
-- **Priorität:** P1, **vorgezogen vor E04** (MASTERPLAN §9.2: der Ersatzschutz sperrt in Liga A ≈ 20 von 34,5 Mio. Bankwert für den Kredit) · **Abhängig von:** E02.04 · **Aufwand:** M
-- **Zusätzliches Abnahmekriterium:** In Liga A steigt die Liquidation mit `none_outside_critical` außerhalb von `prepare`/`repay`/`final` von 14,4 Mio. auf den Bankwert abzüglich der Schutzregel S10. Innerhalb dieser Phasen bleibt sie unverändert.
-- **Ziel:** `bench.strategy` ∈ `full_cover` (2.0), `minimal` (nur TW + je eine Feldposition), `none_outside_critical` (Ersatz nur in `prepare/repay/final`), `adaptive` (E05.06); `bench.max_total_budget`.
-- **Abnahmekriterien:** 1. `full_cover` = 2.0 bit-identisch. 2. Mit `minimal` geben Liquidation und Gewinn-Budget den nicht benötigten Ersatzschutz frei (Test mit Zahlen). 3. In `prepare` gilt immer mindestens die Absicherung der Positionen der besten Elf mit Verletzungsrisiko (S10).
+- **Priorität:** P1, vorgezogen vor E04 (MASTERPLAN §9.2) · **Status:** done · **Abhängig von:** E02.04, E02.08 · **Aufwand:** M · **Flag:** `flexible_bench`
+- **Ergebnis:**
+  - Neue Liga-Option `bench_strategy`:
+    - 0 = volle Absicherung jeder Position (2.0, Standard);
+    - 1 = minimal: zweiter fitter Torwart und ein fitter Feldspieler über die Elf hinaus, Position egal;
+    - 2 = keine Bank außerhalb der Spieltagsnähe; in `prepare`/`repay`/`final` gilt wieder volle Absicherung (S10).
+  - Die Option wirkt nur mit dem Flag `flexible_bench`: bei `live`, oder bei `dry_run`, solange die Liga ohnehin im Probelauf handelt. Bei `shadow` gilt die volle Bank, und das Debug-Feld `bench` zeigt, was die Strategie freigeben würde (`liquidation_wanted`, `missing_cover_wanted`).
+  - `missing_cover`/`keeps_cover` haben einen Modus-Parameter mit Standard „voll“. Derselbe Modus gilt für Liquidation/Kredit, Platz-Verkauf, Ersatzkäufe, Rücklage je fehlendem Ersatz, Ausstiegsschutz und die Risk Engine (`Context.bench`, Code `BREAKS_COVER`).
+  - Starter, gesperrte Spieler und neue Lücken bleiben in jedem Modus geschützt.
+  - Schema (`bench.strategy`), API-Schema und Automatik-Seite (Auswahl „Ersatzbank“) sind ergänzt; Profile ändern die Wahl nicht.
+- **Abnahme:**
+  - Modus „voll“ ist identisch zu 2.0: 300 Zufallskader gegen eine Kopie der alten Funktionen. Smoke-Pläne zum selben Zeitpunkt sind vor und nach der Änderung identisch.
+  - Liquidation/Kredit in der letzten Runde der Exporte (Quote 100 %, 5 Verkäufe):
+
+    | Ersatzbank | Liga A | Liga B |
+    |---|---|---|
+    | voll | 14,4 Mio. | 0 |
+    | minimal | 17,2 Mio. | 0 |
+    | keine | 34,5 Mio. | 20,7 Mio. |
+
+    „Minimal“ bringt wenig, weil der zweite Torwart (11,5 Mio.) geschützt bleibt. Erst Strategie 2 gibt die Bank frei, und zwar nur außerhalb der Spieltagsnähe; das erfüllt das Abnahmekriterium.
+  - Tests: 610 neue Checks in `check_trader_safety.py` (Gleichheit mit 2.0, Modi, Liquidation, Risk Engine) und Smoke (Flag aus, `shadow` ohne Entscheidungsänderung, `live`/Probelauf wirkt).
+  - Frontend nur über die CI geprüft (lokal kein Node).
+- **Rollback:** Flag `flexible_bench` auf `off`.
 
 ### E05.03 – Spielerbezogene Schutzregeln
 - **Priorität:** P2 · **Abhängig von:** E05.01 · **Aufwand:** S

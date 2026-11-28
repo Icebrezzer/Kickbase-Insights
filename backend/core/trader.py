@@ -75,6 +75,8 @@ class Options:
     ### A target that changes the formation and pushes a player of another position out is judged by the
     ### points (next matchday, next three matches), not by that other player's season quality (E05.08)
     upgrade_cross_position: bool = False
+    ### Bench strategy (E05.02), only with the flag flexible_bench: 0 full, 1 minimal, 2 none between matchdays
+    bench_strategy: int = 0
 
     @classmethod
     def load(cls, data: dict | None) -> Options:
@@ -165,6 +167,7 @@ OPTION_LIMITS: dict[str, tuple[float, float]] = {
     "position_stop": (0, 100),
     "max_hold_days": (0, 60),
     "sell_ratio": (50, 100),
+    "bench_strategy": (0, 2),
 }
 
 
@@ -214,22 +217,45 @@ def best_of(squad: Sequence[Candidate]) -> coach.Eleven:
     return coach.best_eleven([coach.LineupCandidate(p.player_id, p.position, p.expected, p.value) for p in squad])
 
 
-def keeps_cover(squad: Sequence[Candidate], sold: Candidate) -> bool:
-    """After the sale every position still has a fit player beyond the ones the best eleven fields.
+### How much bench the squad keeps (E05.02). FULL is the rule of 2.0 and the default everywhere:
+### every position has a fit player beyond the best eleven. MINIMAL: a second fit goalkeeper and one fit
+### field player beyond the eleven, of any position (a formation change covers the others). NONE: no bench
+BENCH_FULL, BENCH_MINIMAL, BENCH_NONE = 0, 1, 2
+### The league option `bench_strategy`: 0 full, 1 minimal, 2 none between matchdays (full from 24 hours before)
+BENCH_STRATEGIES = {0: "volle Absicherung", 1: "minimal", 2: "keine außerhalb der Spieltagsnähe"}
 
-    An unfit player covers nothing, so selling one never breaks the cover."""
+
+def bench_mode(strategy: int, stage: str) -> int:
+    """The bench mode of a league's strategy in a deadline phase: close to the matchday the eleven has to
+    be safe, so strategy 2 keeps the full bench in prepare, repay and final."""
+    if strategy == 1:
+        return BENCH_MINIMAL
+    if strategy == 2:
+        return BENCH_FULL if stage in ("prepare", "repay", "final") else BENCH_NONE
+    return BENCH_FULL
+
+
+def keeps_cover(squad: Sequence[Candidate], sold: Candidate, bench: int = BENCH_FULL) -> bool:
+    """After the sale the bench is still as the mode wants it (full: every position has a fit player
+    beyond the ones the best eleven fields). An unfit player covers nothing, so selling one never breaks
+    the cover."""
     if not sold.fit:
         return True
     rest = [p for p in squad if p.player_id != sold.player_id]
-    rows = coach.row_sizes(best_of(rest).formation)
-    fit_here = sum(1 for p in rest if p.fit and p.position == sold.position)
-    return fit_here >= rows[sold.position] + 1
+    return sold.position not in missing_cover(rest, bench)
 
 
-def missing_cover(squad: Sequence[Candidate]) -> list[int]:
-    """Positions without a fit substitute beyond the best eleven."""
+def missing_cover(squad: Sequence[Candidate], bench: int = BENCH_FULL) -> list[int]:
+    """Positions without the fit substitute the bench mode wants. MINIMAL names all field positions when
+    no fit field player is left beyond the eleven: any of them covers."""
+    if bench == BENCH_NONE:
+        return []
     rows = coach.row_sizes(best_of(squad).formation)
-    return [pos for pos in (1, 2, 3, 4) if sum(1 for p in squad if p.fit and p.position == pos) < rows[pos] + 1]
+    fit = {pos: sum(1 for p in squad if p.fit and p.position == pos) for pos in (1, 2, 3, 4)}
+    if bench == BENCH_MINIMAL:
+        field_spare = sum(fit[pos] - rows[pos] for pos in (2, 3, 4))
+        return ([1] if fit[1] < rows[1] + 1 else []) + ([2, 3, 4] if field_spare < 1 else [])
+    return [pos for pos in (1, 2, 3, 4) if fit[pos] < rows[pos] + 1]
 
 
 def sell_order(squad: Iterable[Candidate], min_play: float) -> list[Candidate]:
@@ -237,7 +263,8 @@ def sell_order(squad: Iterable[Candidate], min_play: float) -> list[Candidate]:
     return sorted(squad, key=lambda p: (p.fit, p.regular(min_play), p.in_best, p.today + p.forecast, p.expected))
 
 
-def pick_sale(squad: Sequence[Candidate], target: Candidate, min_play: float, swap_edge: int) -> Candidate | None:
+def pick_sale(squad: Sequence[Candidate], target: Candidate, min_play: float, swap_edge: int,
+              bench: int = BENCH_FULL) -> Candidate | None:
     """The one player to sell for `target`, an auction that may still be lost.
 
     `squad` is the confirmed squad only: the target is no cover and no starter yet. So the sale must
@@ -249,7 +276,7 @@ def pick_sale(squad: Sequence[Candidate], target: Candidate, min_play: float, sw
     gaps = best_of(squad).empty_slots if squad else 0
     options = [
         p for p in squad
-        if not p.locked and p.player_id != target.player_id and keeps_cover(squad, p)
+        if not p.locked and p.player_id != target.player_id and keeps_cover(squad, p, bench)
         and best_of([o for o in squad if o is not p]).empty_slots <= gaps
     ]
     for p in sell_order(options, min_play):
@@ -365,10 +392,11 @@ def worth_it(upgrade: Upgrade, bid: int, opts: Options, ratio: float = 1.0) -> b
     return cost_per_point(upgrade, bid, ratio) <= opts.max_cost_per_point
 
 
-def cover_target(squad: Sequence[Candidate], market: Iterable[Candidate], opts: Options) -> Candidate | None:
+def cover_target(squad: Sequence[Candidate], market: Iterable[Candidate], opts: Options,
+                 bench: int = BENCH_FULL) -> Candidate | None:
     """The cheapest fit player of a position without a substitute who plays at least now and then
     and is not falling."""
-    missing = set(missing_cover(squad))
+    missing = set(missing_cover(squad, bench))
     if not missing:
         return None
     options = [
@@ -384,7 +412,7 @@ def cover_target(squad: Sequence[Candidate], market: Iterable[Candidate], opts: 
     return min(options, key=lambda c: (max(c.bid_low, c.price, c.value), -c.expected), default=None)
 
 
-def liquidation_value(squad: Sequence[Candidate], ratio: float, max_sales: int) -> int:
+def liquidation_value(squad: Sequence[Candidate], ratio: float, max_sales: int, bench: int = BENCH_FULL) -> int:
     """What selling players really brings in before a deadline, sold one after the other in the sell
     order: never a locked player, never one of the best eleven, never the last fit cover of a position,
     at most `max_sales` sales, each valued at its value after a forecast fall times the sell ratio.
@@ -394,7 +422,7 @@ def liquidation_value(squad: Sequence[Candidate], ratio: float, max_sales: int) 
     for p in sell_order(squad, 1.0):
         if sales >= max_sales:
             break
-        if p.locked or p.in_best or not keeps_cover(remaining, p):
+        if p.locked or p.in_best or not keeps_cover(remaining, p, bench):
             continue
         total += int(max(p.value + min(p.forecast, 0), 0) * ratio)
         remaining.remove(p)

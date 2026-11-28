@@ -249,6 +249,21 @@ function SettingsCard({ initial }: { initial: AutomationSettings }) {
                   </select>
                   <span className="mt-0.5 block text-xs text-muted">Nur so weit, wie verkaufbare Bankspieler ihn bis zum Spieltag zurückzahlen</span>
                 </label>
+                <label className="text-sm">
+                  <span className="mb-1 block text-xs font-medium text-muted">Ersatzbank</span>
+                  <select
+                    value={opts.benchStrategy}
+                    onChange={(event) => setOption({ benchStrategy: Number(event.target.value) })}
+                    className="h-10 w-full rounded-xl border border-line bg-surface px-3"
+                  >
+                    <option value={0}>Volle Absicherung jeder Position</option>
+                    <option value={1}>Minimal: Ersatztorwart und ein Feldspieler</option>
+                    <option value={2}>Keine Bank zwischen den Spieltagen</option>
+                  </select>
+                  <span className="mt-0.5 block text-xs text-muted">
+                    Wirkt erst mit dem Feature Flag „flexible_bench“. Ab 24 Std. vor dem Spieltag gilt bei „Keine Bank“ wieder volle Absicherung.
+                  </span>
+                </label>
                 <OptionField label="Höchstpreis für einen Ersatzspieler (€)" value={opts.coverMaxPrice} min={0} max={50_000_000} money onCommit={(coverMaxPrice) => setOption({ coverMaxPrice })} />
                 <OptionField label="Gebote pro Tag" value={opts.dailyBids} min={0} max={30} onCommit={(dailyBids) => setOption({ dailyBids })} />
                 <OptionField label="Verkäufe pro Tag" value={opts.dailySales} min={0} max={30} onCommit={(dailySales) => setOption({ dailySales })} />
@@ -369,12 +384,13 @@ const OPTION_LABELS: Record<string, string> = {
   rescueOverride: "Notfallregel",
   sellRatio: "Verkaufsquote %",
   upgradeCrossPosition: "Formationswechsel nach Punkten",
+  benchStrategy: "Ersatzbank",
 }
 
 /** A strategy profile as a starting point: shows what would change, applies only after a confirmation.
  *  The switches (shadow trades, emergency rule) stay as they are. */
 /** Profiles never change these: switches and facts about Kickbase, not strategy */
-const PROFILE_KEEPS: (keyof TraderOptions)[] = ["shadow", "rescueOverride", "sellRatio", "upgradeCrossPosition"]
+const PROFILE_KEEPS: (keyof TraderOptions)[] = ["shadow", "rescueOverride", "sellRatio", "upgradeCrossPosition", "benchStrategy"]
 
 function ProfilePicker({ current, onApply }: { current: TraderOptions; onApply: (next: TraderOptions) => void }) {
   const profiles = useTraderProfiles()
@@ -421,6 +437,7 @@ function ProfilePicker({ current, onApply }: { current: TraderOptions; onApply: 
                     rescueOverride: current.rescueOverride,
                     sellRatio: current.sellRatio,
                     upgradeCrossPosition: current.upgradeCrossPosition,
+                    benchStrategy: current.benchStrategy,
                   })
                   setName("")
                 }}

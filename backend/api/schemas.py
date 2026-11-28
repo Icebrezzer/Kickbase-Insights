@@ -646,6 +646,7 @@ class TraderOptionsIn(Schema):
     rescue_override: bool = False # Rescue sales may sell locked players
     sell_ratio: int = Field(90, ge=50, le=100) # % of the market value an instant sale brings (Kickbase: 100)
     upgrade_cross_position: bool = False # A formation change is judged by the points (E05.08)
+    bench_strategy: int = Field(0, ge=0, le=2) # 0 full, 1 minimal, 2 none between matchdays (flag flexible_bench)
 
 
 class AutomationSettingsIn(Schema):
