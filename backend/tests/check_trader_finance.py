@@ -139,6 +139,20 @@ def main() -> None:
     ok(risk.validate(bids, ctx(team, trio, collateral=trio_claims, repay_from=repay, credit=shortfall - 10_000, credit_mode=2))[2] == risk.OVER_BUDGET,
        "one step less: the third is refused")
 
+    ### E04.08: the balance at kick-off
+    monday = datetime(2026, 11, 23, 10, 0, tzinfo=UTC)
+    ok(finance.sales_until(monday, monday + timedelta(days=3), 1, 3) == 1 + 3 * 3, "sales left today plus the daily limit of every further day")
+    ok(finance.sales_until(monday, monday + timedelta(hours=2), 2, 3) == 2 and finance.sales_until(monday, monday - timedelta(hours=1), 2, 3) == 2,
+       "same day: only what is left today")
+    fine = finance.deadline_forecast(5_000_000, {"a": 3_000_000}, {"a": 0.5}, 0, 1_000_000)
+    ok(fine == {"worst": 2_000_000, "expected": 3_500_000, "capacity": 1_000_000, "after_sales": 3_000_000, "status": "ok"}, f"ok ({fine})")
+    sales = finance.deadline_forecast(1_000_000, {"a": 3_000_000}, {"a": None}, 0, 4_000_000)
+    ok(sales["status"] == "needs_sales" and sales["expected"] == -2_000_000, f"an unknown chance counts as won, sales cover it ({sales})")
+    short = finance.deadline_forecast(1_000_000, {"a": 3_000_000, "b": 2_000_000}, {}, 500_000, 3_000_000)
+    ok(short["status"] == "short" and short["after_sales"] == -1_000_000, f"short, even with every sale ({short})")
+    ok(finance.deadline_forecast(-1, {}, {}, 0, None)["status"] == "short", "unknown capacity and a minus: short")
+    ok(finance.deadline_forecast(0, {}, {}, 0, None)["status"] == "ok", "nothing open, nothing owed: ok")
+
     print(f"All {passed} trader finance checks passed.")
 
 

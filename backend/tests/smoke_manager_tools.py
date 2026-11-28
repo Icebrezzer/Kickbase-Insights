@@ -780,6 +780,10 @@ def main() -> None:
         check(scenarios["pessimistic"] <= scenarios["realistic"] or scenarios["pessimistic"] <= debug_fin_off["liquidation"],
               f"scenarios logged ({scenarios})")
         check(debug_fin_off["finance"]["credit_from"] == "current", "flag off: credit as in 2.0")
+        forecast = debug_fin_off.get("deadline_forecast") or {}
+        check(forecast.get("status") in ("ok", "needs_sales", "short") and forecast["worst"] >= debug_fin_off["worst_case"],
+              f"E04.08: balance at kick-off forecast ({forecast})")
+        check("deadline_forecast" in client.get("/api/automation/trader/dashboard").json(), "E04.08: in the dashboard")
         client.put("/api/automation/trader/flags", json={"flags": {"conditional_repayment": "shadow", "upgrade_financing": "shadow", "scenario_credit": "shadow"}})
         plan_fin_shadow, debug_fin_shadow = bench_round()
         check([(a.kind, a.player_id, a.price) for a in plan_fin_shadow] == [(a.kind, a.player_id, a.price) for a in plan_fin_off]

@@ -79,7 +79,14 @@ LiquidityPlan(budget, open_bids, squad, deadline, now, sales_used_today, config)
 - **Ziel:** `max_utilization_pct` plus Abhängigkeit von Zeit bis Deadline, verbleibenden Updates, Prognosegüte (über Regelwerk E08.01 oder feste Kurve im Schema).
 
 ### E04.08 – Deadline-Liquiditätsprognose
-- **Priorität:** P2 · **Abhängig von:** E04.06 · **Aufwand:** S
+- **Priorität:** P2 · **Status:** done · **Abhängig von:** E04.06 · **Aufwand:** S
+- **Ergebnis:**
+  - `finance.deadline_forecast` berechnet je Planungsrunde den Kontostand zum Anpfiff: Worst Case (alle Gebote mit Ende vor der Deadline gewinnen), erwartet (jedes Gebot mit seiner Zuschlagschance, unbekannt = gewonnen) und pessimistisch nach allen Verkäufen bis zur Tilgungsphase.
+  - Für die Verkäufe zählen die heute übrigen plus das Tageslimit jedes weiteren Tages (`sales_until`), pessimistisch bewertet, mit der Ersatzbank der Tilgungsphase.
+  - Status `ok`, `needs_sales` oder `short` steht im Debug-Protokoll und im Dashboard-API (`deadline_forecast`).
+  - Bei `short` vor der Tilgungsphase kommt einmal je Spieltag die Push-Warnung „Spieltag gefährdet“.
+  - Nur Diagnose, kein Flag nötig; Entscheidungen unverändert.
+  - Tests: 7 Checks in `check_trader_finance.py`, 2 Smoke-Prüfungen.
 - **Ziel:** Erwarteter und pessimistischer Kontostand zum Anpfiff je Runde in Debug/Dashboard; Push, wenn pessimistisch < 0 vor Beginn der Tilgungsphase.
 
 ### E04.09 – Automatische Tilgungsstrategie

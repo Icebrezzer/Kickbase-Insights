@@ -131,3 +131,29 @@ def check_collateral(c: Collateral, own: Sequence[t.Candidate], target: t.Candid
     if again is None or again.player_id != c.player_id or again.value < c.value:
         return "FINANCE_PLAN_INVALID"
     return None
+
+
+### ===============================================================================
+### Balance at the deadline (E04.08)
+### ===============================================================================
+
+
+def sales_until(now: datetime, repay_from: datetime, sales_left_today: int, daily_sales: int) -> int:
+    """Sales possible before the repay phase starts: what is left today, then the daily limit of every
+    further Berlin day up to that day (rescue sales in the repay phase come on top, no limit)."""
+    tz = analytics.MARKET_VALUE_TIMEZONE
+    days = max((repay_from.astimezone(tz).date() - now.astimezone(tz).date()).days, 0)
+    return max(sales_left_today, 0) + days * max(daily_sales, 0)
+
+
+def deadline_forecast(budget: int, due_bids: dict[str, int], p_win: dict[str, float | None], reserve: int,
+                      capacity: int | None) -> dict:
+    """The balance at kick-off. worst: every open bid that ends before the deadline is won; expected: each
+    weighted by its chance (unknown chance: won); after_sales: worst plus what pessimistically valued sales
+    bring before the repay phase. ok: worst is fine; needs_sales: sales cover it; short: they do not
+    (or the capacity is unknown)."""
+    worst = budget - sum(due_bids.values())
+    expected = budget - int(sum(bid * (p_win.get(pid) if p_win.get(pid) is not None else 1.0) for pid, bid in due_bids.items()))
+    after = None if capacity is None else worst + capacity
+    status = "ok" if worst >= reserve else "needs_sales" if after is not None and after >= reserve else "short"
+    return {"worst": worst, "expected": expected, "capacity": capacity, "after_sales": after, "status": status}

@@ -1102,6 +1102,18 @@ class TraderService:
             }
 
         self._observe_forecasts(league.id, predicted, now)
+        ### E04.08: the balance at kick-off, worst, expected and after the sales still possible before the
+        ### repay phase (pessimistic, with the bench the repay phase keeps). Diagnosis and warning only
+        due = {pid: bid for pid, bid in all_open.items()
+               if deadline is None or pid not in pending or pending[pid].expires_at is None or pending[pid].expires_at <= deadline}
+        chances = {pid: t.win_probability(bid, pending[pid].value, t.winning_markups(shares, pending[pid].value)) if pid in pending else None
+                   for pid, bid in due.items()}
+        capacity = None
+        if deadline is not None and repay_from is not None and now < repay_from:
+            bench_at_repay = t.bench_mode(opts.bench_strategy, "repay") if applies("flexible_bench") else t.BENCH_FULL
+            capacity = finance.liquidation(own0, ratio, finance.sales_until(now, repay_from, sales0, opts.daily_sales), bench_at_repay,
+                                           "pessimistic", finance.updates_between(now, repay_from))
+        deadline_forecast = finance.deadline_forecast(budget, due, chances, opts.reserve, capacity)
         considered: dict[str, str] = {}
         for _, purpose, c, _ in options:
             considered.setdefault(c.player_id, purpose)
@@ -1116,6 +1128,7 @@ class TraderService:
             ### The liquidation that limited the credit (sales left today, after this round's exit sale), and
             ### for comparison the one of the whole daily limit before it
             "liquidation": liquidation, "liquidation_full_day": t.liquidation_value(own0, ratio, opts.daily_sales, bench),
+            "deadline_forecast": deadline_forecast,
             "finance": {
                 "scenarios": scenario_liquidation, "credit_from": "pessimistic" if applies("scenario_credit") else "current",
                 "conditional": conditional_log, "claimed_before": sorted(claimed_before),
@@ -1549,6 +1562,7 @@ class TraderService:
             "credit_mode": d.get("credit_mode"),
             "liquidation": d.get("liquidation"),
             "money_check": d.get("money_check"),
+            "deadline_forecast": d.get("deadline_forecast"),
             "forecast_quality": self.forecast_quality(league_id),
             "rejections": self.rejection_stats(user_id, league_id),
             "reason_texts": rc.TEXT,
@@ -1671,6 +1685,12 @@ class TraderService:
         if debug.get("paused"):
             notes.append((f"trader-stoploss:{league_id}:{user_id}:{t.week_of(now)}", "Autotrader: Stop-Loss",
                           "Gewinnhandel pausiert bis Wochenende: Wochenverlust hat das Limit erreicht"))
+        forecast = debug.get("deadline_forecast") or {}
+        if forecast.get("status") == "short" and stage in ("normal", "prepare") and deadline is not None:
+            missing = -(forecast.get("after_sales") if forecast.get("after_sales") is not None else forecast.get("worst", 0))
+            notes.append((f"trader-deadline:{league_id}:{user_id}:{deadline.isoformat()}", "Autotrader: Spieltag gefährdet",
+                          f"Wenn alle offenen Gebote gewinnen, fehlen pessimistisch {missing / 1e6:.1f} Mio. € zum Anpfiff, "
+                          "auch mit allen möglichen Verkäufen bis dahin – Gebote prüfen"))
         if debug.get("forecast_paused"):
             notes.append((f"trader-forecast:{league_id}:{user_id}:{day}", "Autotrader: Prognose unzuverlässig",
                           "Gewinnhandel pausiert, bis die Marktwertprognose wieder trifft"))
