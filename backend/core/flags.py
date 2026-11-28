@@ -21,6 +21,7 @@ FLAGS: dict[str, str] = {
     "flexible_bench": "Konfigurierbare Ersatzbank statt voller Positionsabsicherung (E05.02)",
     "multi_day_liquidation": "Kredit mit allen Verkaufsmöglichkeiten bis zur Deadline (E04.02)",
     "scenario_credit": "Kredit nur auf den pessimistisch bewerteten Verkaufserlösen (E04.03)",
+    "early_repayment": "Ein bestätigtes Minus schon ab 24 Std. vor dem Spieltag zurückverkaufen (E04.09)",
     "conditional_repayment": "Gewinnspieler sichern ihre eigene Finanzierung ab (E04.04)",
     "upgrade_financing": "Startelf-Upgrade über den Verkauf des Verdrängten finanzieren (E04.05)",
 }

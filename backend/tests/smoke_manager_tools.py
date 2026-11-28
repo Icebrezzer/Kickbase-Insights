@@ -314,6 +314,20 @@ def main() -> None:
         )
         check(not any(a.purpose == "rescue" for a in far_plan), "no rescue sales days before the deadline")
 
+        ### E04.09: with the flag early_repayment a confirmed minus is sold back from the prepare phase on
+        prepare_at = next((m for m in (deadline_at - timedelta(hours=23), core_trader.repay_from(deadline_at) - timedelta(minutes=1))
+                           if core_trader.phase(m, deadline_at) == "prepare"), None)
+        check(prepare_at is not None, f"a moment in the prepare phase ({prepare_at})")
+        prepare_off, _ = state.automation.trader._plan(league, state.automation.get_settings("1001", "4242"), squad_x, -3_000_000, market_x, prepare_at)
+        check(not any(a.purpose == "rescue" for a in prepare_off), "flag off: no rescue sale in the prepare phase, as before")
+        client.put("/api/automation/trader/flags", json={"flags": {"early_repayment": "live"}, "confirm_live": True})
+        prepare_on, _ = state.automation.trader._plan(league, state.automation.get_settings("1001", "4242"), squad_x, -3_000_000, market_x, prepare_at)
+        check(prepare_on and all(a.kind == "sell" and a.purpose == "rescue" for a in prepare_on),
+              f"flag on: the minus is sold back a day early, nothing else ({[(a.kind, a.purpose) for a in prepare_on]})")
+        far_on, _ = state.automation.trader._plan(league, state.automation.get_settings("1001", "4242"), squad_x, -3_000_000, market_x, deadline_at - timedelta(days=3))
+        check(not any(a.purpose == "rescue" for a in far_on), "flag on: still nothing days before the deadline")
+        client.put("/api/automation/trader/flags", json={"flags": {"early_repayment": "off"}})
+
         ### Exit system: a profit position bought three days ago is judged every round, and an exit
         ### verdict on an unprotected player becomes one sale
         bench_player = next(c for c in squad_x.players[::-1])
@@ -631,6 +645,10 @@ def main() -> None:
 
         ### E02.08: feature flags per league, off by default, strict, live only confirmed and with live trading
         flag_list = client.get("/api/automation/trader/flags").json()
+        with Session(state.engine) as s:
+            from db.models import AutomationEvent as FlagEvent
+
+            flag_events_before = len(s.exec(select(FlagEvent).where(FlagEvent.kind == "trader-flags")).all())
         check(flag_list and all(f["stage"] == "off" and f["effective"] == "off" for f in flag_list.values()), "every flag off by default")
         check(client.put("/api/automation/trader/flags", json={"flags": {"casino": "live"}}).status_code == 422, "an unknown flag is refused")
         check(client.put("/api/automation/trader/flags", json={"flags": {"flexible_bench": "on"}}).status_code == 422, "an unknown stage is refused")
@@ -644,7 +662,7 @@ def main() -> None:
             from db.models import AutomationEvent as Event
 
             logged = s.exec(select(Event).where(Event.kind == "trader-flags")).all()
-        check(len(logged) == 2 and logged[-1].details["after"]["flexible_bench"] == "live", "every change is logged with before and after")
+        check(len(logged) == flag_events_before + 2 and logged[-1].details["after"]["flexible_bench"] == "live", "every change is logged with before and after")
         page = client.get("/api/automation/settings").json()
         client.put("/api/automation/settings", json=page)
         check(client.get("/api/automation/trader/flags").json()["decision_snapshots"]["stage"] == "shadow", "the settings page keeps the flags")

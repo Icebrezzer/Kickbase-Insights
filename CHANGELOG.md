@@ -5,6 +5,7 @@ Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Au
 ## [Unveröffentlicht] – Auto-Trader 3.0
 
 ### Hinzugefügt
+- E04.09 (Teil 1): Flag `early_repayment`: Ein bestätigtes Minus wird schon ab 24 Std. vor dem Spieltag zurückverkauft, nicht erst ab dem letzten Marktwert-Update.
 - E04.08: Prognose des Kontostands zum Anpfiff (Worst Case, erwartet, pessimistisch nach möglichen Verkäufen) im Dashboard-API, dazu die Push-Warnung „Spieltag gefährdet“, wenn selbst alle Verkäufe bis zur Tilgungsphase nicht reichen.
 - E04.01/03/04/05/06/10: Finanzierung (`core/finance.py`) hinter Flags, alle Standard aus.
   - Verkaufserlöse in drei Szenarien; mit `scenario_credit` gilt der Kredit nur auf dem pessimistischen Erlös.

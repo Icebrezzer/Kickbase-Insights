@@ -90,7 +90,13 @@ LiquidityPlan(budget, open_bids, squad, deadline, now, sales_used_today, config)
 - **Ziel:** Erwarteter und pessimistischer Kontostand zum Anpfiff je Runde in Debug/Dashboard; Push, wenn pessimistisch < 0 vor Beginn der Tilgungsphase.
 
 ### E04.09 – Automatische Tilgungsstrategie
-- **Priorität:** P2 · **Abhängig von:** E04.08 · **Aufwand:** M
+- **Priorität:** P2 · **Status:** done (Teil 1) · **Abhängig von:** E04.08 · **Aufwand:** M · **Flag:** `early_repayment`
+- **Ergebnis (Teil 1):**
+  - Mit dem Flag verkauft der Trader ein **bestätigtes** Minus schon ab der Vorbereitungsphase (24 Std. vor dem Spieltag) zurück, statt erst ab dem letzten Update. Ein Serverausfall am Vorabend hinterlässt so kein Minus mehr (bekannte Grenze aus 2.0).
+  - Verkauft wird wie in der Rettung: ein Verkauf je Runde, geringster Punktverlust je Euro, gesperrte Spieler geschützt. Offene Gebote zieht er erst in der Tilgungsphase zurück, sie können noch verloren gehen.
+  - Ohne Flag bleibt alles wie bisher. Tage vor dem Spieltag passiert auch mit Flag nichts.
+  - Tests: Smoke-Prüfungen (Flag aus: kein Verkauf in `prepare`; Flag an: nur Rettungsverkauf; 3 Tage vorher: nichts).
+- **Offen (Teil 2):** ein laufender Tilgungsplan, der Verkäufe vor die Vorbereitungsphase legt, wenn die Kapazität späterer Tage laut E04.08 nicht reicht. Er braucht die mehrtägige Liquidation (E04.02).
 - **Ziel:** Laufender Tilgungsplan (welcher Verkauf an welchem Tag), Verkäufe vor der `repay`-Phase, wenn die Kapazität späterer Tage nicht reicht; Neuplanung bei Abweichung. Rettungsverkäufe 2.0 bleiben letzte Linie.
 - **Abnahmekriterien:** Ausfall der API für den letzten Tag → Plan hat Schulden bereits am Vortag getilgt (Puffer).
 

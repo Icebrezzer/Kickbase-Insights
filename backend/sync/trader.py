@@ -774,10 +774,14 @@ class TraderService:
         ### for a while still has many rounds left): first the trader's bids that could still make it
         ### negative are withdrawn, then a negative balance is sold back to zero. One sale per round, the
         ### next round re-plans with the confirmed balance
-        if stage in ("repay", "final"):
+        ### E04.09 (flag early_repayment): a confirmed minus is sold back from the prepare phase on, a day
+        ### early, so a server that is down in the evening before the matchday leaves no debt. Open bids
+        ### are only withdrawn in the repay phase as before: they may still be lost
+        early = stage == "prepare" and budget < 0 and applies("early_repayment")
+        if stage in ("repay", "final") or early:
             due = {pid: bid for pid, bid in open_bids.items() if pending[pid].expires_at is None or pending[pid].expires_at <= deadline}
             worst = budget - sum(due.values())
-            for pid in sorted((p for p in due if p in trader_bids), key=lambda p: _purpose_rank(trader_bids[p].purpose)):
+            for pid in [] if early else sorted((p for p in due if p in trader_bids), key=lambda p: _purpose_rank(trader_bids[p].purpose)):
                 if worst >= 0:
                     break
                 actions.append(Action("withdraw", trader_bids[pid].purpose, pid, names.get(pid, pid), open_bids.pop(pid), pending[pid].value, reason="Kontostand zum Spieltag sichern"))
@@ -800,7 +804,7 @@ class TraderService:
                     self._warn_debt(league, user_id, min(after, worst), deadline)
                 return finish(actions, [], {
                     "live": row.trader_live, "phase": stage, "budget": budget, "worst_case": worst, "rescue": True,
-                    "deadline": deadline.isoformat(), "repay_from": repay_from.isoformat(),
+                    "deadline": deadline.isoformat(), "repay_from": repay_from.isoformat(), "early_repayment": early,
                 }, {})
 
         ### Profit positions: hold or sell, every round (the price is the same all day until 22:00).
