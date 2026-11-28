@@ -731,7 +731,11 @@ def main() -> None:
         check(not snapshots(), "flag off: no snapshot")
         client.put("/api/automation/trader/flags", json={"flags": {"decision_snapshots": "shadow"}})
         settings_now = state.automation.get_settings("1001", "4242")
-        plan_on, _ = state.automation.trader._plan(league, settings_now, squad_l, 200_000_000, market_l, utcnow())
+        from unittest.mock import patch
+
+        with patch("httpx.AsyncClient.send", side_effect=AssertionError("extra request")) as outgoing:
+            plan_on, _ = state.automation.trader._plan(league, settings_now, squad_l, 200_000_000, market_l, utcnow())
+            check(outgoing.call_count == 0, "shadow planning sends zero Kickbase requests")
         taken = snapshots()
         report = client.get("/api/automation/trader/shadow-intelligence")
         check(report.status_code == 200 and report.json()["observed"] == len(taken), "viewer sees sampled auctions")

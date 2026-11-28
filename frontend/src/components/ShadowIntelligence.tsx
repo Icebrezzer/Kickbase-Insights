@@ -21,8 +21,8 @@ export function ShadowIntelligence() {
     <QueryState query={query}>{d => <div className="space-y-4 p-4 text-sm">
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat label="Beobachtete Auktionen" value={d.observed} />
-        <Stat label="Entgangene Gewinne · Fälle" value={d.categories.missed ?? 0} />
-        <Stat label="Vermiedene Verluste · Fälle" value={d.categories.avoided ?? 0} />
+        <Stat label="Entgangene Gewinne · finanzierbare Fälle" value={d.feasible.missed ?? 0} />
+        <Stat label="Vermiedene Verluste · finanzierbare Fälle" value={d.feasible.avoided ?? 0} />
         <Stat label="Realisierter Gewinn / Verlust" value={money(d.realized.sum)} hint={d.realized.count + " bestätigte Verkäufe mit Ergebnis"} />
       </div>
       <p className="text-muted">Die letzten {d.days} Tage, bis zu {d.limit} Auktionen. Hypothetische Ergebnisse gelten einzeln.

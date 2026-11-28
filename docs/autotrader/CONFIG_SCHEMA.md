@@ -23,6 +23,8 @@ Status: **Entwurf** (wird mit E02.01 verbindlich). Teil A beschreibt den Ist-Zus
 | `min_roi` | 2,0 | 0–100 % | `profit.min_roi_pct` |
 | `credit_mode` | 1 | 0–2 | `finance.credit_mode` (bleibt; E04.07 ergänzt `max_utilization_pct`) |
 | `trailing_stop` / `position_stop` / `max_hold_days` | 5 / 10 / 7 | 0–50 / 0–100 / 0–60 | `profit.trailing_stop_pct` … |
+| `snapshot_limit` | 32 | 1–200 je Runde | `learning.snapshot_limit` |
+| `snapshot_days` | 120 | 7–365 Tage | `learning.snapshot_days` |
 | `shadow` / `rescue_override` | an / aus | bool | `learning.shadow_enabled` / `matchday.rescue_override` |
 
 **Fest im Code** (Kandidaten für Schema v1, jeweils mit harten Grenzen): siehe `KNOWN_ISSUES.md` KI-07. Bewusst **nicht** konfigurierbar bleiben: Gebotsschritt 10.000 €, 33-%-Regel, Abgleich-/Pausenlogik für unklare Aufrufe, Leader-Lease, Kill-Switches.

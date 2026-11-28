@@ -17,7 +17,7 @@ STAGES = (OFF, SHADOW, DRY_RUN, LIVE)
 ### Name -> what it switches. Planned functions are listed before they exist, so a configuration can
 ### already carry them; each stays without effect until its package is done
 FLAGS: dict[str, str] = {
-    "decision_snapshots": "Entscheidungs-Snapshots aller Kandidaten speichern (E03.01)",
+    "decision_snapshots": "Stichprobe der Marktentscheidungen speichern und hypothetische Alternativen auswerten",
     "flexible_bench": "Konfigurierbare Ersatzbank statt voller Positionsabsicherung (E05.02)",
     "multi_day_liquidation": "Kredit mit allen Verkaufsmöglichkeiten bis zur Deadline (E04.02)",
     "scenario_credit": "Kredit nur auf den pessimistisch bewerteten Verkaufserlösen (E04.03)",

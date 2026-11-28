@@ -10,7 +10,7 @@ from sqlalchemy import func, insert
 from sqlmodel import Session, select
 
 from db import create_db_engine, init_db
-from db.models import DecisionSnapshot, ShadowDaily, utcnow
+from db.models import DecisionSnapshot, ShadowAnalysis, ShadowDaily, utcnow
 from sync.shadow_retention import BATCH, archive_batch
 
 
@@ -22,9 +22,13 @@ def main():
         now = utcnow()
         sample = DecisionSnapshot(user_id="u", league_id="l", auction="a", first_seen=now - timedelta(days=121),
                                   player_id="p", reason="BUDGET", value=1000000).model_dump()
+        replay = ShadowAnalysis(user_id="u", league_id="l", auction="a", player_id="p",
+            inputs={"bids": {"standard": 1010000}, "cap": 1020000},
+            result={"outcomes": {"standard": "won"}, "exits": {"hold_2": 1030000}}).model_dump()
         with engine.begin() as conn:
             for start in range(0, 100000, 1000):
                 conn.execute(insert(DecisionSnapshot), [dict(sample, player_id=str(i)) for i in range(start, start+1000)])
+                conn.execute(insert(ShadowAnalysis), [dict(replay, player_id=str(i)) for i in range(start, start+1000)])
         with Session(engine) as session:
             start = perf_counter()
             assert archive_batch(session, "u", "l", now) == BATCH

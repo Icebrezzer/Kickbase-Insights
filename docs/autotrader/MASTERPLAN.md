@@ -2,6 +2,8 @@
 
 Stand: 27.11.2026 · Ausgangscode `4b85715` · Arbeitsbranch `codex/autotrader-3`
 
+W6-Branch, 28.11.2026: E03.03–E03.09 sind implementiert. Nachweise und Integration mit W5 siehe [Welle-6-Bericht](WAVE6_HANDOVER.md).
+
 ## 1. Ziel
 
 Langfristig maximaler sportlicher Erfolg durch effiziente Kapitalnutzung. **Leitprinzip: maximale sinnvolle Kapitalnutzung bei kontrolliertem Risiko und zuverlässiger Punkteberechtigung zum Spieltagsbeginn.** Bewertet wird realisierter finanzieller und sportlicher Mehrwert, nicht Transferzahl oder theoretischer Marktwertgewinn.

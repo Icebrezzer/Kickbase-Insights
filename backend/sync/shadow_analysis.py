@@ -8,7 +8,14 @@ from sqlmodel import Session, select
 
 from core import analytics
 from core.shadow_intelligence import AuctionEvidence, bid_variants, sale_strategies, settle_bids
-from db.models import DecisionSnapshot, ForecastObservation, MarketValueHistory, ShadowAnalysis, Transfer
+from db.models import (
+    DecisionSnapshot,
+    ForecastObservation,
+    MarketValueHistory,
+    ShadowAnalysis,
+    TradeLog,
+    Transfer,
+)
 
 
 def freeze(user, league, pid, auction, values, listing, extra, deadline, trailing, now):
@@ -57,6 +64,11 @@ def settle_due(session: Session, user: str, league: str, now: datetime):
     ids = {r.player_id for r in rows}
     histories = dict(session.exec(select(MarketValueHistory.player_id, MarketValueHistory.points)
                                   .where(MarketValueHistory.player_id.in_(ids))).all())
+    lost_bids = defaultdict(list)
+    for bid in session.exec(select(TradeLog).where(TradeLog.user_id == user, TradeLog.league_id == league,
+            TradeLog.player_id.in_(ids), TradeLog.kind == "bid", TradeLog.status == "lost",
+            TradeLog.resolved_at >= min(ends) - jitter, TradeLog.at <= max(ends) + jitter)):
+        lost_bids[bid.player_id].append(bid)
     observations = defaultdict(dict)
     for obs in session.exec(select(ForecastObservation).where(ForecastObservation.league_id == league,
             ForecastObservation.player_id.in_(ids), ForecastObservation.day >= analytics.market_value_day(min(ends)),
@@ -74,6 +86,12 @@ def settle_due(session: Session, user: str, league: str, now: datetime):
         row.result = {"outcomes": {v.name: v.outcome for v in settle_bids(data["bids"], evidence)},
                       "winner_price": sale.price if sale else None, "own": own, "no_buyer": evidence.confirmed_no_buyer}
         row.next_check = None if sale or evidence.confirmed_no_buyer or now >= end + timedelta(days=2) else now + timedelta(hours=1)
+        if sale and not own:
+            listed_at = datetime.fromisoformat(row.auction)
+            lost = [b for b in lost_bids[row.player_id] if listed_at <= b.at <= sale.date
+                    and b.details.get("winner_id") == sale.buyer_id and b.details.get("winner_price") == sale.price]
+            if len(lost) == 1:
+                row.result = {**row.result, "real_lost": True}
         if sale and (own or "won" in row.result["outcomes"].values()):
             start = analytics.market_value_day(sale.date)
             today = analytics.market_value_day(now)

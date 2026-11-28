@@ -492,7 +492,7 @@ export const useLearning = () => useLeagueQuery<Learning>(["learning"], "/learni
 type ShadowStats = { count: number; sum: number | null; median: number | null }
 export type ShadowReport = {
   observed: number; days: number; limit: number
-  categories: Record<string, number>; realized: ShadowStats
+  categories: Record<string, number>; feasible: Record<string, number>; realized: ShadowStats
   reasons: (ShadowStats & { reason: string; category: string; finance: string })[]
   bids: Record<string, Record<string, number>>
   sales: Record<string, ShadowStats>

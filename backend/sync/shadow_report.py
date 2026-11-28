@@ -20,6 +20,7 @@ def shadow_report(engine, user, league):
     exits = defaultdict(list)
     finance_counts = Counter()
     categories = Counter()
+    feasible = Counter()
     learning = []
     with Session(engine) as session:
         join = and_(*(getattr(snap, k) == getattr(analysis, k) for k in ("user_id", "league_id", "player_id", "auction")))
@@ -30,11 +31,13 @@ def shadow_report(engine, user, league):
             inputs, result = (record.inputs, record.result) if record else ({}, {})
             kind, net, finance = classify(snapshot.reason, inputs, result)
             outcome = result.get("outcomes", {}).get("standard")
-            real = bool(result.get("own"))
+            real = bool(result.get("own") or result.get("real_lost"))
             if real or (finance == "feasible" and outcome in ("won", "lost")):
-                learning.append(((snapshot.player_id, snapshot.auction), real, real or outcome == "won",
+                learning.append(((snapshot.player_id, snapshot.auction), real, bool(result.get("own")) if real else outcome == "won",
                                  (now - snapshot.first_seen).total_seconds() / 86400))
             categories[kind] += 1
+            if finance == "feasible":
+                feasible[kind] += 1
             finance_counts[finance] += 1
             groups[(snapshot.reason, kind, finance)].append(net)
             for variant in ("minimum", "defensive", "standard", "aggressive", "ev"):
@@ -45,11 +48,12 @@ def shadow_report(engine, user, league):
                 for strategy, proceeds in result.get("exits", {}).items():
                     exits[strategy].append(proceeds - cost)
         profits = session.exec(select(TradeLog.profit).where(TradeLog.user_id == user, TradeLog.league_id == league,
-            TradeLog.kind == "sell", TradeLog.status == "sold", TradeLog.at >= since, TradeLog.profit.is_not(None))).all()
+            TradeLog.kind == "sell", TradeLog.status == "sold", TradeLog.at >= since, TradeLog.profit.is_not(None),
+            TradeLog.details["received_known"].as_boolean().is_(True))).all()
     def stats(values):
         known = [v for v in values if v is not None]
         return {"count": len(values), "sum": sum(known) if known else None, "median": median(known) if known else None}
     return {"observed": len(rows), "learning": weighted_win_rate(learning), "days": 30, "limit": 500, "categories": categories, "finance": finance_counts,
-            "realized": stats(profits), "reasons": [{"reason": r, "category": c, "finance": f, **stats(v)}
+            "feasible": feasible, "realized": stats(profits), "reasons": [{"reason": r, "category": c, "finance": f, **stats(v)}
                 for (r, c, f), v in sorted(groups.items())], "bids": variants,
             "sales": {k: stats(v) for k, v in exits.items()}}

@@ -2,6 +2,10 @@
 
 **Zuletzt aktualisiert:** 27.11.2026 · **Branch:** `codex/autotrader-3` (lokal, nicht gepusht) · **Basis:** `4b85715` (`codex/autotrader-2-audit`, CI grün)
 
+## Welle 6 · Branch `codex/autotrader-3-w6`
+
+E03.03–E03.09 umgesetzt und lokal geprüft. Paketstände, Messwerte, Einschränkungen und Integrationsanleitung in [WAVE6_HANDOVER.md](WAVE6_HANDOVER.md). Die folgende Kurzfassung beschreibt die gemeinsame Basis vor Welle 5 und 6.
+
 ## Kurzfassung
 
 - **Erledigt:**

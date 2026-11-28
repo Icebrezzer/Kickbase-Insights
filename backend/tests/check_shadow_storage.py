@@ -67,9 +67,9 @@ class ShadowStorage(unittest.TestCase):
             db.add(Transfer(id="sale", league_id="L", player_id=pid, buyer_id="rival", price=price, date=self.end))
             db.add(MarketValueHistory(player_id=pid, points=[[start+i, price+i*20000] for i in range(4)]))
             db.add(TradeLog(user_id="viewer", league_id="L", player_id=pid, kind="sell", status="sold",
-                            purpose="exit", profit=-7))
+                            purpose="exit", profit=-7, details={"received_known": True}))
             db.add(TradeLog(user_id="other", league_id="L", player_id=pid, kind="sell", status="sold",
-                            purpose="exit", profit=800))
+                            purpose="exit", profit=800, details={"received_known": True}))
             db.commit()
         self.engine.dispose()
         self.engine = create_db_engine(self.url)
@@ -126,3 +126,21 @@ class ShadowStorage(unittest.TestCase):
             db.commit()
             self.assertTrue(rows[0].result["no_buyer"])
             self.assertIsNone(rows[-1].result["winner_price"])
+
+    def test_confirmed_loss_precedes_alternative_win(self):
+        self.snapshot()
+        with Session(self.engine) as db:
+            row = db.exec(select(ShadowAnalysis)).first()
+            price = row.inputs["bids"]["standard"] - 10_000
+            db.add(Transfer(id="sale", league_id="L", player_id=row.player_id, date=self.end,
+                            buyer_id="rival", price=price))
+            db.add(TradeLog(user_id="viewer", league_id="L", player_id=row.player_id, kind="bid",
+                            purpose="profit", status="lost", at=self.at, resolved_at=self.end,
+                            details={"winner_id": "rival", "winner_price": price}))
+            db.commit()
+            settle_due(db, "viewer", "L", utcnow())
+            db.commit()
+        report = shadow_report(self.engine, "viewer", "L")
+        self.assertEqual(report["bids"]["standard"]["won"], 1)
+        self.assertEqual(report["learning"]["samples"], 1)
+        self.assertEqual(report["learning"]["rate"], 0)

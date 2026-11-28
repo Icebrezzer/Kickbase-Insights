@@ -42,41 +42,41 @@ Ziel des Epics: Der Trader lernt auch ohne eigene Transfers – aus jeder releva
 - **Abnahmekriterien:** Jede Kategorie aus der Übergabe §8.1 ist einem Reason Code zugeordnet und im Test vertreten.
 
 ### E03.03 – Systematische Stichprobenauswahl
-- **Umsetzung im W6-Branch:** Gewichtete Auswahl nach Preisklasse und Hauptgrund aus dem Bestand des Nutzers in der Liga. Limit 1–200, Standard 32. Bestandspflege verbraucht keine Plätze. 200 Kandidaten, 20 Schichten in vier Runden im Auswahltest.
+- **Status W6: umgesetzt und geprüft.** Gewichtete Auswahl nach Preisklasse und Hauptgrund aus dem Bestand des Nutzers in der Liga. Limit 1–200, Standard 32. Bestandspflege verbraucht keine Plätze. 200 Kandidaten, 20 Schichten in vier Runden im Auswahltest.
 - **Priorität:** P2 · **Abhängig von:** E03.02 · **Aufwand:** S
 - **Ziel:** Begrenzte Zahl je Runde (konfigurierbar), stratifiziert nach Preisklasse × Ablehnungsgrund (erweitert die bestehende Preisklassen-Streuung), Vorrang für bisher unterrepräsentierte Schichten.
 - **Abnahmekriterien:** Bei 200 Kandidaten höchstens N neue Snapshots je Runde; jede vorhandene Schicht erscheint innerhalb von k Runden.
 
 ### E03.04 – Alternative Gebote simulieren
-- **Umsetzung im W6-Branch:** Vier Gebotsstufen und positives EV-Gebot aus dem zum Entscheidungszeitpunkt verfügbaren Ligamodell. Eigener Zuschlag, fehlender Preis, Gleichstand und mehrdeutige Evidenz erzeugen keinen simulierten Sieg. Zeitliche Zuordnung erfordert Listungszeit, Verkäufer und Auktionsende ±1 Sekunde. Nachprüfung bis 48 Stunden.
+- **Status W6: umgesetzt und geprüft.** Vier Gebotsstufen und positives EV-Gebot aus dem zum Entscheidungszeitpunkt verfügbaren Ligamodell. Eigener Zuschlag, fehlender Preis, Gleichstand und mehrdeutige Evidenz erzeugen keinen simulierten Sieg. Zeitliche Zuordnung erfordert Listungszeit, Verkäufer und Auktionsende ±1 Sekunde. Nachprüfung bis 48 Stunden.
 - **Priorität:** P2 · **Abhängig von:** E03.01 · **Aufwand:** M
 - **Ziel:** Je Snapshot Varianten: Mindestgebot, defensiv, Standard, aggressiv, EV-optimal. Abrechnung mit bekanntem Transfer: gewonnen nur bei Gebot > Gewinnerpreis; Gleichstand = unbekannt; verschwunden ohne Transfer = unbekannt (kein Lernen); kein Käufer (Kickbase-Spieler ohne Gebot) gesondert.
 - **Abnahmekriterien:** 1. Varianten zählen als **eine** Stichprobe (ADR-007). 2. Unbekannte Gewinnerpreise werden nie geschätzt. 3. Simulationsgrenze ausgewiesen: „andere Manager hätten anders reagieren können“.
 
 ### E03.05 – Alternative Verkaufsstrategien simulieren
-- **Umsetzung im W6-Branch:** Sechs vorab definierte Verkaufsregeln auf echtem Zuschlag und hypothetischen Gewinnen. Replay über maximal 14 Updates, Tageswerte aus lokalem Verlauf, Prognosen aus datierten Beobachtungen. Fehlende Tage brechen die Folge ab. Zukunftsänderung und Datenlücke getestet.
+- **Status W6: umgesetzt und geprüft.** Sechs vorab definierte Verkaufsregeln auf echtem Zuschlag und hypothetischen Gewinnen. Replay über maximal 14 Updates, Tageswerte aus lokalem Verlauf, Prognosen aus datierten Beobachtungen. Fehlende Tage brechen die Folge ab. Zukunftsänderung und Datenlücke getestet.
 - **Priorität:** P2 · **Abhängig von:** E03.04 · **Aufwand:** M
 - **Ziel:** Für hypothetisch gewonnene und echte Positionen: Verkauf nach 1/2/3 Updates, Prognose-Ausstieg, Trailing-Stop, Deadline-Verkauf – jeweils **vorab definierte Regel**, Bewertung zum jeweiligen Tageswert × Quote.
 - **Abnahmekriterien:** 1. Höchstwert nur als Feld `diagnostic_peak`, nie als Ergebnis einer Strategie. 2. Kein Zukunftswissen: Regel entscheidet je Tag nur mit Werten bis zu diesem Tag (Test: geänderte Zukunft ändert Entscheidung nicht).
 
 ### E03.06 – Entgangene Gewinne und vermiedene Verluste
-- **Umsetzung im W6-Branch:** Je Auktion ein Standardgebot mit zwei Updates als feste Referenz. Gruppierung nach Grund, Ausgang und Finanzierbarkeit mit Anzahl, Summe und Median. Bestätigte Verkäufe separat. 30 Tage, neueste 500 Entscheidungen.
+- **Status W6: umgesetzt und geprüft.** Je Auktion ein Standardgebot mit zwei Updates als feste Referenz. Gruppierung nach Grund, Ausgang und Finanzierbarkeit mit Anzahl, Summe und Median. Bestätigte Verkäufe separat. 30 Tage, neueste 500 Entscheidungen.
 - **Priorität:** P2 · **Abhängig von:** E03.05 · **Aufwand:** S
 - **Ziel:** Ergebnisarten getrennt: realisiert, hypothetisch einzeln, vermiedener Verlust, unbekannter Ausgang, nicht finanzierbar, hypothetisch finanzierbar. Je Reason Code: Summe, Anzahl, Median.
 - **Abnahmekriterien:** Keine Summe einzelner Hypothesen wird als erreichbarer Gesamtgewinn bezeichnet (gemeinsam realisierbar erst mit E09).
 
 ### E03.07 – Lerngewichtung und Deduplizierung
-- **Umsetzung im W6-Branch:** Separates diagnostisches Lernmodell für belegte Zuschläge und finanzierbare Standardgebote. Ein Schlüssel je Auktion, reale Evidenz zuerst, Halbwertszeit 30 Tage, volle Stützung ab zehn Auktionen. Keine Übernahme in Handelsparameter.
+- **Status W6: umgesetzt und geprüft.** Separates diagnostisches Lernmodell für belegte Zuschläge und finanzierbare Standardgebote. Ein Schlüssel je Auktion, reale Evidenz zuerst, Halbwertszeit 30 Tage, volle Stützung ab zehn Auktionen. Keine Übernahme in Handelsparameter.
 - **Priorität:** P2 · **Abhängig von:** E03.06 · **Aufwand:** S
 - **Ziel:** Gewicht nach Alter, Echtheit (echt 1,0, Schatten ≤ 0,5), Stichprobe; je Auktion höchstens einmal in Lernverfahren.
 
 ### E03.08 – Aufbewahrung und Performance
-- **Umsetzung im W6-Branch:** Aufbewahrung je Liga 7–365 Tage (Standard 120). Atomare Verdichtung je Nutzer, Liga, Berliner Marktwerttag, Grund und Preisklasse. Pro Runde höchstens 256 Löschungen je Detailtabelle. SQLite-Test: 100.000 Alt-Snapshots, 15,5 ms inklusive Commit für einen Batch. Größenordnung bei angenommenen 40 neuen Auktionen je Liga/Tag: 87.600 pro Jahr, 28.800 gleichzeitig bei 120 Tagen. Bei angenommenen 1–3 KiB je vollständiger Entscheidung ca. 28–84 MiB Detailbestand zuzüglich Tagesaggregate, WAL und freier Seiten.
+- **Status W6: umgesetzt und geprüft.** Aufbewahrung je Liga 7–365 Tage (Standard 120). Atomare Verdichtung je Nutzer, Liga, Berliner Marktwerttag, Grund und Preisklasse. Pro Runde höchstens 256 Löschungen je Detailtabelle. SQLite-Test: 100.000 Alt-Snapshots, 15,5 ms inklusive Commit für einen Batch. Größenordnung bei angenommenen 40 neuen Auktionen je Liga/Tag: 87.600 pro Jahr, 28.800 gleichzeitig bei 120 Tagen. Bei angenommenen 1–3 KiB je vollständiger Entscheidung ca. 28–84 MiB Detailbestand zuzüglich Tagesaggregate, WAL und freier Seiten.
 - **Priorität:** P2 · **Abhängig von:** E03.01 · **Aufwand:** S
 - **Ziel:** Konfigurierbare Aufbewahrung (Standard 120 Tage wie heute), danach Verdichtung in Tagesaggregate je Liga × Code × Preisklasse; Löschlauf in Batches.
 - **Abnahmekriterien:** DB-Wachstum bei 6 Ligen × 1 Jahr geschätzt und dokumentiert; Löschlauf < 1 s auf 100.000 Zeilen (SQLite).
 
 ### E03.09 – Shadow-Dashboard
-- **Umsetzung im W6-Branch:** Authentifizierte, liga- und nutzergebundene Lese-API und Dashboard auf der Automatikseite. Angezeigt werden Evidenz, Ergebnisse je Grund, Vergleich der Gebote und sechs Verkaufsregeln; Einstellungen für Aufbewahrung und Stichprobenlimit sind im Formular verfügbar. Leerer Datenbestand ist ein eigener Zustand.
+- **Status W6: umgesetzt und geprüft.** Authentifizierte, liga- und nutzergebundene Lese-API und Dashboard auf der Automatikseite. Angezeigt werden Evidenz, Ergebnisse je Grund, Vergleich der Gebote und sechs Verkaufsregeln; Einstellungen für Aufbewahrung und Stichprobenlimit sind im Formular verfügbar. Leerer Datenbestand ist ein eigener Zustand.
 - **Priorität:** P3 · **Abhängig von:** E03.06 · **Aufwand:** M
 - **Ziel:** Beobachtete Auktionen, verpasste Chancen, vermiedene Verluste, Gründe, alternative Gebote/Haltedauern, mit deutlicher Kennzeichnung „hypothetisch“.
