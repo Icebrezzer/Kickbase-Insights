@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import statistics
 import sys
 import tempfile
@@ -47,6 +48,8 @@ def main():
             row = state.automation.get_settings("1001", "4242")
             row.trader = True
             row.trader_live = False
+            if os.environ.get("KBI_BENCH_SNAPSHOTS") == "1":
+                row.trader_flags = {"decision_snapshots": "shadow"}
             queries = []
 
             def count(*args):

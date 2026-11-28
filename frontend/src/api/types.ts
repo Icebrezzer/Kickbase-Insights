@@ -501,6 +501,8 @@ export type AutomationSettings = {
 }
 
 export type TraderOptions = {
+  snapshotDays: number
+  snapshotLimit: number
   minGain: number
   maxCostPerPoint: number
   minAvgEdge: number

@@ -713,7 +713,7 @@ def main() -> None:
               f"the options of a 2.0 export can be previewed ({old_export['changes']})")
 
         ### E03.01/E03.02: decision snapshots only with the flag, one per user and auction, same decisions
-        from db.models import DecisionSnapshot
+        from db.models import DecisionSnapshot, ShadowAnalysis
 
         def snapshots() -> list:
             with Session(state.engine) as s:
@@ -723,6 +723,7 @@ def main() -> None:
         from sqlmodel import delete as sql_delete
 
         with Session(state.engine) as s:
+            s.exec(sql_delete(ShadowAnalysis))
             s.exec(sql_delete(DecisionSnapshot))
             s.commit()
         settings_now = state.automation.get_settings("1001", "4242")
@@ -732,6 +733,8 @@ def main() -> None:
         settings_now = state.automation.get_settings("1001", "4242")
         plan_on, _ = state.automation.trader._plan(league, settings_now, squad_l, 200_000_000, market_l, utcnow())
         taken = snapshots()
+        report = client.get("/api/automation/trader/shadow-intelligence")
+        check(report.status_code == 200 and report.json()["observed"] == len(taken), "viewer sees sampled auctions")
         listed_ids = {p.id for p in market_l.players if p.seller is None or p.seller.id != "1001"}
         check(len(taken) > 5 and {r.player_id for r in taken} <= listed_ids, f"snapshots of the market decisions ({len(taken)})")
         check([(a.kind, a.player_id, a.price) for a in plan_on] == [(a.kind, a.player_id, a.price) for a in plan_off], "the flag changes no decision")

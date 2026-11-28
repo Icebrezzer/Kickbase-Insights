@@ -3,11 +3,12 @@
 from collections import defaultdict
 from datetime import datetime, timedelta
 
+from sqlalchemy import tuple_
 from sqlmodel import Session, select
 
 from core import analytics
 from core.shadow_intelligence import AuctionEvidence, bid_variants, sale_strategies, settle_bids
-from db.models import ForecastObservation, MarketValueHistory, ShadowAnalysis, Transfer
+from db.models import DecisionSnapshot, ForecastObservation, MarketValueHistory, ShadowAnalysis, Transfer
 
 
 def freeze(user, league, pid, auction, values, listing, extra, deadline, trailing, now):
@@ -16,7 +17,9 @@ def freeze(user, league, pid, auction, values, listing, extra, deadline, trailin
         end = now + timedelta(seconds=listing.expires_in)
     floor = values.get("min_bid") or max(values.get("price") or 0, values.get("value") or 0)
     bids = bid_variants(floor, values.get("hypothetical_bid"), None) if floor > 0 else {}
-    if extra.get("ev") and extra["ev"] >= bids.get("minimum", 0):
+    if end and end <= now:
+        bids = {}
+    if bids and extra.get("ev") and extra["ev"] >= bids.get("minimum", 0):
         bids["ev"] = extra["ev"]
     return ShadowAnalysis(user_id=user, league_id=league, player_id=pid, auction=auction,
         next_check=end + timedelta(seconds=2) if end else None, inputs={
@@ -25,6 +28,17 @@ def freeze(user, league, pid, auction, values, listing, extra, deadline, trailin
             "ratio": values.get("sell_ratio"), "deadline": deadline, "trailing": trailing,
             "no_buyer": bool(listing and listing.seller is None and listing.expires_in == 0 and listing.offer_count == 0),
         })
+
+
+def record_closed_listings(session, user, league, listings):
+    """A later observation of the same expired free-agent listing can supply no-buyer evidence."""
+    closed = [(p.id, p.listed_at.isoformat()) for p in listings.values()
+              if p.listed_at and p.seller is None and p.expires_in == 0 and p.offer_count == 0]
+    if closed:
+        for row in session.exec(select(ShadowAnalysis).where(ShadowAnalysis.user_id == user,
+                ShadowAnalysis.league_id == league, tuple_(ShadowAnalysis.player_id, ShadowAnalysis.auction).in_(closed))):
+            if not row.inputs.get("no_buyer"):
+                row.inputs = {**row.inputs, "no_buyer": True}
 
 
 def settle_due(session: Session, user: str, league: str, now: datetime):
@@ -58,7 +72,7 @@ def settle_due(session: Session, user: str, league: str, now: datetime):
         own = sale is not None and sale.buyer_id == user
         evidence = AuctionEvidence(sale.price if sale and not own else None, bool(not matches and data["no_buyer"]))
         row.result = {"outcomes": {v.name: v.outcome for v in settle_bids(data["bids"], evidence)},
-                      "winner_price": sale.price if sale else None, "own": own}
+                      "winner_price": sale.price if sale else None, "own": own, "no_buyer": evidence.confirmed_no_buyer}
         row.next_check = None if sale or evidence.confirmed_no_buyer or now >= end + timedelta(days=2) else now + timedelta(hours=1)
         if sale and (own or "won" in row.result["outcomes"].values()):
             start = analytics.market_value_day(sale.date)
@@ -68,7 +82,12 @@ def settle_due(session: Session, user: str, league: str, now: datetime):
             for day, obs in observations[row.player_id].items():
                 if day <= today:
                     points[day] = (obs.value, obs.forecast_1)
-            end_day = analytics.market_value_day(deadline) if deadline and deadline > sale.date else None
+            end_day = analytics.market_value_day(deadline) if deadline and sale.date < deadline <= now else None
             row.result = {**row.result, **sale_strategies(start, points, data["ratio"] or 0, data["trailing"], end_day)}
             if today <= start + 14:
                 row.next_check = now + timedelta(hours=6)
+    finished = [(row.player_id, row.auction) for row in rows if row.next_check is None]
+    if finished:
+        from sqlalchemy import update
+        session.exec(update(DecisionSnapshot).where(DecisionSnapshot.user_id == user, DecisionSnapshot.league_id == league,
+            tuple_(DecisionSnapshot.player_id, DecisionSnapshot.auction).in_(finished)).values(resolved=True))

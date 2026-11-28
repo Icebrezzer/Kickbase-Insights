@@ -3,7 +3,12 @@ import unittest
 from collections import Counter
 
 from core.shadow_intelligence import (
-    AuctionEvidence, AuctionOutcome, Candidate, bid_variants, select_candidates, settle_bids,
+    AuctionEvidence,
+    AuctionOutcome,
+    Candidate,
+    bid_variants,
+    select_candidates,
+    settle_bids,
 )
 
 

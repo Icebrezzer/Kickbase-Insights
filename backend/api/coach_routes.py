@@ -49,6 +49,7 @@ from core.trader import PROFILES, Learned, Options
 from core.trader import profile as profile_options
 from db.models import utcnow
 from kickbase import KickbaseClient
+from sync.shadow_report import shadow_report
 from sync.strategy import ConfigConflict
 
 router = APIRouter(prefix="/api")
@@ -256,6 +257,11 @@ async def trader_dashboard(state: StateDep, league_id: LeagueIdDep, viewer: View
     protections, the candidates with their reasons) and its statistics."""
     automation = _automation(state)
     return await asyncio.to_thread(automation.trader.dashboard, viewer.user_id, league_id)
+
+
+@router.get("/automation/trader/shadow-intelligence")
+async def shadow_intelligence(state: StateDep, league_id: LeagueIdDep, viewer: ViewerDep) -> dict:
+    return await asyncio.to_thread(shadow_report, state.engine, viewer.user_id, league_id)
 
 
 @router.get("/automation/trader/profiles", response_model=dict[str, TraderOptionsIn])

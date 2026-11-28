@@ -165,6 +165,8 @@ def classify(reason: str, inputs: dict, result: dict) -> tuple[str, int | None, 
     outcome = result.get("outcomes", {}).get("standard")
     cap = inputs.get("cap")
     finance = "unknown" if bid is None or cap is None else "feasible" if bid <= cap else "infeasible"
+    if result.get("no_buyer"):
+        return "no_buyer", None, finance
     if result.get("own"):
         return "purchased", None, finance
     if outcome in ("lost", "no_buyer"):

@@ -52,6 +52,10 @@ jobs:
         run: python tests/check_trader_forecast_quality.py
       - name: Autotrader backtest (no look-ahead, real winner prices)
         run: python tests/check_trader_backtest.py
+      - name: Shadow Intelligence replay and storage
+        run: |
+          python -m unittest discover -s tests -p "check_shadow*.py" -v
+          python tests/benchmark_shadow_retention.py
       - name: Offline audit regressions
         run: python tests/check_audit_regressions.py
       - name: League settings, migrations and lineup bounds

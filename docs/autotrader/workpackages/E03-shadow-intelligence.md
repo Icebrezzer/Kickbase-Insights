@@ -77,5 +77,6 @@ Ziel des Epics: Der Trader lernt auch ohne eigene Transfers – aus jeder releva
 - **Abnahmekriterien:** DB-Wachstum bei 6 Ligen × 1 Jahr geschätzt und dokumentiert; Löschlauf < 1 s auf 100.000 Zeilen (SQLite).
 
 ### E03.09 – Shadow-Dashboard
+- **Umsetzung im W6-Branch:** Authentifizierte, liga- und nutzergebundene Lese-API und Dashboard auf der Automatikseite. Angezeigt werden Evidenz, Ergebnisse je Grund, Vergleich der Gebote und sechs Verkaufsregeln; Einstellungen für Aufbewahrung und Stichprobenlimit sind im Formular verfügbar. Leerer Datenbestand ist ein eigener Zustand.
 - **Priorität:** P3 · **Abhängig von:** E03.06 · **Aufwand:** M
 - **Ziel:** Beobachtete Auktionen, verpasste Chancen, vermiedene Verluste, Gründe, alternative Gebote/Haltedauern, mit deutlicher Kennzeichnung „hypothetisch“.

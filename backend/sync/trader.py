@@ -35,13 +35,13 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
-from sqlalchemy import case, func
+from sqlalchemy import case, func, tuple_
 from sqlmodel import Session, delete, select
 
 from api.context import load_context
 from core import analytics, coach, finance, flags, learning, risk
-from core import shadow_intelligence as si
 from core import reasons as rc
+from core import shadow_intelligence as si
 from core import trader as t
 from db import exclusive
 from db.models import (
@@ -62,9 +62,9 @@ from db.models import (
 )
 from kickbase import KickbaseAuthError, KickbaseClient, KickbaseError
 from kickbase import models as kb
+from sync import shadow_analysis, shadow_retention
 from sync.learning import load_state
 from sync.learning import sell_ratio as learned_sell_ratio
-from sync import shadow_analysis, shadow_retention
 from sync.strategy import StrategyStore
 
 if TYPE_CHECKING:
@@ -75,8 +75,6 @@ log = logging.getLogger(__name__)
 ### The instant sale ratio is the league option `sell_ratio` (t.sell_ratio): Kickbase pays the market value
 ### Forecast observations (E10.00) are kept this long, then only their statistics are gone too
 FORECAST_KEEP_DAYS = 120
-### Decision snapshots (E03.01) are kept this long
-SNAPSHOT_KEEP_DAYS = 120
 ### Paper purchases started per round and league, the most promising first
 SHADOWS_PER_ROUND = 5
 SHADOW_KEEP = timedelta(days=120)
@@ -767,7 +765,7 @@ class TraderService:
             debug["gaps_projected"] = t.best_of([*own0, *pending.values(), *new]).empty_slots if own0 or pending or new else 11
             debug["runtime_ms"] = int((time.monotonic() - started) * 1000)
             if "market" in debug:
-                self._snapshot(league.id, row, debug, listed, snapshot_extra, now)
+                self._snapshot(league.id, row, debug, listed, snapshot_extra, now, opts)
             self._notify(league.id, user_id, debug, stage, deadline, now)
             self._log_debug(league.id, user_id, debug)
             return approved, [s for s in shadows if s.player_id not in {a.player_id for a in approved}]
@@ -982,6 +980,8 @@ class TraderService:
         spread = [c for rank in range(len(ranked_profit)) for group in by_class.values() if rank < len(group) for c in [group[rank]]]
         shadow_ids = {c.player_id for c in spread[:SHADOWS_PER_ROUND]}
         money_seen: dict[str, int] = {}
+        snapshot_caps = {}
+        snapshots_on = watched("decision_snapshots")
 
         shadows: list[ShadowTrade] = []
         sold_now = any(a.kind == "sell" for a in actions)
@@ -1026,6 +1026,12 @@ class TraderService:
                 keep += len(t.missing_cover(planned, bench)) * opts.cover_max_price
             backing = collateral_for(c, purpose, upgrade)
             money_seen[c.player_id] = money_for(c, free, purpose) - keep + (backing.value if backing else 0)
+            if snapshots_on:
+                # Only confirmed opening funds and unconditional credit; never include a planned sale.
+                cash = min(free, budget - opts.reserve - sum(open_bids.values()))
+                available = money_for(c, cash, purpose) - keep
+                cap = min(available, profit_room) if profit else int(available * opts.lineup_share / 100)
+                snapshot_caps.setdefault(c.player_id, min(cap, money_check["max_bid_free"]))
             bid = _price(c, purpose, upgrade, extra, money_seen[c.player_id], opts, state, ratio, profit_room, shares) if slots > 0 else None
             sale = None
             if bid is None:
@@ -1110,11 +1116,11 @@ class TraderService:
             considered.setdefault(c.player_id, purpose)
         for c in market_candidates:
             ev = None
-            if flags.effective(flags.load(row.trader_flags), "decision_snapshots", row.trader_live) != flags.OFF:
+            if snapshots_on:
                 worth = t.expected_proceeds(c, ratio)
                 ev = t.best_bid(replace(c, price=max(c.price, c.bid_low)), worth, worth, t.winning_markups(shares, c.value))
             snapshot_extra[c.player_id] = {
-                "ev": ev[0] if ev else None, "cap": min(free, money_seen[c.player_id]) if c.player_id in money_seen else None,
+                "ev": ev[0] if ev else None, "cap": snapshot_caps.get(c.player_id),
                 "forecast_2": raw_gain.get(c.player_id), "purpose": considered.get(c.player_id),
                 "hypothetical_bid": t.bid_for(c, state.extra[coach.price_class(c.value)], None),
             }
@@ -1165,7 +1171,7 @@ class TraderService:
     SNAPSHOT_SKIP = (rc.OWN_PLAYER, rc.OWN_BID_OPEN, rc.NO_MARKET_DATA)
 
     def _snapshot(self, league_id: str, row: UserAutomation, debug: dict, listed: dict, extra: dict[str, dict],
-                  now: datetime) -> None:
+                  now: datetime, opts: t.Options) -> None:
         """E03.01/E03.02: every market decision of the round, once per user and auction, from what the
         round already holds (no Kickbase call). Later rounds only note a changed reason. Only while the
         flag decision_snapshots is not off; a failure never stops a trading round."""
@@ -1211,11 +1217,12 @@ class TraderService:
             }
         try:
             with Session(self.engine) as session:
+                shadow_analysis.record_closed_listings(session, row.user_id, league_id, listed)
                 shadow_analysis.settle_due(session, row.user_id, league_id, now)
                 stored = {
                     (r.player_id, r.auction): r for r in session.exec(select(DecisionSnapshot).where(
                         DecisionSnapshot.user_id == row.user_id, DecisionSnapshot.league_id == league_id,
-                        DecisionSnapshot.player_id.in_([pid for pid, _ in rows]))).all()
+                        tuple_(DecisionSnapshot.player_id, DecisionSnapshot.auction).in_(list(rows)))).all()
                 }
                 candidates = [si.Candidate(pid, auction, coach.price_class(v["value"]), v["reason"])
                               for (pid, auction), v in rows.items() if (pid, auction) not in stored]
@@ -1228,14 +1235,14 @@ class TraderService:
                         select(bucket, snap.reason, func.count()).where(snap.user_id == row.user_id,
                             snap.league_id == league_id).group_by(bucket, snap.reason))}
                     selected = {c.key for c in si.select_candidates(candidates, set(), counts,
-                                t.Options.load(row.trader_options).snapshot_limit)}
+                                opts.snapshot_limit)}
                 for (pid, auction), values in rows.items():
                     if (pid, auction) not in stored and (pid, auction) not in selected:
                         continue
                     old = stored.get((pid, auction))
                     if old is None:
                         session.add(shadow_analysis.freeze(row.user_id, league_id, pid, auction, values, listed.get(pid),
-                            extra.get(pid, {}), debug.get("deadline"), t.Options.load(row.trader_options).trailing_stop, now))
+                            extra.get(pid, {}), debug.get("deadline"), opts.trailing_stop, now))
                         session.add(DecisionSnapshot(user_id=row.user_id, league_id=league_id, player_id=pid, auction=auction,
                                                      first_seen=now, last_changed=now, last_reason=values["reason"], **values))
                     elif old.last_reason != values["reason"]:
@@ -1244,7 +1251,7 @@ class TraderService:
                 scope = (row.user_id, league_id)
                 removed = 0
                 if self._snapshots_pruned.get(scope) != day:
-                    cutoff = now - timedelta(days=t.Options.load(row.trader_options).snapshot_days)
+                    cutoff = now - timedelta(days=opts.snapshot_days)
                     removed = shadow_retention.archive_batch(session, *scope, cutoff)
                 session.commit()
             if removed < shadow_retention.BATCH:

@@ -5,6 +5,7 @@ Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Au
 ## [Unveröffentlicht] – Auto-Trader 3.0
 
 ### Hinzugefügt
+- E03.03–09: Stratifizierte Entscheidungs-Snapshots, alternative Gebote und Verkaufsregeln, gewichtete Auswertung, tägliche Archive und Shadow Intelligence auf der Automatikseite. Alle Simulationen verwenden lokale Daten. Details in `docs/autotrader/WAVE6_HANDOVER.md`.
 - E04.01/03/04/05/06/10: Finanzierung (`core/finance.py`) hinter Flags, alle Standard aus.
   - Verkaufserlöse in drei Szenarien; mit `scenario_credit` gilt der Kredit nur auf dem pessimistischen Erlös.
   - Mit `conditional_repayment` sichert ein Gewinnziel sein Gebot selbst ab.

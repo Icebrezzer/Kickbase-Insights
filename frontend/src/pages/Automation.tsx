@@ -20,6 +20,7 @@ import {
   withLeague,
   type TraderDashboard,
 } from "@/api/hooks"
+import { ShadowIntelligence } from "@/components/ShadowIntelligence"
 import { useLeagueId } from "@/lib/league"
 import type { AutomationSettings, TraderOptions } from "@/api/types"
 import { Badge, Button, Card, CardHeader, EmptyState, PageHeader, QueryState, Stat } from "@/components/ui"
@@ -36,6 +37,7 @@ export default function Automation() {
         <PushCard />
         <QueryState query={settings}>{(data) => <SettingsCard initial={data} />}</QueryState>
         <TraderDashboardCard />
+        <ShadowIntelligence />
         <TraderCard />
         <ForecastCard />
         <LearningCard />
@@ -265,6 +267,8 @@ function SettingsCard({ initial }: { initial: AutomationSettings }) {
                   </span>
                 </label>
                 <OptionField label="Höchstpreis für einen Ersatzspieler (€)" value={opts.coverMaxPrice} min={0} max={50_000_000} money onCommit={(coverMaxPrice) => setOption({ coverMaxPrice })} />
+                <OptionField label="Neue Snapshots pro Runde" value={opts.snapshotLimit} min={1} max={200} onCommit={(snapshotLimit) => setOption({ snapshotLimit })} />
+                <OptionField label="Snapshot-Aufbewahrung (Tage)" value={opts.snapshotDays} min={7} max={365} onCommit={(snapshotDays) => setOption({ snapshotDays })} />
                 <OptionField label="Gebote pro Tag" value={opts.dailyBids} min={0} max={30} onCommit={(dailyBids) => setOption({ dailyBids })} />
                 <OptionField label="Verkäufe pro Tag" value={opts.dailySales} min={0} max={30} onCommit={(dailySales) => setOption({ dailySales })} />
                 <OptionField label="Verkauf für Platz: Minuten vor Auktionsende" value={opts.sellWindow} min={5} max={180} onCommit={(sellWindow) => setOption({ sellWindow })} />
@@ -385,12 +389,14 @@ const OPTION_LABELS: Record<string, string> = {
   sellRatio: "Verkaufsquote %",
   upgradeCrossPosition: "Formationswechsel nach Punkten",
   benchStrategy: "Ersatzbank",
+  snapshotDays: "Snapshot-Aufbewahrung",
+  snapshotLimit: "Neue Snapshots pro Runde",
 }
 
 /** A strategy profile as a starting point: shows what would change, applies only after a confirmation.
  *  The switches (shadow trades, emergency rule) stay as they are. */
 /** Profiles never change these: switches and facts about Kickbase, not strategy */
-const PROFILE_KEEPS: (keyof TraderOptions)[] = ["shadow", "rescueOverride", "sellRatio", "upgradeCrossPosition", "benchStrategy"]
+const PROFILE_KEEPS: (keyof TraderOptions)[] = ["shadow", "rescueOverride", "sellRatio", "upgradeCrossPosition", "benchStrategy", "snapshotDays", "snapshotLimit"]
 
 function ProfilePicker({ current, onApply }: { current: TraderOptions; onApply: (next: TraderOptions) => void }) {
   const profiles = useTraderProfiles()
@@ -438,6 +444,8 @@ function ProfilePicker({ current, onApply }: { current: TraderOptions; onApply: 
                     sellRatio: current.sellRatio,
                     upgradeCrossPosition: current.upgradeCrossPosition,
                     benchStrategy: current.benchStrategy,
+                    snapshotLimit: current.snapshotLimit,
+                    snapshotDays: current.snapshotDays,
                   })
                   setName("")
                 }}

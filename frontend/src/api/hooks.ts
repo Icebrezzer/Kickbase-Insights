@@ -488,3 +488,15 @@ export const useManagerDetail = (id: string, day: number | null) =>
   })
 
 export const useLearning = () => useLeagueQuery<Learning>(["learning"], "/learning", { staleTime: 10 * 60_000 })
+
+type ShadowStats = { count: number; sum: number | null; median: number | null }
+export type ShadowReport = {
+  observed: number; days: number; limit: number
+  categories: Record<string, number>; realized: ShadowStats
+  reasons: (ShadowStats & { reason: string; category: string; finance: string })[]
+  bids: Record<string, Record<string, number>>
+  sales: Record<string, ShadowStats>
+  learning: { samples: number; weight: number; rate: number | null }
+}
+export const useShadowReport = () =>
+  useLeagueQuery<ShadowReport>(["shadow-intelligence"], "/automation/trader/shadow-intelligence", { staleTime: 60_000 })
