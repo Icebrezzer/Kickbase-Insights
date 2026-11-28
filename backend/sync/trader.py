@@ -64,6 +64,7 @@ from kickbase import KickbaseAuthError, KickbaseClient, KickbaseError
 from kickbase import models as kb
 from sync.learning import load_state
 from sync.learning import sell_ratio as learned_sell_ratio
+from sync import shadow_analysis
 from sync.strategy import StrategyStore
 
 if TYPE_CHECKING:
@@ -1108,7 +1109,12 @@ class TraderService:
         for _, purpose, c, _ in options:
             considered.setdefault(c.player_id, purpose)
         for c in market_candidates:
+            ev = None
+            if flags.effective(flags.load(row.trader_flags), "decision_snapshots", row.trader_live) != flags.OFF:
+                worth = t.expected_proceeds(c, ratio)
+                ev = t.best_bid(replace(c, price=max(c.price, c.bid_low)), worth, worth, t.winning_markups(shares, c.value))
             snapshot_extra[c.player_id] = {
+                "ev": ev[0] if ev else None, "cap": min(free, money_seen[c.player_id]) if c.player_id in money_seen else None,
                 "forecast_2": raw_gain.get(c.player_id), "purpose": considered.get(c.player_id),
                 "hypothetical_bid": t.bid_for(c, state.extra[coach.price_class(c.value)], None),
             }
@@ -1203,10 +1209,9 @@ class TraderService:
                 **common, "listed_at": listing.listed_at, "value": listing.market_value, "price": listing.price,
                 "reason": found[0], "reasons": found[1:],
             }
-        if not rows:
-            return
         try:
             with Session(self.engine) as session:
+                shadow_analysis.settle_due(session, row.user_id, league_id, now)
                 stored = {
                     (r.player_id, r.auction): r for r in session.exec(select(DecisionSnapshot).where(
                         DecisionSnapshot.user_id == row.user_id, DecisionSnapshot.league_id == league_id,
@@ -1229,6 +1234,8 @@ class TraderService:
                         continue
                     old = stored.get((pid, auction))
                     if old is None:
+                        session.add(shadow_analysis.freeze(row.user_id, league_id, pid, auction, values, listed.get(pid),
+                            extra.get(pid, {}), debug.get("deadline"), t.Options.load(row.trader_options).trailing_stop, now))
                         session.add(DecisionSnapshot(user_id=row.user_id, league_id=league_id, player_id=pid, auction=auction,
                                                      first_seen=now, last_changed=now, last_reason=values["reason"], **values))
                     elif old.last_reason != values["reason"]:

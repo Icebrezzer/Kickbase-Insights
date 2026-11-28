@@ -48,6 +48,7 @@ Ziel des Epics: Der Trader lernt auch ohne eigene Transfers – aus jeder releva
 - **Abnahmekriterien:** Bei 200 Kandidaten höchstens N neue Snapshots je Runde; jede vorhandene Schicht erscheint innerhalb von k Runden.
 
 ### E03.04 – Alternative Gebote simulieren
+- **Umsetzung im W6-Branch:** Vier Gebotsstufen und positives EV-Gebot aus dem zum Entscheidungszeitpunkt verfügbaren Ligamodell. Eigener Zuschlag, fehlender Preis, Gleichstand und mehrdeutige Evidenz erzeugen keinen simulierten Sieg. Zeitliche Zuordnung erfordert Listungszeit, Verkäufer und Auktionsende ±1 Sekunde. Nachprüfung bis 48 Stunden.
 - **Priorität:** P2 · **Abhängig von:** E03.01 · **Aufwand:** M
 - **Ziel:** Je Snapshot Varianten: Mindestgebot, defensiv, Standard, aggressiv, EV-optimal. Abrechnung mit bekanntem Transfer: gewonnen nur bei Gebot > Gewinnerpreis; Gleichstand = unbekannt; verschwunden ohne Transfer = unbekannt (kein Lernen); kein Käufer (Kickbase-Spieler ohne Gebot) gesondert.
 - **Abnahmekriterien:** 1. Varianten zählen als **eine** Stichprobe (ADR-007). 2. Unbekannte Gewinnerpreise werden nie geschätzt. 3. Simulationsgrenze ausgewiesen: „andere Manager hätten anders reagieren können“.

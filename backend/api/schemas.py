@@ -632,6 +632,7 @@ class TraderOptionsIn(Schema):
     profit_share: int = Field(60, ge=10, le=100) # % of team value plus balance all profit trades together
     reserve: int = Field(0, ge=0, le=500_000_000) # € never spent
     cover_max_price: int = Field(3_000_000, ge=0, le=50_000_000)
+    snapshot_limit: int = Field(32, ge=1, le=200)
     daily_bids: int = Field(6, ge=0, le=30)
     daily_sales: int = Field(3, ge=0, le=30)
     stop_loss: int = Field(3_000_000, ge=0, le=100_000_000) # Weekly loss that pauses profit trading, 0 never

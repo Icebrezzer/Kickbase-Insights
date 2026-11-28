@@ -71,3 +71,5 @@ Volle Backend-Suite 17/17 grün: Ruff, 12 Skripte aus der CI, Migration gegen `e
 4. Nach jedem Paket: Eintrag im Paket (Ergebnis, Commit), diese Datei, `CHANGELOG.md`.
 
 - E03.03 (W6): Gewichtete Auswahl nach Preisklasse und Hauptgrund aus dem Bestand des Nutzers in der Liga. Limit 1–200, Standard 32. Bestandspflege verbraucht keine Plätze. 200 Kandidaten, 20 Schichten in vier Runden im Auswahltest.
+
+- E03.04 (W6): Vier Gebotsstufen und positives EV-Gebot aus dem zum Entscheidungszeitpunkt verfügbaren Ligamodell. Eigener Zuschlag, fehlender Preis, Gleichstand und mehrdeutige Evidenz erzeugen keinen simulierten Sieg. Zeitliche Zuordnung erfordert Listungszeit, Verkäufer und Auktionsende ±1 Sekunde. Nachprüfung bis 48 Stunden.

@@ -588,3 +588,15 @@ class AuctionLog(SQLModel, table=True):
     winner_id: str | None = None
     final_price: int | None = _money()
     resolved: bool = False
+
+
+class ShadowAnalysis(SQLModel, table=True):
+    """Frozen alternatives and evidence for one decision. Additive for older images."""
+    __table_args__ = (Index("ix_shadowanalysis_due", "user_id", "league_id", "next_check"),)
+    user_id: str = Field(primary_key=True)
+    league_id: str = Field(primary_key=True)
+    player_id: str = Field(primary_key=True)
+    auction: str = Field(primary_key=True)
+    next_check: datetime | None = _ts()
+    inputs: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    result: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
