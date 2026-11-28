@@ -144,3 +144,16 @@ class ShadowStorage(unittest.TestCase):
         self.assertEqual(report["bids"]["standard"]["won"], 1)
         self.assertEqual(report["learning"]["samples"], 1)
         self.assertEqual(report["learning"]["rate"], 0)
+
+    def test_two_overlapping_listings_never_share_a_transfer(self):
+        self.snapshot()
+        with Session(self.engine) as db:
+            row = db.exec(select(DecisionSnapshot)).first()
+            db.add(DecisionSnapshot(**{**row.model_dump(), "auction": "relisted",
+                "listed_at": self.at + timedelta(minutes=1), "expires_at": self.end + timedelta(minutes=15)}))
+            db.add(Transfer(id="sale", league_id="L", player_id=row.player_id,
+                            buyer_id="rival", price=1000, date=self.end))
+            db.commit()
+            settle_due(db, "viewer", "L", utcnow())
+            db.commit()
+            self.assertTrue(all(r.result["winner_price"] is None for r in db.exec(select(ShadowAnalysis))))

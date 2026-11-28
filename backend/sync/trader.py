@@ -1213,6 +1213,7 @@ class TraderService:
                 continue
             rows[(pid, auction_key(pid))] = {
                 **common, "listed_at": listing.listed_at, "value": listing.market_value, "price": listing.price,
+                "expires_at": now + timedelta(seconds=listing.expires_in) if listing.expires_in is not None else None,
                 "reason": found[0], "reasons": found[1:],
             }
         try:

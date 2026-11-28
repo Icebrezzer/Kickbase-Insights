@@ -87,3 +87,5 @@ Volle Backend-Suite 17/17 grün: Ruff, 12 Skripte aus der CI, Migration gegen `e
 - E03.08 (W6): Aufbewahrung je Liga 7–365 Tage (Standard 120). Atomare Verdichtung je Nutzer, Liga, Berliner Marktwerttag, Grund und Preisklasse. Pro Runde höchstens 256 Löschungen je Detailtabelle. SQLite-Test: 100.000 Alt-Snapshots, 15,5 ms inklusive Commit für einen Batch. Größenordnung bei angenommenen 40 neuen Auktionen je Liga/Tag: 87.600 pro Jahr, 28.800 gleichzeitig bei 120 Tagen. Bei angenommenen 1–3 KiB je vollständiger Entscheidung ca. 28–84 MiB Detailbestand zuzüglich Tagesaggregate, WAL und freier Seiten.
 
 - E03.09 (W6): Authentifizierte, liga- und nutzergebundene Lese-API und Dashboard auf der Automatikseite. Angezeigt werden Evidenz, Ergebnisse je Grund, Vergleich der Gebote und sechs Verkaufsregeln; Einstellungen für Aufbewahrung und Stichprobenlimit sind im Formular verfügbar. Leerer Datenbestand ist ein eigener Zustand.
+
+- E03.04 (W6): Zusätzlicher Regressionstest: Sobald sich zwei bekannte Listungen desselben Spielers am Zuschlagszeitpunkt überschneiden, bleibt die Zuordnung unbekannt. Ein Transfer kann damit keine zwei Stichproben liefern.

@@ -62,6 +62,12 @@ def settle_due(session: Session, user: str, league: str, now: datetime):
             Transfer.date <= max(ends) + jitter)):
         transfers[sale.player_id].append(sale)
     ids = {r.player_id for r in rows}
+    overlaps = defaultdict(list)
+    snap = DecisionSnapshot
+    for pid, auction, listed, expires in session.exec(select(snap.player_id, snap.auction, snap.listed_at, snap.expires_at)
+            .where(snap.user_id == user, snap.league_id == league, snap.player_id.in_(ids),
+                   snap.listed_at <= max(ends) + jitter, snap.expires_at >= min(ends) - jitter)):
+        overlaps[pid].append((auction, listed, expires))
     histories = dict(session.exec(select(MarketValueHistory.player_id, MarketValueHistory.points)
                                   .where(MarketValueHistory.player_id.in_(ids))).all())
     lost_bids = defaultdict(list)
@@ -77,12 +83,14 @@ def settle_due(session: Session, user: str, league: str, now: datetime):
     for row, end in zip(rows, ends, strict=True):
         data = row.inputs
         matches = [s for s in transfers[row.player_id] if abs(s.date - end) <= jitter]
-        sale = matches[0] if len(matches) == 1 and data["listed"] else None
+        conflict = any(other != row.auction and listed - jitter <= end <= expires + jitter
+                       for other, listed, expires in overlaps[row.player_id])
+        sale = matches[0] if len(matches) == 1 and data["listed"] and not conflict else None
         if sale and (not sale.buyer_id or sale.seller_id != data["seller"] or
                      (sale.seller and not sale.seller_id) or sale.price <= 0):
             sale = None
         own = sale is not None and sale.buyer_id == user
-        evidence = AuctionEvidence(sale.price if sale and not own else None, bool(not matches and data["no_buyer"]))
+        evidence = AuctionEvidence(sale.price if sale and not own else None, bool(not conflict and not matches and data["no_buyer"]))
         row.result = {"outcomes": {v.name: v.outcome for v in settle_bids(data["bids"], evidence)},
                       "winner_price": sale.price if sale else None, "own": own, "no_buyer": evidence.confirmed_no_buyer}
         row.next_check = None if sale or evidence.confirmed_no_buyer or now >= end + timedelta(days=2) else now + timedelta(hours=1)
