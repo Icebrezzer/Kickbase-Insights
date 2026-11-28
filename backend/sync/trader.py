@@ -860,7 +860,9 @@ class TraderService:
         }
         if applies("scenario_credit"):
             liquidation = scenario_liquidation["pessimistic"]
-        loan = t.credit(budget, team_value, liquidation)
+        loan_full = t.credit(budget, team_value, liquidation)
+        ### E04.07: only part of the released credit, rounded down to the bid step
+        loan = loan_full * opts.credit_utilization // 100 // coach.BID_STEP * coach.BID_STEP if opts.credit_utilization < 100 else loan_full
         ### Profit trades together never tie up more than `profit_share` of team value plus balance
         holdings = sum(c.value for c in own if (h := bought.get(c.player_id)) is not None and h.purpose == "profit")
         profit_room = int((team_value + budget) * opts.profit_share / 100) - holdings - sum(
@@ -873,7 +875,7 @@ class TraderService:
             budget, team_value, sum(open_bids.values()), opts.reserve, loan,
             {p: risk.credit_for(p, None, stage, deadline, loan, opts.credit_mode) for p in ("lineup", "cover", "profit")},
             {p: risk.credit_for(p, None, "normal", None, loan, opts.credit_mode) for p in ("lineup", "cover", "profit")},
-            profit_room,
+            profit_room, loan_full,
         )
 
         def money_for(c: t.Candidate, cash: int, purpose: str) -> int:

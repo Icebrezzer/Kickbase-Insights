@@ -264,6 +264,14 @@ function SettingsCard({ initial }: { initial: AutomationSettings }) {
                     Wirkt erst mit dem Feature Flag „flexible_bench“. Ab 24 Std. vor dem Spieltag gilt bei „Keine Bank“ wieder volle Absicherung.
                   </span>
                 </label>
+                <OptionField
+                  label="Höchstens so viel des freigegebenen Kredits nutzen (%)"
+                  hint="100 = den ganzen Kredit, den Verkäufe bis zum Spieltag decken. Weniger lässt einen Puffer"
+                  value={opts.creditUtilization}
+                  min={0}
+                  max={100}
+                  onCommit={(creditUtilization) => setOption({ creditUtilization })}
+                />
                 <OptionField label="Höchstpreis für einen Ersatzspieler (€)" value={opts.coverMaxPrice} min={0} max={50_000_000} money onCommit={(coverMaxPrice) => setOption({ coverMaxPrice })} />
                 <OptionField label="Gebote pro Tag" value={opts.dailyBids} min={0} max={30} onCommit={(dailyBids) => setOption({ dailyBids })} />
                 <OptionField label="Verkäufe pro Tag" value={opts.dailySales} min={0} max={30} onCommit={(dailySales) => setOption({ dailySales })} />
@@ -385,12 +393,13 @@ const OPTION_LABELS: Record<string, string> = {
   sellRatio: "Verkaufsquote %",
   upgradeCrossPosition: "Formationswechsel nach Punkten",
   benchStrategy: "Ersatzbank",
+  creditUtilization: "Kreditauslastung %",
 }
 
 /** A strategy profile as a starting point: shows what would change, applies only after a confirmation.
  *  The switches (shadow trades, emergency rule) stay as they are. */
 /** Profiles never change these: switches and facts about Kickbase, not strategy */
-const PROFILE_KEEPS: (keyof TraderOptions)[] = ["shadow", "rescueOverride", "sellRatio", "upgradeCrossPosition", "benchStrategy"]
+const PROFILE_KEEPS: (keyof TraderOptions)[] = ["shadow", "rescueOverride", "sellRatio", "upgradeCrossPosition", "benchStrategy", "creditUtilization"]
 
 function ProfilePicker({ current, onApply }: { current: TraderOptions; onApply: (next: TraderOptions) => void }) {
   const profiles = useTraderProfiles()
@@ -438,6 +447,7 @@ function ProfilePicker({ current, onApply }: { current: TraderOptions; onApply: 
                     sellRatio: current.sellRatio,
                     upgradeCrossPosition: current.upgradeCrossPosition,
                     benchStrategy: current.benchStrategy,
+                    creditUtilization: current.creditUtilization,
                   })
                   setName("")
                 }}

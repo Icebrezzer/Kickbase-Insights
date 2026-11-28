@@ -58,6 +58,7 @@ SETTINGS: tuple[Setting, ...] = (
     _o("finance.reserve", "reserve", "int", "€", "Geld, das nie ausgegeben wird"),
     _o("finance.credit_mode", "credit_mode", "choice", "", "Kredit: 0 nie, 1 für Startelf und Ersatz, 2 auch für Gewinnhandel", (0, 1, 2)),
     _o("finance.lineup_cash_share_pct", "lineup_share", "int", "%", "Anteil des freien Geldes je Startelf- oder Ersatzgebot"),
+    _o("finance.max_utilization_pct", "credit_utilization", "int", "%", "Höchstens dieser Anteil des freigegebenen Kredits wird genutzt (100 = alles)"),
     _o("finance.sell_ratio_pct", "sell_ratio", "int", "%", "Sofortverkauf bringt diesen Anteil des Marktwerts (Kickbase: 100)"),
     ### Profit trading
     _o("profit.max_total_share_pct", "profit_share", "int", "%", "Alle Gewinnpositionen zusammen höchstens dieser Anteil von Teamwert + Kontostand"),

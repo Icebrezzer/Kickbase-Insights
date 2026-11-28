@@ -813,6 +813,14 @@ def main() -> None:
         check(debug_fin_live["finance"]["credit_from"] == "pessimistic" and debug_fin_live["credit"] <= debug_fin_off["credit"],
               f"pessimistic credit never above 2.0 ({debug_fin_live['credit']:,} <= {debug_fin_off['credit']:,})")
         client.put("/api/automation/trader/flags", json={"flags": {"conditional_repayment": "off", "upgrade_financing": "off", "scenario_credit": "off"}})
+        ### E04.07: half of the released credit, set through the configuration
+        client.post("/api/automation/trader/config/activate",
+                    json={"config": {"schema_version": 1, "finance": {"max_utilization_pct": 50}}, "expected_version": configs.active("1001", "4242").version})
+        _, debug_half = bench_round()
+        check(debug_half["credit"] <= debug_fin_off["credit"] // 2 + 10_000 and debug_half["credit"] % 10_000 == 0,
+              f"credit utilization 50 %: at most half the credit ({debug_half['credit']:,} of {debug_fin_off['credit']:,})")
+        client.post("/api/automation/trader/config/activate",
+                    json={"config": {"schema_version": 1, "finance": {"max_utilization_pct": 100}}, "expected_version": configs.active("1001", "4242").version})
         client.post("/api/automation/trader/config/activate",
                     json={"config": {"schema_version": 1, "bench": {"strategy": 0}}, "expected_version": configs.active("1001", "4242").version})
 

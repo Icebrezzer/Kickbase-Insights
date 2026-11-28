@@ -77,6 +77,8 @@ class Options:
     upgrade_cross_position: bool = False
     ### Bench strategy (E05.02), only with the flag flexible_bench: 0 full, 1 minimal, 2 none between matchdays
     bench_strategy: int = 0
+    ### Share of the released credit the trader may use (E04.07): 100 as before, less keeps a buffer
+    credit_utilization: int = 100
 
     @classmethod
     def load(cls, data: dict | None) -> Options:
@@ -168,6 +170,7 @@ OPTION_LIMITS: dict[str, tuple[float, float]] = {
     "max_hold_days": (0, 60),
     "sell_ratio": (50, 100),
     "bench_strategy": (0, 2),
+    "credit_utilization": (0, 100),
 }
 
 
@@ -444,10 +447,11 @@ LIMIT_LIQUIDATION = "LIQUIDATION" # Credit only as far as selling sellable playe
 LIMIT_CREDIT_MODE = "CREDIT_MODE" # The credit mode gives this purpose no credit
 LIMIT_PHASE = "PHASE" # Close to the deadline this purpose gets no credit
 LIMIT_PROFIT_ROOM = "PROFIT_ROOM" # Profit positions together stay within `profit_share`
+LIMIT_UTILIZATION = "UTILIZATION" # Only part of the released credit may be used (E04.07)
 
 
 def money_check(budget: int, team_value: int, open_bids: int, reserve: int, loan: int, credits: dict[str, int],
-                credit_anyway: dict[str, int], profit_room: int) -> dict:
+                credit_anyway: dict[str, int], profit_room: int, loan_full: int | None = None) -> dict:
     """The max bid next to the money released per purpose, and what makes up the difference.
 
     `credits` is the credit each purpose may use in this phase and mode, `credit_anyway` the same in the
@@ -457,12 +461,14 @@ def money_check(budget: int, team_value: int, open_bids: int, reserve: int, loan
     """
     max_bid = analytics.max_bid(budget, team_value)
     room = max_bid - max(budget, 0)
+    loan_full = loan if loan_full is None else loan_full
     free_max = max_bid - open_bids
     released: dict[str, int] = {}
     limits: dict[str, dict[str, int]] = {}
     for purpose, credit_now in credits.items():
         raw = budget - reserve - open_bids + credit_now
-        parts = {LIMIT_RESERVE: reserve, LIMIT_DEBT: max(0, -budget), LIMIT_LIQUIDATION: room - loan}
+        parts = {LIMIT_RESERVE: reserve, LIMIT_DEBT: max(0, -budget), LIMIT_LIQUIDATION: room - loan_full,
+                 LIMIT_UTILIZATION: loan_full - loan}
         parts[LIMIT_PHASE if credit_anyway.get(purpose, 0) > credit_now else LIMIT_CREDIT_MODE] = loan - credit_now
         value = raw
         if purpose == "profit" and raw > profit_room:

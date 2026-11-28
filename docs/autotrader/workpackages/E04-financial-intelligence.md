@@ -75,7 +75,13 @@ LiquidityPlan(budget, open_bids, squad, deadline, now, sales_used_today, config)
 - **Abnahmekriterien:** Doppelt beanspruchter Erlös → zweites Gebot `FINANCE_COLLATERAL_TAKEN`; Eigenschaftstest: Σ Sicherheiten ≤ Σ Einzelerlöse.
 
 ### E04.07 – Dynamische Kreditauslastung
-- **Priorität:** P2 · **Abhängig von:** E04.06, E02.04 · **Aufwand:** S
+- **Priorität:** P2 · **Status:** done (Teil 1) · **Abhängig von:** E04.06, E02.04 · **Aufwand:** S
+- **Ergebnis (Teil 1):**
+  - Neue Liga-Option `credit_utilization` (Schema `finance.max_utilization_pct`, 0–100 %, Standard 100 = wie bisher), auch auf der Automatik-Seite.
+  - Der freigegebene Kredit wird anteilig gekürzt und auf den Gebotsschritt abgerundet. Die Kürzung steht im Budgetvergleich als eigener Grund `UTILIZATION`.
+  - Die Option kann den Kredit nur verkleinern und braucht deshalb kein Flag.
+  - Tests: Unit-Test (Kürzung, Summenidentität, Grenzen) und Smoke (Weg über die Konfiguration).
+- **Offen (Teil 2):** eine Auslastung abhängig von Zeit bis zur Deadline, Prognosegüte und Updates. Sie gehört zum Regelwerk (E08.01), statt fest im Code zu stehen.
 - **Ziel:** `max_utilization_pct` plus Abhängigkeit von Zeit bis Deadline, verbleibenden Updates, Prognosegüte (über Regelwerk E08.01 oder feste Kurve im Schema).
 
 ### E04.08 – Deadline-Liquiditätsprognose

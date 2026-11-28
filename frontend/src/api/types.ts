@@ -524,6 +524,7 @@ export type TraderOptions = {
   sellRatio: number
   upgradeCrossPosition: boolean
   benchStrategy: number
+  creditUtilization: number
 }
 
 export type Shadow = {

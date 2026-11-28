@@ -104,6 +104,7 @@ TEXT: dict[str, str] = {
     t.LIMIT_LIQUIDATION: "Kredit nur so weit, wie Verkäufe ihn zurückzahlen",
     t.LIMIT_CREDIT_MODE: "Kreditmodus gibt diesem Zweck keinen Kredit",
     t.LIMIT_PHASE: "kurz vor dem Spieltag kein Kredit",
+    t.LIMIT_UTILIZATION: "nur ein Teil des Kredits freigegeben (Kreditauslastung)",
     ### t.LIMIT_PROFIT_ROOM is the code PROFIT_ROOM above
 }
 

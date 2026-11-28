@@ -322,6 +322,15 @@ def main() -> None:
     ok(risk.validate([A("sell", "room", "m0", 0)], ctx(squad=bench_team, listings={}, club_of={}, bench=t.BENCH_NONE))[0] == risk.STARTER,
        "no bench: starters stay protected")
 
+    ### E04.07: only part of the released credit; the cut is named and the limits still add up
+    full_loan = t.credit(0, 100_000_000, 20_000_000)
+    half_loan = full_loan * 50 // 100 // 10_000 * 10_000
+    purposes = ("lineup", "cover", "profit")
+    cut = t.money_check(0, 100_000_000, 0, 0, half_loan, {pp: half_loan for pp in purposes}, {pp: half_loan for pp in purposes}, 10**12, full_loan)
+    ok(cut["released"]["lineup"] == half_loan and cut["limits"]["lineup"][t.LIMIT_UTILIZATION] == full_loan - half_loan, "the cut is named UTILIZATION")
+    ok(all(cut["gap"][pp] == sum(cut["limits"][pp].values()) for pp in purposes), "the limits still add up with a cut")
+    ok(t.Options().credit_utilization == 100 and t.Options.load({"credit_utilization": 150}).credit_utilization == 100, "default all, at most 100")
+
     print(f"All {passed} trader safety checks passed.")
 
 
