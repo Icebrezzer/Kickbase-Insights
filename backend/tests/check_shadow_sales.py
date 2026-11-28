@@ -24,3 +24,10 @@ class SaleReplay(unittest.TestCase):
         result["exits"] = {"hold_2": 110}
         self.assertEqual(classify("BUDGET", bids, result), ("missed", 10, "infeasible"))
         self.assertEqual(classify("BUDGET", {}, {})[:2], ("unknown", None))
+
+    def test_weight(self):
+        from core.shadow_intelligence import weighted_win_rate
+        learn = weighted_win_rate([("a", False, False, 0), ("a", True, True, 0), ("b", False, False, 30)])
+        self.assertEqual(learn["samples"], 2)
+        self.assertEqual(learn["weight"], .25)
+        self.assertAlmostEqual(learn["rate"], .8)

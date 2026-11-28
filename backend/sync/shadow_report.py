@@ -7,18 +7,20 @@ from statistics import median
 from sqlalchemy import and_
 from sqlmodel import Session, select
 
-from core.shadow_intelligence import classify
+from core.shadow_intelligence import classify, weighted_win_rate
 from db.models import DecisionSnapshot, ShadowAnalysis, TradeLog, utcnow
 
 
 def shadow_report(engine, user, league):
-    since = utcnow() - timedelta(days=30)
+    now = utcnow()
+    since = now - timedelta(days=30)
     snap, analysis = DecisionSnapshot, ShadowAnalysis
     groups = defaultdict(list)
     variants = defaultdict(Counter)
     exits = defaultdict(list)
     finance_counts = Counter()
     categories = Counter()
+    learning = []
     with Session(engine) as session:
         join = and_(*(getattr(snap, k) == getattr(analysis, k) for k in ("user_id", "league_id", "player_id", "auction")))
         rows = session.exec(select(snap, analysis).outerjoin(analysis, join).where(snap.user_id == user,
@@ -27,6 +29,11 @@ def shadow_report(engine, user, league):
         for snapshot, record in rows:
             inputs, result = (record.inputs, record.result) if record else ({}, {})
             kind, net, finance = classify(snapshot.reason, inputs, result)
+            outcome = result.get("outcomes", {}).get("standard")
+            real = bool(result.get("own"))
+            if real or (finance == "feasible" and outcome in ("won", "lost")):
+                learning.append(((snapshot.player_id, snapshot.auction), real, real or outcome == "won",
+                                 (now - snapshot.first_seen).total_seconds() / 86400))
             categories[kind] += 1
             finance_counts[finance] += 1
             groups[(snapshot.reason, kind, finance)].append(net)
@@ -42,7 +49,7 @@ def shadow_report(engine, user, league):
     def stats(values):
         known = [v for v in values if v is not None]
         return {"count": len(values), "sum": sum(known) if known else None, "median": median(known) if known else None}
-    return {"observed": len(rows), "days": 30, "limit": 500, "categories": categories, "finance": finance_counts,
+    return {"observed": len(rows), "learning": weighted_win_rate(learning), "days": 30, "limit": 500, "categories": categories, "finance": finance_counts,
             "realized": stats(profits), "reasons": [{"reason": r, "category": c, "finance": f, **stats(v)}
                 for (r, c, f), v in sorted(groups.items())], "bids": variants,
             "sales": {k: stats(v) for k, v in exits.items()}}

@@ -77,3 +77,5 @@ Volle Backend-Suite 17/17 grün: Ruff, 12 Skripte aus der CI, Migration gegen `e
 - E03.05 (W6): Sechs vorab definierte Verkaufsregeln auf echtem Zuschlag und hypothetischen Gewinnen. Replay über maximal 14 Updates, Tageswerte aus lokalem Verlauf, Prognosen aus datierten Beobachtungen. Fehlende Tage brechen die Folge ab. Zukunftsänderung und Datenlücke getestet.
 
 - E03.06 (W6): Je Auktion ein Standardgebot mit zwei Updates als feste Referenz. Gruppierung nach Grund, Ausgang und Finanzierbarkeit mit Anzahl, Summe und Median. Bestätigte Verkäufe separat. 30 Tage, neueste 500 Entscheidungen.
+
+- E03.07 (W6): Separates diagnostisches Lernmodell für belegte Zuschläge und finanzierbare Standardgebote. Ein Schlüssel je Auktion, reale Evidenz zuerst, Halbwertszeit 30 Tage, volle Stützung ab zehn Auktionen. Keine Übernahme in Handelsparameter.

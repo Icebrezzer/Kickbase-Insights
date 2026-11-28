@@ -66,6 +66,7 @@ Ziel des Epics: Der Trader lernt auch ohne eigene Transfers – aus jeder releva
 - **Abnahmekriterien:** Keine Summe einzelner Hypothesen wird als erreichbarer Gesamtgewinn bezeichnet (gemeinsam realisierbar erst mit E09).
 
 ### E03.07 – Lerngewichtung und Deduplizierung
+- **Umsetzung im W6-Branch:** Separates diagnostisches Lernmodell für belegte Zuschläge und finanzierbare Standardgebote. Ein Schlüssel je Auktion, reale Evidenz zuerst, Halbwertszeit 30 Tage, volle Stützung ab zehn Auktionen. Keine Übernahme in Handelsparameter.
 - **Priorität:** P2 · **Abhängig von:** E03.06 · **Aufwand:** S
 - **Ziel:** Gewicht nach Alter, Echtheit (echt 1,0, Schatten ≤ 0,5), Stichprobe; je Auktion höchstens einmal in Lernverfahren.
 

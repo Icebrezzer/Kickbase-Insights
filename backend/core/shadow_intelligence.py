@@ -176,3 +176,18 @@ def classify(reason: str, inputs: dict, result: dict) -> tuple[str, int | None, 
     if reason == "BID_PLANNED" or net == 0:
         return "hypothetical", net, finance
     return ("missed" if net > 0 else "avoided"), net, finance
+
+
+def weighted_win_rate(observations):
+    """Estimate the standard bid's success on eligible auctions, preferring actual purchases."""
+    unique = {}
+    for key, real, won, age_days in observations:
+        if key not in unique or (real and not unique[key][0]):
+            unique[key] = (real, won, age_days)
+    support = min(1.0, len(unique) / 10)
+    weight = hits = 0.0
+    for real, won, age in unique.values():
+        w = (1.0 if real else 0.5) * 0.5 ** (max(0, age) / 30) * support
+        hits += w * won
+        weight += w
+    return {"samples": len(unique), "weight": round(weight, 3), "rate": hits / weight if weight else None}
