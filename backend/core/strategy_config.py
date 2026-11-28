@@ -81,6 +81,7 @@ SETTINGS: tuple[Setting, ...] = (
     _fixed("auction.room_bid_extra", t.ROOM_EXTRA, "float", "", "Gebotshöhe nach einem Verkauf für einen Platz (0–1 zwischen Mindest- und Höchstgebot)"),
     _fixed("auction.min_auctions", t.MIN_AUCTIONS, "int", "Auktionen", "Ab so vielen Liga-Auktionen gilt das Gewinnchance-Modell"),
     _fixed("auction.bid_grid", t.BID_GRID, "int", "Schritte", "Geprüfte Gebotshöhen für das Gebot nach Erwartungswert"),
+    _o("learning.snapshot_limit", "snapshot_limit", "int", "Auktionen", "Neue Entscheidungs-Snapshots je Runde"),
     ### Learning
     _o("learning.shadow_enabled", "shadow", "bool", "", "Schattentransfers verfolgen und daraus lernen"),
     _fixed("learning.min_samples", t.MIN_SAMPLES, "int", "Verläufe", "Ab so vielen Verläufen gelten gelernte Prognosewerte"),

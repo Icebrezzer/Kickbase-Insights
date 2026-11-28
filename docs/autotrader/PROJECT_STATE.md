@@ -69,3 +69,5 @@ Volle Backend-Suite 17/17 grün: Ruff, 12 Skripte aus der CI, Migration gegen `e
 2. Lokal: `py -3.12 -m venv`, `pip install ./backend ruff`, Tests wie in `AGENTS.md` §4.
 3. Nichts pushen ohne Auftrag (jeder Push baut ein Image).
 4. Nach jedem Paket: Eintrag im Paket (Ergebnis, Commit), diese Datei, `CHANGELOG.md`.
+
+- E03.03 (W6): Gewichtete Auswahl nach Preisklasse und Hauptgrund aus dem Bestand des Nutzers in der Liga. Limit 1–200, Standard 32. Bestandspflege verbraucht keine Plätze. 200 Kandidaten, 20 Schichten in vier Runden im Auswahltest.

@@ -42,6 +42,7 @@ Ziel des Epics: Der Trader lernt auch ohne eigene Transfers – aus jeder releva
 - **Abnahmekriterien:** Jede Kategorie aus der Übergabe §8.1 ist einem Reason Code zugeordnet und im Test vertreten.
 
 ### E03.03 – Systematische Stichprobenauswahl
+- **Umsetzung im W6-Branch:** Gewichtete Auswahl nach Preisklasse und Hauptgrund aus dem Bestand des Nutzers in der Liga. Limit 1–200, Standard 32. Bestandspflege verbraucht keine Plätze. 200 Kandidaten, 20 Schichten in vier Runden im Auswahltest.
 - **Priorität:** P2 · **Abhängig von:** E03.02 · **Aufwand:** S
 - **Ziel:** Begrenzte Zahl je Runde (konfigurierbar), stratifiziert nach Preisklasse × Ablehnungsgrund (erweitert die bestehende Preisklassen-Streuung), Vorrang für bisher unterrepräsentierte Schichten.
 - **Abnahmekriterien:** Bei 200 Kandidaten höchstens N neue Snapshots je Runde; jede vorhandene Schicht erscheint innerhalb von k Runden.

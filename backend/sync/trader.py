@@ -35,10 +35,12 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
+from sqlalchemy import case, func
 from sqlmodel import Session, delete, select
 
 from api.context import load_context
 from core import analytics, coach, finance, flags, learning, risk
+from core import shadow_intelligence as si
 from core import reasons as rc
 from core import trader as t
 from db import exclusive
@@ -1210,7 +1212,21 @@ class TraderService:
                         DecisionSnapshot.user_id == row.user_id, DecisionSnapshot.league_id == league_id,
                         DecisionSnapshot.player_id.in_([pid for pid, _ in rows]))).all()
                 }
+                candidates = [si.Candidate(pid, auction, coach.price_class(v["value"]), v["reason"])
+                              for (pid, auction), v in rows.items() if (pid, auction) not in stored]
+                selected = set()
+                if candidates:
+                    snap = DecisionSnapshot
+                    bucket = case(*[(snap.value < high, i) for i, (_, high) in enumerate(coach.PRICE_CLASSES[:-1])],
+                                  else_=len(coach.PRICE_CLASSES) - 1)
+                    counts = {(b, reason): n for b, reason, n in session.exec(
+                        select(bucket, snap.reason, func.count()).where(snap.user_id == row.user_id,
+                            snap.league_id == league_id).group_by(bucket, snap.reason))}
+                    selected = {c.key for c in si.select_candidates(candidates, set(), counts,
+                                t.Options.load(row.trader_options).snapshot_limit)}
                 for (pid, auction), values in rows.items():
+                    if (pid, auction) not in stored and (pid, auction) not in selected:
+                        continue
                     old = stored.get((pid, auction))
                     if old is None:
                         session.add(DecisionSnapshot(user_id=row.user_id, league_id=league_id, player_id=pid, auction=auction,
@@ -1220,7 +1236,7 @@ class TraderService:
                         session.add(old)
                 if self._snapshots_pruned.get(league_id) != day:
                     session.exec(delete(DecisionSnapshot).where(
-                        DecisionSnapshot.league_id == league_id, DecisionSnapshot.first_seen < now - timedelta(days=SNAPSHOT_KEEP_DAYS)))
+                        DecisionSnapshot.user_id == row.user_id, DecisionSnapshot.league_id == league_id, DecisionSnapshot.first_seen < now - timedelta(days=SNAPSHOT_KEEP_DAYS)))
                 session.commit()
             self._snapshots_pruned[league_id] = day
         except Exception:
