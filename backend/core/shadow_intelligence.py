@@ -157,3 +157,22 @@ def sale_strategies(start: int, points: Mapping[int, tuple[int, int | None]], ra
             if trailing and value * 100 <= peak * (100 - trailing):
                 exits.setdefault("trailing", proceeds)
     return {"exits": exits, "diagnostic_peak": peak or None}
+
+
+def classify(reason: str, inputs: dict, result: dict) -> tuple[str, int | None, str]:
+    """One canonical alternative per auction: standard bid and two market updates."""
+    bid = inputs.get("bids", {}).get("standard")
+    outcome = result.get("outcomes", {}).get("standard")
+    cap = inputs.get("cap")
+    finance = "unknown" if bid is None or cap is None else "feasible" if bid <= cap else "infeasible"
+    if result.get("own"):
+        return "purchased", None, finance
+    if outcome in ("lost", "no_buyer"):
+        return outcome, None, finance
+    proceeds = result.get("exits", {}).get("hold_2")
+    if outcome != "won" or bid is None or proceeds is None:
+        return "unknown", None, finance
+    net = proceeds - bid
+    if reason == "BID_PLANNED" or net == 0:
+        return "hypothetical", net, finance
+    return ("missed" if net > 0 else "avoided"), net, finance

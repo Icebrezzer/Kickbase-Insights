@@ -15,3 +15,12 @@ class SaleReplay(unittest.TestCase):
             self.assertEqual(result["exits"][name], future["exits"][name])
         del prices[1]
         self.assertFalse(sale_strategies(0, prices, 1, 5, 2)["exits"])
+
+    def test_categories(self):
+        from core.shadow_intelligence import classify
+        bids = {"bids": {"standard": 100}, "cap": 80}
+        result = {"outcomes": {"standard": "won"}, "exits": {"hold_2": 90}}
+        self.assertEqual(classify("BUDGET", bids, result), ("avoided", -10, "infeasible"))
+        result["exits"] = {"hold_2": 110}
+        self.assertEqual(classify("BUDGET", bids, result), ("missed", 10, "infeasible"))
+        self.assertEqual(classify("BUDGET", {}, {})[:2], ("unknown", None))

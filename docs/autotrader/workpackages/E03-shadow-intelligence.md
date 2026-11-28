@@ -60,6 +60,7 @@ Ziel des Epics: Der Trader lernt auch ohne eigene Transfers – aus jeder releva
 - **Abnahmekriterien:** 1. Höchstwert nur als Feld `diagnostic_peak`, nie als Ergebnis einer Strategie. 2. Kein Zukunftswissen: Regel entscheidet je Tag nur mit Werten bis zu diesem Tag (Test: geänderte Zukunft ändert Entscheidung nicht).
 
 ### E03.06 – Entgangene Gewinne und vermiedene Verluste
+- **Umsetzung im W6-Branch:** Je Auktion ein Standardgebot mit zwei Updates als feste Referenz. Gruppierung nach Grund, Ausgang und Finanzierbarkeit mit Anzahl, Summe und Median. Bestätigte Verkäufe separat. 30 Tage, neueste 500 Entscheidungen.
 - **Priorität:** P2 · **Abhängig von:** E03.05 · **Aufwand:** S
 - **Ziel:** Ergebnisarten getrennt: realisiert, hypothetisch einzeln, vermiedener Verlust, unbekannter Ausgang, nicht finanzierbar, hypothetisch finanzierbar. Je Reason Code: Summe, Anzahl, Median.
 - **Abnahmekriterien:** Keine Summe einzelner Hypothesen wird als erreichbarer Gesamtgewinn bezeichnet (gemeinsam realisierbar erst mit E09).
