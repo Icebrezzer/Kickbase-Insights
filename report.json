@@ -1,0 +1,1226 @@
+[
+  {
+    "name": "iphone-se-dark-home",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.truncate.font-medium «Kenan Zimmermann»",
+      "a.min-w-0.flex-1.truncate.text-sm «Abseitsfalle Anna»",
+      "a.min-w-0.flex-1.truncate.text-sm «Gegenpress Gerd»",
+      "a.min-w-0.flex-1.truncate.text-sm «Fallrückzieher Felix»",
+      "a.min-w-0.flex-1.truncate.text-sm «Catenaccio Carla»",
+      "span.truncate.font-medium «Tim Krause»",
+      "span.truncate.font-medium «Sandro Werner»",
+      "span.truncate.font-medium «Tom Krause»",
+      "span.truncate.font-medium «Omar Jung»",
+      "span.truncate «Leverkusen»",
+      "span.truncate «Hamburg»",
+      "span.truncate «Union Berlin»",
+      "span.truncate «Freiburg»",
+      "span.truncate «Frankfurt»",
+      "span.truncate «Dortmund»",
+      "span.truncate «Wolfsburg»",
+      "span.truncate «Gladbach»",
+      "span.truncate «Heidenheim»",
+      "span.truncate «Hoffenheim»",
+      "span.truncate «Augsburg»",
+      "span.block.truncate.text-xs.text-muted «Fallrückzieher Felix → Kickbase»",
+      "span.block.truncate.text-xs.text-muted «Tiki Taka Toni → Gegenpress Gerd»",
+      "span.block.truncate.text-xs.text-muted «Tiki Taka Toni → Konter Kalle»",
+      "span.block.truncate.text-xs.text-muted «Abseitsfalle Anna → Kickbase»",
+      "span.block.truncate.text-xs.text-muted «Gegenpress Gerd → Fallrückzieher Felix»"
+    ],
+    "cutCount": 25,
+    "errors": []
+  },
+  {
+    "name": "iphone-se-dark-spieltag",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.truncate «Union Berlin»",
+      "span.truncate «Freiburg»",
+      "span.truncate «Gladbach»",
+      "span.truncate «Hoffenheim»",
+      "span.truncate «Frankfurt»",
+      "span.truncate «St. Pauli»",
+      "span.truncate «Bremen»",
+      "span.truncate «Konter Kalle»",
+      "span.truncate «Gegenpress Gerd»",
+      "span.truncate «Abseitsfalle Anna»",
+      "span.truncate «Catenaccio Carla»",
+      "span.truncate «Tiki Taka Toni»",
+      "span.truncate.font-medium «Robin Schreiber»",
+      "span.truncate «Hamburg»",
+      "span.truncate.font-medium «Rafael Wagner»",
+      "span.truncate.font-medium «Emre Lehmann»",
+      "span.truncate «Leipzig»",
+      "span.truncate.font-medium «Noah Winkler»",
+      "span.truncate.font-medium «Kevin Meier»",
+      "span.truncate.font-medium «Sandro Berger»",
+      "span.truncate «Heidenheim»",
+      "span.truncate.font-medium «Finn Kraus»",
+      "span.truncate «Wolfsburg»"
+    ],
+    "cutCount": 37,
+    "errors": []
+  },
+  {
+    "name": "iphone-se-dark-markt",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»",
+      "span.truncate.font-medium «Finn Roth»",
+      "span.truncate «Kickbase»",
+      "span.max-w-20.truncate «Abseitsfalle Anna»",
+      "span.max-w-20.truncate «Fallrückzieher Felix»",
+      "span.truncate.font-medium «Tim Krause»",
+      "span.max-w-20.truncate «Gegenpress Gerd»",
+      "span.truncate.font-medium «Sandro Werner»",
+      "span.truncate.font-medium «Tom Krause»",
+      "span.truncate.font-medium «Omar Jung»",
+      "span.truncate.font-medium «Jonas Heinrich»",
+      "span.max-w-20.truncate «Catenaccio Carla»",
+      "span.truncate.font-medium «Robin Keller»",
+      "span.truncate «Abseitsfalle Anna»",
+      "span.truncate «Catenaccio Carla»",
+      "span.truncate «Gegenpress Gerd»",
+      "span.truncate «Fallrückzieher Felix»"
+    ],
+    "cutCount": 58,
+    "errors": []
+  },
+  {
+    "name": "iphone-se-dark-konkurrenz",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "iphone-se-dark-live",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»",
+      "span.truncate.font-semibold «Abseitsfalle Anna»",
+      "span.truncate.font-semibold «Tiki Taka Toni»",
+      "span.truncate.font-semibold «Catenaccio Carla»",
+      "span.truncate.font-semibold «Konter Kalle»",
+      "span.truncate.font-semibold «Fallrückzieher Felix»",
+      "span.truncate.font-semibold «Gegenpress Gerd»"
+    ],
+    "cutCount": 7,
+    "errors": []
+  },
+  {
+    "name": "iphone-se-dark-liga",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "iphone-se-dark-spieler",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»",
+      "span.sr-only «Verein»",
+      "span.sr-only «Besitzer»",
+      "span.truncate.font-medium «Kenan Zimmermann»",
+      "span.truncate «Libero Lea»",
+      "span.truncate.font-medium «Luis Hoffmann»",
+      "span.truncate.font-medium «Marco Albrecht»",
+      "span.truncate «Tiki Taka Toni»",
+      "span.truncate «Gegenpress Gerd»",
+      "span.truncate.font-medium «David Baumann»",
+      "span.truncate.font-medium «Emre Zimmermann»",
+      "span.truncate.font-medium «Leon Sommer»",
+      "span.truncate.font-medium «Niklas Berger»",
+      "span.truncate «Catenaccio Carla»",
+      "span.truncate.font-medium «David Schumacher»",
+      "span.truncate «Konter Kalle»",
+      "span.truncate.font-medium «Hugo Wagner»",
+      "span.truncate.font-medium «Jesper Winkler»",
+      "span.truncate.font-medium «Elias Keller»",
+      "span.truncate.font-medium «Sandro Schulz»",
+      "span.truncate.font-medium «Jesper Ludwig»",
+      "span.truncate «Fallrückzieher Felix»",
+      "span.truncate.font-medium «Noah Günther»",
+      "span.truncate «Abseitsfalle Anna»",
+      "span.truncate.font-medium «Julian Stein»"
+    ],
+    "cutCount": 44,
+    "errors": []
+  },
+  {
+    "name": "iphone-se-dark-merkliste",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.truncate.font-medium «Finn Roth»",
+      "span.truncate.font-medium «Luis Jung»",
+      "span.truncate.font-medium «Tom Krause»"
+    ],
+    "cutCount": 3,
+    "errors": []
+  },
+  {
+    "name": "iphone-se-dark-vergleich",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler hinzufügen …»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "iphone-se-dark-fair-value",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.truncate «Abseitsfalle Anna»",
+      "span.truncate «Fallrückzieher Felix»",
+      "span.truncate «Gegenpress Gerd»",
+      "span.truncate «Catenaccio Carla»",
+      "span.truncate.font-medium «Kenan Schuster»",
+      "span.truncate.font-medium «Malte Baumann»",
+      "span.truncate.font-medium «Jesper Schumacher»",
+      "span.truncate.font-medium «Maximilian Hahn»",
+      "span.truncate.font-medium «Maximilian Lorenz»",
+      "span.truncate.font-medium «Maximilian Albrecht»"
+    ],
+    "cutCount": 21,
+    "errors": []
+  },
+  {
+    "name": "iphone-se-dark-transfers",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "iphone-se-dark-planer",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Manager»",
+      "span.max-w-full.truncate.rounded.bg-white/90 «14,4 Mio. €»",
+      "span.max-w-full.truncate.rounded.bg-white/90 «20,6 Mio. €»",
+      "span.truncate.tabular-nums «4,3 Mio. €»",
+      "span.truncate.tabular-nums «11,5 Mio. €»",
+      "span.truncate.tabular-nums «5,5 Mio. €»",
+      "span.truncate.tabular-nums «9,6 Mio. €»",
+      "span.truncate.font-medium «Kenan Böhm»",
+      "span.truncate.font-medium «Robin Schreiber»",
+      "span.truncate.font-medium «Rafael Wagner»",
+      "span.truncate.font-medium «Emre Lehmann»",
+      "span.truncate.font-medium «Noah Winkler»",
+      "span.truncate.font-medium «Aurel Hahn»",
+      "span.truncate.font-medium «Kevin Meier»",
+      "span.truncate.font-medium «Felix Meier»",
+      "span.truncate.font-medium «Ben Pohl»",
+      "span.truncate.font-medium «Sandro Berger»",
+      "span.truncate.font-medium «Leon Vogel»",
+      "span.truncate.font-medium «Dario Martin»",
+      "span.truncate.font-medium «Finn Kraus»"
+    ],
+    "cutCount": 20,
+    "errors": []
+  },
+  {
+    "name": "iphone-se-dark-automatik",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "input.sr-only «»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "iphone-se-dark-status",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "iphone-se-dark-liga-manager-1002",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "iphone-se-dark-dialog-gebot",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»",
+      "span.truncate.font-medium «Finn Roth»",
+      "span.truncate «Kickbase»",
+      "span.max-w-20.truncate «Abseitsfalle Anna»",
+      "span.max-w-20.truncate «Fallrückzieher Felix»",
+      "span.truncate.font-medium «Tim Krause»",
+      "span.max-w-20.truncate «Gegenpress Gerd»",
+      "span.truncate.font-medium «Sandro Werner»",
+      "span.truncate.font-medium «Tom Krause»",
+      "span.truncate.font-medium «Omar Jung»",
+      "span.truncate.font-medium «Jonas Heinrich»",
+      "span.max-w-20.truncate «Catenaccio Carla»",
+      "span.truncate.font-medium «Robin Keller»",
+      "span.truncate «Abseitsfalle Anna»",
+      "span.truncate «Catenaccio Carla»",
+      "span.truncate «Gegenpress Gerd»",
+      "span.truncate «Fallrückzieher Felix»"
+    ],
+    "cutCount": 58
+  },
+  {
+    "name": "iphone-15-dark-home",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.block.truncate.text-xs.text-muted «Gegenpress Gerd → Fallrückzieher Felix»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-dark-spieltag",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-dark-markt",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»",
+      "span.max-w-20.truncate «Abseitsfalle Anna»",
+      "span.max-w-20.truncate «Fallrückzieher Felix»",
+      "span.max-w-20.truncate «Gegenpress Gerd»",
+      "span.max-w-20.truncate «Catenaccio Carla»"
+    ],
+    "cutCount": 37,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-dark-konkurrenz",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-dark-live",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-dark-liga",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-dark-spieler",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»",
+      "span.sr-only «Verein»",
+      "span.sr-only «Besitzer»",
+      "span.truncate.font-medium «Kenan Zimmermann»"
+    ],
+    "cutCount": 4,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-dark-merkliste",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-dark-vergleich",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler hinzufügen …»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-dark-fair-value",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-dark-transfers",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-dark-planer",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Manager»",
+      "span.truncate.tabular-nums «4,3 Mio. €»",
+      "span.truncate.tabular-nums «11,5 Mio. €»",
+      "span.truncate.tabular-nums «5,5 Mio. €»",
+      "span.truncate.tabular-nums «9,6 Mio. €»"
+    ],
+    "cutCount": 5,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-dark-automatik",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "input.sr-only «»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-dark-status",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-dark-liga-manager-1002",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-dark-dialog-gebot",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»",
+      "span.max-w-20.truncate «Abseitsfalle Anna»",
+      "span.max-w-20.truncate «Fallrückzieher Felix»",
+      "span.max-w-20.truncate «Gegenpress Gerd»",
+      "span.max-w-20.truncate «Catenaccio Carla»"
+    ],
+    "cutCount": 37
+  },
+  {
+    "name": "iphone-15-light-home",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.block.truncate.text-xs.text-muted «Gegenpress Gerd → Fallrückzieher Felix»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-light-spieltag",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-light-markt",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»",
+      "span.max-w-20.truncate «Abseitsfalle Anna»",
+      "span.max-w-20.truncate «Fallrückzieher Felix»",
+      "span.max-w-20.truncate «Gegenpress Gerd»",
+      "span.max-w-20.truncate «Catenaccio Carla»"
+    ],
+    "cutCount": 37,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-light-konkurrenz",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-light-live",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-light-liga",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-light-spieler",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»",
+      "span.sr-only «Verein»",
+      "span.sr-only «Besitzer»",
+      "span.truncate.font-medium «Kenan Zimmermann»"
+    ],
+    "cutCount": 4,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-light-merkliste",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-light-vergleich",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler hinzufügen …»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-light-fair-value",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-light-transfers",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-light-planer",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Manager»",
+      "span.truncate.tabular-nums «4,3 Mio. €»",
+      "span.truncate.tabular-nums «11,5 Mio. €»",
+      "span.truncate.tabular-nums «5,5 Mio. €»",
+      "span.truncate.tabular-nums «9,6 Mio. €»"
+    ],
+    "cutCount": 5,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-light-automatik",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "input.sr-only «»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-light-status",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-light-liga-manager-1002",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "iphone-15-light-dialog-gebot",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»",
+      "span.max-w-20.truncate «Abseitsfalle Anna»",
+      "span.max-w-20.truncate «Fallrückzieher Felix»",
+      "span.max-w-20.truncate «Gegenpress Gerd»",
+      "span.max-w-20.truncate «Catenaccio Carla»"
+    ],
+    "cutCount": 37
+  },
+  {
+    "name": "ipad-light-home",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "ipad-light-spieltag",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "ipad-light-markt",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»",
+      "span.max-w-20.truncate «Abseitsfalle Anna»",
+      "span.max-w-20.truncate «Fallrückzieher Felix»",
+      "span.max-w-20.truncate «Gegenpress Gerd»",
+      "span.max-w-20.truncate «Catenaccio Carla»"
+    ],
+    "cutCount": 37,
+    "errors": []
+  },
+  {
+    "name": "ipad-light-konkurrenz",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "ipad-light-live",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "ipad-light-liga",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "ipad-light-spieler",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»",
+      "span.sr-only «Verein»",
+      "span.sr-only «Besitzer»"
+    ],
+    "cutCount": 3,
+    "errors": []
+  },
+  {
+    "name": "ipad-light-merkliste",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "ipad-light-vergleich",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler hinzufügen …»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "ipad-light-fair-value",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "ipad-light-transfers",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "ipad-light-planer",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Manager»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "ipad-light-automatik",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "input.sr-only «»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "ipad-light-status",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "ipad-light-liga-manager-1002",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "ipad-light-dialog-gebot",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»",
+      "span.max-w-20.truncate «Abseitsfalle Anna»",
+      "span.max-w-20.truncate «Fallrückzieher Felix»",
+      "span.max-w-20.truncate «Gegenpress Gerd»",
+      "span.max-w-20.truncate «Catenaccio Carla»"
+    ],
+    "cutCount": 37
+  },
+  {
+    "name": "desktop-dark-home",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "desktop-dark-spieltag",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.truncate.font-medium «Kenan Böhm»",
+      "span.truncate.font-medium «Rafael Wagner»",
+      "span.truncate.font-medium «Emre Lehmann»",
+      "span.truncate.font-medium «Tom Stein»",
+      "span.truncate.font-medium «Aurel Hahn»",
+      "span.truncate.font-medium «Noah Winkler»",
+      "span.truncate.font-medium «Kevin Meier»",
+      "span.truncate.font-medium «Sandro Berger»",
+      "span.truncate.font-medium «Felix Meier»",
+      "span.truncate.font-medium «Leon Vogel»",
+      "span.truncate.font-medium «Dario Martin»"
+    ],
+    "cutCount": 11,
+    "errors": []
+  },
+  {
+    "name": "desktop-dark-markt",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "desktop-dark-konkurrenz",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "desktop-dark-live",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "desktop-dark-liga",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "desktop-dark-spieler",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»",
+      "span.sr-only «Verein»",
+      "span.sr-only «Besitzer»"
+    ],
+    "cutCount": 3,
+    "errors": []
+  },
+  {
+    "name": "desktop-dark-merkliste",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "desktop-dark-vergleich",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler hinzufügen …»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "desktop-dark-fair-value",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "desktop-dark-transfers",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "desktop-dark-planer",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Manager»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "desktop-dark-automatik",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "input.sr-only «»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "desktop-dark-status",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "desktop-dark-liga-manager-1002",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "desktop-dark-dialog-gebot",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»"
+    ],
+    "cutCount": 1
+  },
+  {
+    "name": "desktop-light-home",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "desktop-light-spieltag",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.truncate.font-medium «Kenan Böhm»",
+      "span.truncate.font-medium «Rafael Wagner»",
+      "span.truncate.font-medium «Emre Lehmann»",
+      "span.truncate.font-medium «Tom Stein»",
+      "span.truncate.font-medium «Aurel Hahn»",
+      "span.truncate.font-medium «Noah Winkler»",
+      "span.truncate.font-medium «Kevin Meier»",
+      "span.truncate.font-medium «Sandro Berger»",
+      "span.truncate.font-medium «Felix Meier»",
+      "span.truncate.font-medium «Leon Vogel»",
+      "span.truncate.font-medium «Dario Martin»"
+    ],
+    "cutCount": 11,
+    "errors": []
+  },
+  {
+    "name": "desktop-light-markt",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "desktop-light-konkurrenz",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "desktop-light-live",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "desktop-light-liga",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "desktop-light-spieler",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»",
+      "span.sr-only «Verein»",
+      "span.sr-only «Besitzer»"
+    ],
+    "cutCount": 3,
+    "errors": []
+  },
+  {
+    "name": "desktop-light-merkliste",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "desktop-light-vergleich",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler hinzufügen …»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "desktop-light-fair-value",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "desktop-light-transfers",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "desktop-light-planer",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Manager»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "desktop-light-automatik",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "input.sr-only «»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "desktop-light-status",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "desktop-light-liga-manager-1002",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "desktop-light-dialog-gebot",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»"
+    ],
+    "cutCount": 1
+  },
+  {
+    "name": "laptop-light-home",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "laptop-light-spieltag",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.truncate.font-medium «Kenan Böhm»",
+      "span.truncate.font-medium «Rafael Wagner»",
+      "span.truncate.font-medium «Emre Lehmann»",
+      "span.truncate.font-medium «Tom Stein»",
+      "span.truncate.font-medium «Aurel Hahn»",
+      "span.truncate.font-medium «Noah Winkler»",
+      "span.truncate.font-medium «Sandro Berger»",
+      "span.truncate.font-medium «Felix Meier»",
+      "span.truncate.font-medium «Leon Vogel»",
+      "span.truncate.font-medium «Dario Martin»"
+    ],
+    "cutCount": 10,
+    "errors": []
+  },
+  {
+    "name": "laptop-light-markt",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "laptop-light-konkurrenz",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "laptop-light-live",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "laptop-light-liga",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "laptop-light-spieler",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»",
+      "span.sr-only «Verein»",
+      "span.sr-only «Besitzer»"
+    ],
+    "cutCount": 3,
+    "errors": []
+  },
+  {
+    "name": "laptop-light-merkliste",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "laptop-light-vergleich",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler hinzufügen …»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "laptop-light-fair-value",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "laptop-light-transfers",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "laptop-light-planer",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Manager»",
+      "span.truncate.font-medium «Robin Schreiber»",
+      "span.truncate.font-medium «Rafael Wagner»",
+      "span.truncate.font-medium «Noah Winkler»",
+      "span.truncate.font-medium «Kevin Meier»",
+      "span.truncate.font-medium «Ben Pohl»",
+      "span.truncate.font-medium «Finn Kraus»"
+    ],
+    "cutCount": 7,
+    "errors": []
+  },
+  {
+    "name": "laptop-light-automatik",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "input.sr-only «»"
+    ],
+    "cutCount": 1,
+    "errors": []
+  },
+  {
+    "name": "laptop-light-status",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "laptop-light-liga-manager-1002",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [],
+    "cutCount": 0,
+    "errors": []
+  },
+  {
+    "name": "laptop-light-dialog-gebot",
+    "pageOverflow": 0,
+    "wide": [],
+    "cut": [
+      "span.sr-only «Spieler suchen …»"
+    ],
+    "cutCount": 1
+  }
+]
