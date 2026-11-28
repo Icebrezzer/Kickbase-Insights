@@ -101,11 +101,17 @@ Reihenfolge (ADR-008): E02.01 → E02.02 → **E02.08** → E02.03 → E02.04 �
 - **Abnahmekriterien:** 1. Vorschau schreibt nichts. 2. Aktivierung atomar (eine Transaktion). 3. Gleichzeitige Aktivierung zweier Versionen: genau eine gewinnt, die andere erhält Konfliktfehler (optimistische Sperre über erwartete Vorgängerversion).
 
 ### E02.06 – Konfigurationshistorie und Vergleich
-- **Priorität:** P2 · **Abhängig von:** E02.05 · **Aufwand:** S
+- **Priorität:** P2 · **Status:** done · **Abhängig von:** E02.05 · **Aufwand:** S
+- **Ergebnis:** `GET /api/automation/trader/config` (Historie mit Autor, Zeit, Notiz, seit E02.05) und `GET …/config/diff?from_version=&to_version=`: jede abweichende Einstellung zweier Versionen mit Erklärung; unbekannte Version 404. Tests: Smoke.
 - **Ziel:** Liste der Versionen mit Autor, Zeit, Notiz; Diff zweier beliebiger Versionen.
 
 ### E02.07 – Rollback
-- **Priorität:** P2 · **Abhängig von:** E02.06 · **Aufwand:** S
+- **Priorität:** P2 · **Status:** done · **Abhängig von:** E02.06 · **Aufwand:** S
+- **Ergebnis:**
+  - `POST …/config/rollback` mit `version` und `expected_version` aktiviert den Inhalt einer älteren Version als neue Version (`created_by = rollback`); die Historie bleibt linear.
+  - Geprüft wird streng wie beim Import: Eine Version, die heutige Regeln ablehnen, wird mit Fehlerliste abgelehnt (422). Bei zwischenzeitlicher Änderung kommt 409.
+  - Läuft unter der Rundensperre und wird als Ereignis `trader-config` mit allen Änderungen protokolliert.
+  - Tests: Smoke (Rollback, Einstellungsseite, Konflikt, ungültige alte Version).
 - **Ziel:** Ältere Version erneut aktivieren = neue Version mit Inhalt der alten (Historie bleibt linear).
 - **Abnahmekriterien:** Rollback einer Version mit inzwischen ungültigen Werten (Schema verschärft) wird abgelehnt mit Fehlerliste.
 

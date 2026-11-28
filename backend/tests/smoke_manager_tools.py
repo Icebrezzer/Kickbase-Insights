@@ -726,6 +726,25 @@ def main() -> None:
         with Session(state.engine) as s:
             config_events = s.exec(select(AutomationEvent).where(AutomationEvent.kind == "trader-config")).all()
         check(len(config_events) == 1 and config_events[0].details["previous"] == changed.version, "the activation is logged with its changes")
+        ### E02.06/E02.07: compare two versions, go back to an older one as a new version
+        newest = configs.active("1001", "4242").version
+        compared = client.get(f"/api/automation/trader/config/diff?from_version={changed.version}&to_version={newest}").json()
+        check({c["path"] for c in compared["changes"]} >= {"finance.reserve"}, f"two versions compared ({len(compared['changes'])} changes)")
+        check(client.get("/api/automation/trader/config/diff?from_version=1&to_version=999").status_code == 404, "an unknown version: 404")
+        back = client.post("/api/automation/trader/config/rollback", json={"version": changed.version, "expected_version": newest})
+        check(back.status_code == 200 and back.json()["version"] == newest + 1 and back.json()["created_by"] == "rollback",
+              f"rolled back as a new version ({back.status_code})")
+        check(client.get("/api/automation/settings").json()["traderOptions"]["reserve"] == 0, "the settings show the rolled back values")
+        check(client.post("/api/automation/trader/config/rollback", json={"version": changed.version, "expected_version": newest}).status_code == 409,
+              "a rollback on a stale version is a conflict")
+        with Session(state.engine) as s:
+            from db.models import StrategyConfig as StoredConfig
+
+            tampered = StoredConfig(user_id="1001", league_id="4242", version=newest + 50, data={"schema_version": 1, "limits": {"daily_bids": 99}})
+            s.add(tampered)
+            s.commit()
+        invalid = client.post("/api/automation/trader/config/rollback", json={"version": newest + 50, "expected_version": newest + 1})
+        check(invalid.status_code == 422 and configs.active("1001", "4242").version == newest + 1, "a version the rules refuse today is not taken")
         old_export = client.post("/api/automation/trader/config/preview", json={"config": {"min_gain": 10.0, "reserve": 2_000_000}}).json()
         check(old_export["valid"] and {c["path"] for c in old_export["changes"]} == {"sport.min_points_gain", "finance.reserve"},
               f"the options of a 2.0 export can be previewed ({old_export['changes']})")

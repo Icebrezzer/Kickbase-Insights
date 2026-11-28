@@ -5,6 +5,7 @@ Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Au
 ## [Unveröffentlicht] – Auto-Trader 3.0
 
 ### Hinzugefügt
+- E02.06/E02.07: Zwei Konfigurationsversionen vergleichen (`GET …/config/diff`) und zu einer älteren Version zurückkehren (`POST …/config/rollback`, als neue Version, streng geprüft).
 - E04.07 (Teil 1): Liga-Option „Höchstens so viel des freigegebenen Kredits nutzen (%)“ (Standard 100). Die Kürzung erscheint im Budgetvergleich als `UTILIZATION`.
 - E04.09 (Teil 1): Flag `early_repayment`: Ein bestätigtes Minus wird schon ab 24 Std. vor dem Spieltag zurückverkauft, nicht erst ab dem letzten Marktwert-Update.
 - E04.08: Prognose des Kontostands zum Anpfiff (Worst Case, erwartet, pessimistisch nach möglichen Verkäufen) im Dashboard-API, dazu die Push-Warnung „Spieltag gefährdet“, wenn selbst alle Verkäufe bis zur Tilgungsphase nicht reichen.

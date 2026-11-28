@@ -344,6 +344,50 @@ async def trader_config_activate(state: StateDep, league_id: LeagueIdDep, viewer
     return {**_config_out(row), "data": row.data, "changes": changes}
 
 
+@router.get("/automation/trader/config/diff")
+async def trader_config_diff(state: StateDep, league_id: LeagueIdDep, viewer: ViewerDep,
+                             from_version: Annotated[int, Query(ge=1)], to_version: Annotated[int, Query(ge=1)]) -> dict:
+    """E02.06: every setting that differs between two stored versions of this league."""
+    configs = _automation(state).trader.configs
+    old = await asyncio.to_thread(configs.version, viewer.user_id, league_id, from_version)
+    new = await asyncio.to_thread(configs.version, viewer.user_id, league_id, to_version)
+    if old is None or new is None:
+        raise HTTPException(404, "Version nicht gefunden")
+    return {"from": _config_out(old), "to": _config_out(new), "changes": strategy_config.diff(old.data, new.data)}
+
+
+@router.post("/automation/trader/config/rollback")
+async def trader_config_rollback(state: StateDep, league_id: LeagueIdDep, viewer: ViewerDep, body: dict) -> dict:
+    """E02.07: an older version becomes active again, as a new version (the history stays linear).
+    Checked like any import: a version whose values the current rules refuse is not taken (422), and
+    only on top of `expected_version` (409 if another change came first)."""
+    automation = _automation(state)
+    configs = automation.trader.configs
+    version, expected = body.get("version"), body.get("expected_version")
+    if any(isinstance(v, bool) or not isinstance(v, int) for v in (version, expected)):
+        raise HTTPException(422, "version und expected_version als Zahlen angeben")
+    old = await asyncio.to_thread(configs.version, viewer.user_id, league_id, version)
+    if old is None:
+        raise HTTPException(404, "Version nicht gefunden")
+    active = await asyncio.to_thread(configs.active, viewer.user_id, league_id)
+    result, errors = strategy_config.validate(old.data, active.data)
+    if errors:
+        raise HTTPException(422, {"errors": errors})
+    note = f"Zurück zu Version {version}" + (f" – {str(body.get('note'))[:150]}" if body.get("note") else "")
+    async with automation._lock(viewer.user_id, league_id): # Never in the middle of a trading round
+        try:
+            row = await asyncio.to_thread(configs.activate, viewer.user_id, league_id, result, "rollback", note, expected)
+        except ConfigConflict as e:
+            raise HTTPException(409, str(e)) from e
+    changes = strategy_config.diff(active.data, result)
+    await asyncio.to_thread(
+        automation.record, viewer.user_id, league_id, "trader-config",
+        f"Konfiguration Version {row.version}: zurück zu Version {version}, {len(changes)} Änderung(en)",
+        details={"version": row.version, "previous": expected, "rollback_to": version, "changes": changes},
+    )
+    return {**_config_out(row), "data": row.data, "changes": changes}
+
+
 @router.get("/automation/trader/backtest")
 async def trader_backtest(
     state: StateDep,
