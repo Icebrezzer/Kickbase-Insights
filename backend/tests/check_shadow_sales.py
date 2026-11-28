@@ -1,0 +1,17 @@
+import unittest
+
+from core.shadow_intelligence import sale_strategies
+
+
+class SaleReplay(unittest.TestCase):
+    def test_future_and_gaps(self):
+        prices = {0: (100, 4), 1: (120, 3), 2: (110, -1), 3: (150, 4)}
+        result = sale_strategies(0, prices, 1, 5, 2)
+        self.assertEqual(result["exits"], {"hold_1": 120, "hold_2": 110, "hold_3": 150,
+                         "deadline": 110, "trailing": 110, "forecast": 110})
+        prices[3] = (2000, 7)
+        future = sale_strategies(0, prices, 1, 5, 2)
+        for name in ("forecast", "trailing", "deadline"):
+            self.assertEqual(result["exits"][name], future["exits"][name])
+        del prices[1]
+        self.assertFalse(sale_strategies(0, prices, 1, 5, 2)["exits"])

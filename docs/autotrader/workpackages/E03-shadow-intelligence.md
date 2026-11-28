@@ -54,6 +54,7 @@ Ziel des Epics: Der Trader lernt auch ohne eigene Transfers – aus jeder releva
 - **Abnahmekriterien:** 1. Varianten zählen als **eine** Stichprobe (ADR-007). 2. Unbekannte Gewinnerpreise werden nie geschätzt. 3. Simulationsgrenze ausgewiesen: „andere Manager hätten anders reagieren können“.
 
 ### E03.05 – Alternative Verkaufsstrategien simulieren
+- **Umsetzung im W6-Branch:** Sechs vorab definierte Verkaufsregeln auf echtem Zuschlag und hypothetischen Gewinnen. Replay über maximal 14 Updates, Tageswerte aus lokalem Verlauf, Prognosen aus datierten Beobachtungen. Fehlende Tage brechen die Folge ab. Zukunftsänderung und Datenlücke getestet.
 - **Priorität:** P2 · **Abhängig von:** E03.04 · **Aufwand:** M
 - **Ziel:** Für hypothetisch gewonnene und echte Positionen: Verkauf nach 1/2/3 Updates, Prognose-Ausstieg, Trailing-Stop, Deadline-Verkauf – jeweils **vorab definierte Regel**, Bewertung zum jeweiligen Tageswert × Quote.
 - **Abnahmekriterien:** 1. Höchstwert nur als Feld `diagnostic_peak`, nie als Ergebnis einer Strategie. 2. Kein Zukunftswissen: Regel entscheidet je Tag nur mit Werten bis zu diesem Tag (Test: geänderte Zukunft ändert Entscheidung nicht).

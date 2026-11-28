@@ -128,3 +128,32 @@ def settle_bids(variants: Mapping[str, int], evidence: AuctionEvidence) -> tuple
             outcome = AuctionOutcome.LOST
         result.append(BidVariant(name, amount, outcome))
     return tuple(result)
+
+
+def sale_strategies(start: int, points: Mapping[int, tuple[int, int | None]], ratio: float,
+                    trailing: int, deadline: int | None) -> dict:
+    """Replay at most 14 consecutive market updates. Never fill missing prices or forecasts."""
+    exits = {}
+    peak = 0
+    forecast_known = True
+    if not 0 < ratio <= 1:
+        return {}
+    for day in range(start, start + 15):
+        point = points.get(day)
+        if point is None or point[0] <= 0:
+            break
+        value, forecast = point
+        peak = max(peak, value)
+        update = day - start
+        proceeds = int(value * ratio)
+        if update in (1, 2, 3):
+            exits[f"hold_{update}"] = proceeds
+        if day == deadline:
+            exits["deadline"] = proceeds
+        if update:
+            forecast_known = forecast_known and forecast is not None
+            if forecast_known and forecast <= 0:
+                exits.setdefault("forecast", proceeds)
+            if trailing and value * 100 <= peak * (100 - trailing):
+                exits.setdefault("trailing", proceeds)
+    return {"exits": exits, "diagnostic_peak": peak or None}

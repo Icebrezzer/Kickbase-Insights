@@ -5,8 +5,9 @@ from datetime import datetime, timedelta
 
 from sqlmodel import Session, select
 
-from core.shadow_intelligence import AuctionEvidence, bid_variants, settle_bids
-from db.models import ShadowAnalysis, Transfer
+from core import analytics
+from core.shadow_intelligence import AuctionEvidence, bid_variants, sale_strategies, settle_bids
+from db.models import ForecastObservation, MarketValueHistory, ShadowAnalysis, Transfer
 
 
 def freeze(user, league, pid, auction, values, listing, extra, deadline, trailing, now):
@@ -39,6 +40,14 @@ def settle_due(session: Session, user: str, league: str, now: datetime):
             Transfer.player_id.in_({r.player_id for r in rows}), Transfer.date >= min(ends) - jitter,
             Transfer.date <= max(ends) + jitter)):
         transfers[sale.player_id].append(sale)
+    ids = {r.player_id for r in rows}
+    histories = dict(session.exec(select(MarketValueHistory.player_id, MarketValueHistory.points)
+                                  .where(MarketValueHistory.player_id.in_(ids))).all())
+    observations = defaultdict(dict)
+    for obs in session.exec(select(ForecastObservation).where(ForecastObservation.league_id == league,
+            ForecastObservation.player_id.in_(ids), ForecastObservation.day >= analytics.market_value_day(min(ends)),
+            ForecastObservation.day <= analytics.market_value_day(max(ends)) + 14, ForecastObservation.observed_at <= now)):
+        observations[obs.player_id][obs.day] = obs
     for row, end in zip(rows, ends, strict=True):
         data = row.inputs
         matches = [s for s in transfers[row.player_id] if abs(s.date - end) <= jitter]
@@ -51,3 +60,15 @@ def settle_due(session: Session, user: str, league: str, now: datetime):
         row.result = {"outcomes": {v.name: v.outcome for v in settle_bids(data["bids"], evidence)},
                       "winner_price": sale.price if sale else None, "own": own}
         row.next_check = None if sale or evidence.confirmed_no_buyer or now >= end + timedelta(days=2) else now + timedelta(hours=1)
+        if sale and (own or "won" in row.result["outcomes"].values()):
+            start = analytics.market_value_day(sale.date)
+            today = analytics.market_value_day(now)
+            points = {d: (v, None) for d, v in histories.get(row.player_id, []) if start <= d <= min(start + 14, today)}
+            deadline = datetime.fromisoformat(data["deadline"]) if data.get("deadline") else None
+            for day, obs in observations[row.player_id].items():
+                if day <= today:
+                    points[day] = (obs.value, obs.forecast_1)
+            end_day = analytics.market_value_day(deadline) if deadline and deadline > sale.date else None
+            row.result = {**row.result, **sale_strategies(start, points, data["ratio"] or 0, data["trailing"], end_day)}
+            if today <= start + 14:
+                row.next_check = now + timedelta(hours=6)
