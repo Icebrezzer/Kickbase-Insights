@@ -54,7 +54,7 @@ Stand nach der Auswertung der realen Exporte (§9, ADR-011, ADR-012). ✅ = erle
 | ✅ | E04.04 Gewinnspieler als bedingte Tilgung | 5 | 4 | 2 | 4 | W4 | einziger Kredithebel in Liga B |
 | ✅ | E04.06 + E04.10 Gemeinsame Finanzierung, Risk Engine | 5 | 3 | 2 | 5 | W4 | – |
 | 16 | E04.02 Mehrtägige Liquidation | **3** | 3 | 2 | **1** | **W5 (zurückgestuft)** | bringt in beiden Ligen 0 €: Kaderschutz bindet, nicht die Verkaufslimits |
-| 17 | E01.06 Was-wäre-wenn | 4 | 1 | 2 | 5 | W5 | – |
+| ✅ | E01.06 Was-wäre-wenn | 4 | 1 | 2 | 5 | W5 | – |
 | – | E06.04 Verkaufsquoten auswerten | 2 | 1 | 1 | 2 | W6 | nur noch Kontrolle, Quote ist bekannt (100 %) |
 | – | Rest (E02.05–09, E03.03–09, E04.07–09/11, E05–E11) | | | | | W5–W8 | nach Matrix |
 

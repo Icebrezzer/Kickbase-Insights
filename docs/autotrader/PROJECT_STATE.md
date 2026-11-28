@@ -19,7 +19,33 @@
 - **Welle 4 umgesetzt:** E05.02 ✅, E04.01 ✅, E04.03 ✅, E04.04 ✅, E04.05 ✅, E04.06 ✅, E04.10 ✅. Alles steht hinter den Flags `flexible_bench`, `scenario_credit`, `conditional_repayment` und `upgrade_financing`, Standard aus.
   - Empfohlene Freigabe: erst `shadow` (≥ 2 Spieltage beobachten), dann `dry_run` in einer Probelauf-Liga, dann `live` in einer Liga.
   - Upgrade-Finanzierung braucht die automatische Aufstellung.
-  - Offen in E04: E04.02 (P2), E04.07–E04.09, E04.11 (UI).
+  - Offen in E04: E04.02 (P2), E04.11 (UI).
+- **Welle 5 umgesetzt (lokal, nicht gepusht):**
+  - E04.08 ✅ Deadline-Prognose mit Push-Warnung.
+  - E04.09 ✅ Teil 1: frühe Tilgung, Flag `early_repayment`.
+  - E04.07 ✅ Teil 1: Kreditauslastung als Option.
+  - E02.06/E02.07 ✅ Vergleich und Rollback.
+  - E01.06 ✅ Was-wäre-wenn.
+
+## Was noch offen ist (Stand Welle 5)
+
+| Bereich | Offene Pakete | Kern |
+|---|---|---|
+| Oberfläche | E02.09 Strategy Studio, E04.11 Finanzübersicht, E03.09 Shadow-Dashboard, E09.07, E10.08 | Konfiguration, Vorschau, Rollback, Flags, Was-wäre-wenn und Finanzen sind per API fertig, aber noch ohne Bedienoberfläche |
+| Finanzierung, Rest | E04.02 mehrtägige Liquidation (P2), E04.07 Teil 2 und E04.09 Teil 2 (beide über das Regelwerk E08.01) | Laut Daten derzeit ohne Nutzen (E04.02) bzw. abhängig vom Regelwerk |
+| Lernen aus verpassten Chancen | E03.03–E03.08 | Snapshots abrechnen: alternative Gebote, Verkaufsstrategien, entgangene Gewinne, vermiedene Verluste, Gewichtung, Aufbewahrung |
+| Kader | E05.01 Rollen, E05.03 Schutzregeln je Spieler, E05.04–E05.07 | Spielerrollen, „nie verkaufen“, adaptive Ersatzbank, erweiterte Bewertung |
+| Trading | E06.01–E06.07 | Variable Haltedauer, Opportunitätskosten, Kapitalrotation, Ausstiegsstrategien |
+| Auktionen | E07.01–E07.05 | Ligaspezifische Statistiken, bessere Zuschlagschance, Gegnerprofile |
+| Strategie | E08.01–E08.05, E02.10 | Deklaratives Regelwerk, Saisonphase, feste Regeln konfigurierbar |
+| Schattenportfolios | E09.01–E09.07 | Champion-Challenger mit virtuellen Konten |
+| Adaptives Lernen | E10.01–E10.08 | Lernkonfidenz, zeitliche Validierung, Vorschläge, assistiertes/autonomes Lernen, Rollback |
+| Abschluss-QS | E11.01–E11.08 | Backtest, Stresstests, Performance, Sicherheit, PostgreSQL, Migration in CI, UI/UX, Doku |
+
+**Datenabhängigkeit:** E03.04 ff. und E10.x brauchen gesammelte Daten.
+- Flag `decision_snapshots` auf `shadow` stellen.
+- Für E10.01–E10.03 laufen etwa 14 Tage Prognose-Beobachtungen (E10.00 sammelt bereits).
+- Ein neuer Export nach ein, zwei Spieltagen im Vorschau-Image prüft die Annahmen aus MASTERPLAN §9.
 - **Tipp:** Flag `decision_snapshots` je Liga auf `shadow` stellen, dann sammelt der Trader ab sofort Daten für E03.04–E03.06 (verpasste Chancen). Danach Welle 3: E02.03/E02.04 (Konfiguration speichern, Übernahme ohne Neustart), E03.01/E03.02 (Entscheidungs-Snapshots).
 - **CI:** `6250f20` (Welle 1), `d4066f0` (Welle 2), `cedcdab` (ui-audit mit Trader-Runde) , `4709dae` (Welle 3, Lauf 46078231360) und `0ca9a46` (Welle 4, Lauf 46149480143) vollständig grün: Backend, Frontend, ui-audit, Image. Vorschau-Image `ghcr.io/icebrezzer/kickbase-insights:codex-autotrader-3`. Danach E02.01 → E02.02 → E02.08 → E05.02 → E04 (MASTERPLAN §3 und §9, ADR-012).
 - **Geklärt (27.11.2026):** Kickbase zahlt beim Sofortverkauf 100 % des Marktwerts. Formationswechsel mit mehr Punkten sind erwünscht.
